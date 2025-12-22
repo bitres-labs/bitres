@@ -1,0 +1,121 @@
+name: Deploy to Networks
+
+on:
+  workflow_dispatch:
+    inputs:
+      network:
+        description: 'Target network'
+        required: true
+        type: choice
+        options:
+          - sepolia
+          - mainnet
+      confirm:
+        description: 'Type "deploy" to confirm'
+        required: true
+
+env:
+  NODE_VERSION: '20.x'
+
+jobs:
+  validate:
+    name: Validate Deployment
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate confirmation
+        if: github.event.inputs.confirm != 'deploy'
+        run: |
+          echo "❌ Deployment not confirmed"
+          exit 1
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile contracts
+        run: npx hardhat compile
+
+      - name: Run all tests
+        run: npx hardhat test
+
+      - name: Run security checks
+        run: npx slither contracts/ --exclude-dependencies
+        continue-on-error: true
+
+  deploy:
+    name: Deploy to ${{ github.event.inputs.network }}
+    needs: validate
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.event.inputs.network }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Deploy contracts
+        run: npx hardhat run scripts/deploy.js --network ${{ github.event.inputs.network }}
+        env:
+          PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+          INFURA_API_KEY: ${{ secrets.INFURA_API_KEY }}
+
+      - name: Verify contracts
+        run: npx hardhat run scripts/verify.js --network ${{ github.event.inputs.network }}
+        env:
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+        continue-on-error: true
+
+      - name: Upload deployment artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-${{ github.event.inputs.network }}-${{ github.sha }}
+          path: |
+            deployments/
+            .openzeppelin/
+          retention-days: 90
+
+  notify:
+    name: Notify Deployment
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Send Discord notification
+        if: env.DISCORD_WEBHOOK_URL != ''
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          curl -X POST "$DISCORD_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"content\": \"🚀 Deployment to **${{ github.event.inputs.network }}** completed\",
+              \"embeds\": [{
+                \"title\": \"BRS Contract Deployment\",
+                \"color\": ${{ needs.deploy.result == 'success' && '3066993' || '15158332' }},
+                \"fields\": [
+                  {\"name\": \"Network\", \"value\": \"${{ github.event.inputs.network }}\", \"inline\": true},
+                  {\"name\": \"Status\", \"value\": \"${{ needs.deploy.result }}\", \"inline\": true},
+                  {\"name\": \"Commit\", \"value\": \"${{ github.sha }}\", \"inline\": true}
+                ]
+              }]
+            }"

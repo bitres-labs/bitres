@@ -1,0 +1,59 @@
+node_modules
+.env
+
+# Hardhat files
+/cache
+/artifacts
+
+# TypeChain files
+/typechain
+/typechain-types
+
+# solidity-coverage files
+/coverage
+/coverage.json
+
+# Hardhat Ignition default folder for deployments against a local node
+ignition/deployments/chain-31337
+
+# Foundry files
+/out
+/cache_forge
+/lib
+
+# Build output
+/dist
+
+# Temporary files
+*.log
+.backup/
+.temp/
+tmp_*.js
+
+# Windows WSL metadata
+*:Zone.Identifier
+*.Zone.Identifier
+
+# SSL certificates and keys (should not be committed)
+config/ssl/*.key
+config/ssl/*.crt
+config/ssl/*.backup
+config/ssl/openssl.cnf
+
+# Claude Code config
+.claude/private-*.md
+.claude.json
+CLAUDE.md
+
+# Internal docs (not for public)
+.docs/
+
+# Internal hardhat v2 helpers (do not upload)
+scripts/main/hardhat2/
+scripts/main/backup/
+
+# Local development scripts (not for public)
+scripts/local/
+
+# Test results
+/test-results/
