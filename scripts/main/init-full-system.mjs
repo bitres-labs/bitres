@@ -104,14 +104,14 @@ async function main() {
   const pairBRSBTD = await get("PairBRSBTD", "contracts/local/UniswapV2Pair.sol:UniswapV2Pair");
   const pairAbi = loadAbi("contracts/local/UniswapV2Pair.sol/UniswapV2Pair.json");
 
-  // 0) enable automine (2s block)
+  // 0) enable automine (transactions are mined immediately)
+  // Note: interval mining is NOT enabled here to prevent timestamp drift
+  // Guardian will control mining after init completes
   const provider = hre.network?.provider ?? connection.provider;
   if (provider?.request) {
     await provider.request({ method: "evm_setAutomine", params: [true] });
-    await provider.request({ method: "evm_setIntervalMining", params: [2000] });
   } else if (provider?.send) {
     await provider.send("evm_setAutomine", [true]);
-    await provider.send("evm_setIntervalMining", [2000]);
   }
 
   // 0.5) roles + oracle toggles
@@ -227,13 +227,13 @@ async function main() {
     "BTB/BTD"
   );
   // BRS/BTD LP: deployer has 1 BRS reserved in Ignition (0.1 for LP, 0.9 for pool 9)
-  // BRS:BTD ratio ~1:1 (initial price assumption)
+  // BRS:BTD ratio 100:1 (1 BRS = 0.01 BTD initial price)
   const lpBRSBTD = await addLP(
     pairBRSBTD,
     brs,
     btd,
     1n * 10n ** 17n,       // 0.1 BRS (minimal for LP, rest for pool 9 staking)
-    1n * 10n ** 17n,       // 0.1 BTD
+    1n * 10n ** 15n,       // 0.001 BTD (ratio 100:1, so 1 BRS = 0.01 BTD)
     "BRS/BTD"
   );
 
@@ -299,7 +299,7 @@ async function main() {
   });
 
   // Use minimal stake amounts - TVL < $1 per pool (pools 3-4, 7-9 = $1)
-  // Prices: WBTC=$102k, WETH=$3k, BTD/BTB/BRS/stBTD/stBTB=$1, USDC/USDT=$1
+  // Prices: WBTC=$102k, WETH=$3k, BTD/BTB/stBTD/stBTB=$1, BRS=$0.01, USDC/USDT=$1
   // LP pools need slightly larger amounts due to contract minimums
   const stakePlans = [
     { id: 0, token: pairBRSBTD, amount: lpBRSBTD / 100n, name: "BRS/BTD LP" },     // ~$0.01 TVL

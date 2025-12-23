@@ -78,8 +78,16 @@ async function enableAutoMining() {
   try {
     await rpcCall("evm_setAutomine", [true]);
   } catch {}
-  await rpcCall("evm_setIntervalMining", [MINING_INTERVAL_MS]);
-  console.log(`   ✓ Blocks mined every ${MINING_INTERVAL_MS}ms`);
+  // Only enable interval mining in accelerated mode
+  // In realtime mode, we control mining ourselves to prevent double-mining
+  if (!useRealTime) {
+    await rpcCall("evm_setIntervalMining", [MINING_INTERVAL_MS]);
+    console.log(`   ✓ Blocks mined every ${MINING_INTERVAL_MS}ms`);
+  } else {
+    // Disable interval mining in realtime mode to prevent timestamp drift
+    await rpcCall("evm_setIntervalMining", [0]);
+    console.log(`   ✓ Manual mining enabled (realtime mode)`);
+  }
 }
 
 async function advanceTime(seconds) {
@@ -88,6 +96,7 @@ async function advanceTime(seconds) {
 }
 
 // Sync block time to real system time
+// In realtime mode, we control mining to keep block time = real time
 async function syncToRealTime() {
   const realTime = Math.floor(Date.now() / 1000);
   await rpcCall("evm_setNextBlockTimestamp", [realTime]);
@@ -191,7 +200,10 @@ async function main() {
       console.log(`${colors.bright}═══════════════════════════════════════════════════════════════════════${colors.reset}`);
       console.log();
       console.log(`  Block #${block.number}  |  ${new Date(blockTime * 1000).toLocaleString()}`);
-      console.log(`  Time Acceleration: ${colors.cyan}${timeSpeed}x${colors.reset}  |  Chain elapsed: ${colors.cyan}${chainHours}h ${chainMins}m${colors.reset}`);
+      const timeMode = useRealTime
+        ? `${colors.green}Real-Time${colors.reset}`
+        : `${colors.cyan}${timeSpeed}x${colors.reset}`;
+      console.log(`  Mode: ${timeMode}  |  Chain elapsed: ${colors.cyan}${chainHours}h ${chainMins}m${colors.reset}`);
       console.log();
       console.log(`${colors.bright}  BRS Token${colors.reset}`);
       console.log(`  ─────────────────────────────────────────────────────────────────────`);
