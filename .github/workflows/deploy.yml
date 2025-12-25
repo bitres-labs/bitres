@@ -15,7 +15,7 @@ on:
         required: true
 
 env:
-  NODE_VERSION: '20.x'
+  NODE_VERSION: '22.x'
 
 jobs:
   validate:
@@ -39,7 +39,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install --legacy-peer-deps
 
       - name: Compile contracts
         run: npx hardhat compile
@@ -69,7 +69,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install --legacy-peer-deps
 
       - name: Deploy contracts
         run: npx hardhat run scripts/deploy.js --network ${{ github.event.inputs.network }}
@@ -85,7 +85,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload deployment artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: deployment-${{ github.event.inputs.network }}-${{ github.sha }}
           path: |
