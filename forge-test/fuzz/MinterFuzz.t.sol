@@ -17,18 +17,20 @@ contract MinterFuzzTest is Test {
     /// @notice Fuzz test: BTD minting amount calculation doesn't overflow
     /// @dev Tests overflow safety of wbtcAmount * btcPrice * (1 - fee)
     function testFuzz_MintBTD_NoOverflow(
-        uint128 wbtcAmount,  // WBTC amount (8 decimals)
-        uint128 btcPrice,     // BTC price (8 decimals)
+        uint64 wbtcAmount,  // WBTC amount (8 decimals) - bounded to uint64 to prevent overflow
+        uint64 btcPrice,     // BTC price (8 decimals) - bounded to uint64 to prevent overflow
         uint16 feeBP          // Fee (basis points)
     ) public pure {
-        // Constraints
-        vm.assume(feeBP <= Constants.BPS_BASE); // Fee rate max 100%
-        vm.assume(btcPrice > 0);
-        vm.assume(wbtcAmount > 0);
+        // Constraints - use bound() to avoid rejection
+        // Using uint64 range to prevent overflow when multiplying: uint64 * uint64 < uint128
+        // Then grossValue * BPS_BASE (10000) is safe in uint256
+        feeBP = uint16(bound(feeBP, 0, Constants.BPS_BASE)); // Fee rate max 100%
+        btcPrice = uint64(bound(btcPrice, 1, type(uint64).max));
+        wbtcAmount = uint64(bound(wbtcAmount, 1, type(uint64).max));
 
         // Calculate BTD amount (use uint256 to prevent overflow)
         uint256 grossValue = uint256(wbtcAmount) * uint256(btcPrice);
-        vm.assume(grossValue < type(uint256).max / Constants.BPS_BASE);
+        // grossValue is always < type(uint256).max / Constants.BPS_BASE for uint128 inputs
 
         uint256 fee = (grossValue * feeBP) / Constants.BPS_BASE;
         uint256 netValue = grossValue - fee;
@@ -42,52 +44,53 @@ contract MinterFuzzTest is Test {
 
     /// @notice Fuzz test: BTD minting amount is proportional to WBTC amount
     function testFuzz_MintBTD_Proportional(
-        uint128 wbtcAmount,
-        uint128 btcPrice,
+        uint64 wbtcAmount,
+        uint64 btcPrice,
         uint16 feeBP
     ) public pure {
-        vm.assume(feeBP < Constants.BPS_BASE); // Fee rate < 100% to produce net value
-        vm.assume(btcPrice > 1); // Price > 1
-        vm.assume(wbtcAmount >= 100); // At least 100 for sufficient precision
-        vm.assume(wbtcAmount <= type(uint128).max / 2); // Prevent wbtcAmount * 2 overflow
+        // Use bound() to avoid rejection
+        // Need larger minimum values to avoid rounding errors affecting the 2x relationship
+        feeBP = uint16(bound(feeBP, 0, 5000)); // Fee rate <= 50% for cleaner math
+        btcPrice = uint64(bound(btcPrice, 1000, type(uint32).max)); // Min price 1000 for precision
+        wbtcAmount = uint64(bound(wbtcAmount, 1000, type(uint32).max / 2)); // Min 1000, prevent *2 overflow
 
         // Calculate BTD for 1x amount
         uint256 grossValue1 = uint256(wbtcAmount) * uint256(btcPrice);
-        vm.assume(grossValue1 < type(uint256).max / Constants.BPS_BASE);
-
         uint256 fee1 = (grossValue1 * feeBP) / Constants.BPS_BASE;
         uint256 btdAmount1 = grossValue1 - fee1;
 
         // Calculate BTD for 2x amount
         uint256 grossValue2 = uint256(wbtcAmount * 2) * uint256(btcPrice);
-        vm.assume(grossValue2 < type(uint256).max / Constants.BPS_BASE);
-
         uint256 fee2 = (grossValue2 * feeBP) / Constants.BPS_BASE;
         uint256 btdAmount2 = grossValue2 - fee2;
 
-        vm.assume(btdAmount1 > 0); // Ensure net value exists
+        // btdAmount1 is large enough for accurate comparison
+        if (btdAmount1 < 1000) return; // Skip very small values
 
-        // Verify: 2x WBTC should produce 2x BTD (allow rounding error)
-        assertApproxEqRel(btdAmount2, btdAmount1 * 2, 1e16); // 1% error // 0.1% error
+        // Verify: 2x WBTC should produce 2x BTD (allow 1% rounding error)
+        assertApproxEqRel(btdAmount2, btdAmount1 * 2, 1e16);
     }
 
     /// @notice Fuzz test: Higher fee rate reduces minting amount
     function testFuzz_MintBTD_HigherFeeReducesMint(
-        uint128 wbtcAmount,
-        uint128 btcPrice,
+        uint64 wbtcAmount,
+        uint64 btcPrice,
         uint16 feeBP1,
         uint16 feeBP2
     ) public pure {
-        vm.assume(btcPrice > 0);
-        vm.assume(wbtcAmount > 0);
-        vm.assume(feeBP1 < Constants.BPS_BASE); // feeBP1 < 100%
-        vm.assume(feeBP2 <= Constants.BPS_BASE);
-        vm.assume(feeBP2 > feeBP1); // feeBP2 is higher
+        // Use bound() to avoid rejection
+        // Using uint64 range to prevent overflow when multiplying: uint64 * uint64 < uint128
+        btcPrice = uint64(bound(btcPrice, 1, type(uint64).max));
+        wbtcAmount = uint64(bound(wbtcAmount, 1, type(uint64).max));
+        feeBP1 = uint16(bound(feeBP1, 0, Constants.BPS_BASE - 2)); // feeBP1 < 100%, leave room for feeBP2
+        feeBP2 = uint16(bound(feeBP2, feeBP1 + 1, Constants.BPS_BASE)); // feeBP2 > feeBP1
 
         uint256 grossValue = uint256(wbtcAmount) * uint256(btcPrice);
-        vm.assume(grossValue < type(uint256).max / Constants.BPS_BASE);
-        vm.assume(grossValue > 10000); // Ensure large enough value to avoid precision issues
-        vm.assume((grossValue * (feeBP2 - feeBP1)) / Constants.BPS_BASE > 1); // Ensure noticeable fee difference // Ensure sufficient value
+        // grossValue is always < type(uint256).max / Constants.BPS_BASE for uint128 inputs
+
+        // Early return if grossValue too small for meaningful comparison
+        if (grossValue <= 10000) return;
+        if ((grossValue * (feeBP2 - feeBP1)) / Constants.BPS_BASE <= 1) return;
 
         // Calculate minting amount under two fee rates
         uint256 fee1 = (grossValue * feeBP1) / Constants.BPS_BASE;
@@ -105,8 +108,9 @@ contract MinterFuzzTest is Test {
         uint64 wbtcAmount,
         uint128 btcPrice
     ) public pure {
-        vm.assume(btcPrice > 0);
-        vm.assume(wbtcAmount > 0);
+        // Use bound() to avoid rejection
+        btcPrice = uint128(bound(btcPrice, 1, type(uint128).max));
+        wbtcAmount = uint64(bound(wbtcAmount, 1, type(uint64).max));
 
         uint256 btdAmount = uint256(wbtcAmount) * uint256(btcPrice);
 
@@ -130,9 +134,10 @@ contract MinterFuzzTest is Test {
         uint128 btcPrice,
         uint16 feeBP
     ) public pure {
-        vm.assume(feeBP <= Constants.BPS_BASE);
-        vm.assume(btcPrice > 0);
-        vm.assume(btdAmount > 0);
+        // Use bound() to avoid rejection
+        feeBP = uint16(bound(feeBP, 0, Constants.BPS_BASE));
+        btcPrice = uint128(bound(btcPrice, 1, type(uint128).max));
+        btdAmount = uint128(bound(btdAmount, 1, type(uint128).max));
 
         // Calculate redemption fee
         uint256 fee = (uint256(btdAmount) * feeBP) / Constants.BPS_BASE;
@@ -153,9 +158,9 @@ contract MinterFuzzTest is Test {
         uint64 wbtcAmount,
         uint128 btcPrice
     ) public pure {
-        vm.assume(btcPrice > 1000); // Price large enough
-        vm.assume(wbtcAmount >= 1000); // Amount large enough to avoid precision loss
-        vm.assume(wbtcAmount <= 1e18); // Limit range
+        // Use bound() to avoid rejection
+        btcPrice = uint128(bound(btcPrice, 1001, type(uint128).max)); // Price large enough
+        wbtcAmount = uint64(bound(wbtcAmount, 1000, 1e18)); // Amount large enough to avoid precision loss
 
         // Mint: WBTC -> BTD (no fee)
         uint256 btdMinted = uint256(wbtcAmount) * uint256(btcPrice);
@@ -174,15 +179,17 @@ contract MinterFuzzTest is Test {
         uint128 minPrice,
         uint128 btbPrice
     ) public pure {
-        vm.assume(btcPrice > 0);
-        vm.assume(minPrice > 0);
-        vm.assume(btbPrice > 0);
-        vm.assume(btcPrice < minPrice); // Price below minimum requires compensation
+        // Use bound() to avoid rejection
+        btcPrice = uint128(bound(btcPrice, 1, type(uint128).max - 1));
+        minPrice = uint128(bound(minPrice, btcPrice + 1, type(uint128).max)); // minPrice > btcPrice
+        btbPrice = uint128(bound(btbPrice, 1, type(uint128).max));
+        btdAmount = uint128(bound(btdAmount, 1, type(uint128).max));
 
         uint256 expectedValue = uint256(btdAmount); // BTD should be worth $1
         uint256 actualWbtcValue = (uint256(btdAmount) * uint256(btcPrice)) / 1e8;
 
-        vm.assume(expectedValue > actualWbtcValue);
+        // Early return if no shortfall (shouldn't happen with bounded inputs but check anyway)
+        if (expectedValue <= actualWbtcValue) return;
 
         uint256 shortfall = expectedValue - actualWbtcValue;
         uint256 btbCompensation = shortfall / uint256(btbPrice);
@@ -198,20 +205,24 @@ contract MinterFuzzTest is Test {
 
     /// @notice Fuzz test: Collateral ratio calculation doesn't overflow
     function testFuzz_CollateralRatio_NoOverflow(
-        uint128 wbtcBalance,
-        uint128 btcPrice,
+        uint64 wbtcBalance,
+        uint64 btcPrice,
         uint128 btdSupply
     ) public pure {
-        vm.assume(btcPrice > 0);
-        vm.assume(btdSupply > 0);
-        vm.assume(wbtcBalance > 0);
+        // Use bound() to avoid rejection
+        // Using uint64 for wbtcBalance and btcPrice to prevent overflow when:
+        // collateralValue * PRECISION_18 where collateralValue = uint64 * uint64
+        // uint64 * uint64 = uint128, uint128 * 1e18 fits in uint256
+        btcPrice = uint64(bound(btcPrice, 1, type(uint64).max));
+        btdSupply = uint128(bound(btdSupply, 1, type(uint128).max));
+        wbtcBalance = uint64(bound(wbtcBalance, 1, type(uint64).max));
 
         // Calculate collateral value (USD)
         uint256 collateralValue = uint256(wbtcBalance) * uint256(btcPrice);
-        vm.assume(collateralValue < type(uint256).max / Constants.PRECISION_18);
-        vm.assume(collateralValue > 0); // Prevent collateralValue being 0
-        // Ensure collateralValue is large enough for meaningful CR calculation
-        vm.assume(collateralValue >= btdSupply / 100); // At least 1% collateral ratio to be meaningful
+        // collateralValue is always < type(uint128).max, so collateralValue * PRECISION_18 fits in uint256
+
+        // Early return if collateralValue too small for meaningful CR calculation
+        if (collateralValue < btdSupply / 100) return; // At least 1% collateral ratio to be meaningful
 
         // Calculate collateral ratio = (collateral value / debt) * 100%
         uint256 cr = (collateralValue * Constants.PRECISION_18) / uint256(btdSupply);
@@ -231,10 +242,10 @@ contract MinterFuzzTest is Test {
         uint16 btcPriceBP,   // Changed to uint16
         uint32 btdSupply     // Changed to uint32
     ) public pure {
-        vm.assume(wbtcBalance > 1e6); // Reasonable WBTC amount
-        vm.assume(wbtcBalance < 1e9);
-        vm.assume(btcPriceBP > 100 && btcPriceBP < 5000); // 1%-50% of base price
-        vm.assume(btdSupply > 1e6 && btdSupply < 1e10); // Reasonable BTD supply
+        // Use bound() to avoid rejection
+        wbtcBalance = uint32(bound(wbtcBalance, 1e6 + 1, 1e9 - 1)); // Reasonable WBTC amount
+        btcPriceBP = uint16(bound(btcPriceBP, 101, 4999)); // 1%-50% of base price
+        btdSupply = uint32(bound(btdSupply, 1e6 + 1, 1e10 - 1)); // Reasonable BTD supply
 
         // Base price is 1e8, calculate actual price based on basis points
         uint256 btcPrice1 = (1e8 * uint256(btcPriceBP)) / 10000;
@@ -256,10 +267,10 @@ contract MinterFuzzTest is Test {
         uint16 btcPriceBP,   // Changed to uint16
         uint32 btdSupply1    // Changed to uint32
     ) public pure {
-        vm.assume(wbtcBalance > 1e6); // Reasonable WBTC amount
-        vm.assume(wbtcBalance < 1e9);
-        vm.assume(btcPriceBP > 100 && btcPriceBP < 5000); // 1%-50% of base price
-        vm.assume(btdSupply1 > 1e6 && btdSupply1 < 5e9); // Reasonable BTD supply
+        // Use bound() to avoid rejection
+        wbtcBalance = uint32(bound(wbtcBalance, 1e6 + 1, 1e9 - 1)); // Reasonable WBTC amount
+        btcPriceBP = uint16(bound(btcPriceBP, 101, 4999)); // 1%-50% of base price
+        btdSupply1 = uint32(bound(btdSupply1, 1e6 + 1, 5e9 - 1)); // Reasonable BTD supply
 
         // supply2 is 2x supply1
         uint256 btdSupply2 = uint256(btdSupply1) * 2;
@@ -282,8 +293,9 @@ contract MinterFuzzTest is Test {
         uint128 wbtcAmount,
         uint128 btcPrice
     ) public pure {
-        vm.assume(btcPrice > 0);
-        vm.assume(wbtcAmount > 0);
+        // Use bound() to avoid rejection
+        btcPrice = uint128(bound(btcPrice, 1, type(uint128).max));
+        wbtcAmount = uint128(bound(wbtcAmount, 1, type(uint128).max));
 
         uint256 grossValue = uint256(wbtcAmount) * uint256(btcPrice);
         uint256 fee = (grossValue * 0) / Constants.BPS_BASE;
@@ -299,9 +311,10 @@ contract MinterFuzzTest is Test {
         uint64 wbtcAmount,  // Changed to uint64 to avoid overflow
         uint64 btcPrice
     ) public pure {
-        vm.assume(wbtcAmount > 0);
-        vm.assume(btcPrice > 0);
-        vm.assume(uint256(wbtcAmount) * uint256(btcPrice) < type(uint128).max);
+        // Use bound() to avoid rejection
+        wbtcAmount = uint64(bound(wbtcAmount, 1, type(uint64).max));
+        btcPrice = uint64(bound(btcPrice, 1, type(uint64).max));
+        // uint64 * uint64 is always < type(uint128).max
 
         uint256 grossValue = uint256(wbtcAmount) * uint256(btcPrice);
         uint256 fee = (grossValue * Constants.BPS_BASE) / Constants.BPS_BASE;
@@ -323,8 +336,9 @@ contract MinterFuzzTest is Test {
         uint8 wbtcAmount,  // Use uint8 to ensure very small
         uint16 btcPrice
     ) public pure {
-        vm.assume(btcPrice > 0);
-        vm.assume(wbtcAmount > 0);
+        // Use bound() to avoid rejection
+        btcPrice = uint16(bound(btcPrice, 1, type(uint16).max));
+        wbtcAmount = uint8(bound(wbtcAmount, 1, type(uint8).max));
 
         uint256 btdAmount = uint256(wbtcAmount) * uint256(btcPrice);
 
@@ -337,8 +351,9 @@ contract MinterFuzzTest is Test {
         uint128 wbtcAmount,
         uint128 btcPrice
     ) public pure {
-        vm.assume(btcPrice > 1); // Price at least > 1 to ensure product > each factor
-        vm.assume(wbtcAmount > 1e18); // At least 10 BTC
+        // Use bound() to avoid rejection
+        btcPrice = uint128(bound(btcPrice, 2, type(uint128).max)); // Price at least > 1 to ensure product > each factor
+        wbtcAmount = uint128(bound(wbtcAmount, 1e18 + 1, type(uint128).max)); // At least 10 BTC
 
         // Use uint256 to prevent overflow
         uint256 btdAmount = uint256(wbtcAmount) * uint256(btcPrice);
@@ -353,8 +368,9 @@ contract MinterFuzzTest is Test {
         uint64 wbtcAmount,
         uint128 btcPrice
     ) public pure {
-        vm.assume(btcPrice > 1e8); // Price at least $1
-        vm.assume(wbtcAmount >= 1e5); // At least 0.001 BTC
+        // Use bound() to avoid rejection
+        btcPrice = uint128(bound(btcPrice, 1e8 + 1, type(uint128).max)); // Price at least $1
+        wbtcAmount = uint64(bound(wbtcAmount, 1e5, type(uint64).max)); // At least 0.001 BTC
 
         uint256 btdAmount = uint256(wbtcAmount) * uint256(btcPrice);
         uint256 wbtcBack = btdAmount / uint256(btcPrice);

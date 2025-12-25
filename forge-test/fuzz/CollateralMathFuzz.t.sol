@@ -16,11 +16,13 @@ contract CollateralMathFuzzTest is Test {
         uint64 collateralValue,  // Changed to uint64 to avoid overflow
         uint64 debtValue
     ) public pure {
-        vm.assume(collateralValue > 1e6);
-        vm.assume(debtValue > 1e6);
-        vm.assume(collateralValue < 1e18);  // Limit upper bound to prevent overflow
-        vm.assume(debtValue < 1e18);
-        vm.assume(debtValue <= collateralValue * 10); // CR in 0-1000% range
+        collateralValue = uint64(bound(collateralValue, 1e6 + 1, 1e18 - 1));
+        debtValue = uint64(bound(debtValue, 1e6 + 1, 1e18 - 1));
+        // Ensure CR is in 0-1000% range
+        if (debtValue > collateralValue * 10) {
+            debtValue = uint64(collateralValue * 10);
+        }
+        if (debtValue < 1e6 + 1) return; // Early return if bounds can't be satisfied
 
         // Calculate CR = (collateral / debt) * 100%
         uint256 cr = (uint256(collateralValue) * Constants.PRECISION_18) / uint256(debtValue);
@@ -47,12 +49,9 @@ contract CollateralMathFuzzTest is Test {
         uint64 collateralValue1,
         uint64 collateralValue2
     ) public pure {
-        vm.assume(debtValue > 1e6);
-        vm.assume(debtValue < 1e18);
-        vm.assume(collateralValue1 > 1e6);
-        vm.assume(collateralValue1 < 1e17);
-        vm.assume(collateralValue2 > collateralValue1);
-        vm.assume(collateralValue2 < 1e17);
+        debtValue = uint64(bound(debtValue, 1e6 + 1, 1e18 - 1));
+        collateralValue1 = uint64(bound(collateralValue1, 1e6 + 1, 1e17 - 2));
+        collateralValue2 = uint64(bound(collateralValue2, uint256(collateralValue1) + 1, 1e17 - 1));
 
         uint256 cr1 = (uint256(collateralValue1) * Constants.PRECISION_18) / uint256(debtValue);
         uint256 cr2 = (uint256(collateralValue2) * Constants.PRECISION_18) / uint256(debtValue);
@@ -65,14 +64,17 @@ contract CollateralMathFuzzTest is Test {
     function testFuzz_CR_DebtNegativeCorrelation(
         uint64 collateralValue,
         uint64 debtValue1,
-        uint64 debtValue2
+        uint64 deltaPercentBP  // Delta as percentage of debtValue1 (basis points)
     ) public pure {
-        vm.assume(collateralValue > 1e6);
-        vm.assume(collateralValue < 1e17);
-        vm.assume(debtValue1 > 1e6);
-        vm.assume(debtValue1 < 1e17);
-        vm.assume(debtValue2 > debtValue1);
-        vm.assume(debtValue2 < 1e17);
+        // Ensure collateral > debt for meaningful CR (>100%)
+        collateralValue = uint64(bound(collateralValue, 1e12, 1e15));
+        debtValue1 = uint64(bound(debtValue1, 1e9, collateralValue / 2)); // Debt < collateral/2
+        deltaPercentBP = uint64(bound(deltaPercentBP, 100, 5000)); // 1%-50% increase
+
+        // Calculate delta as percentage of debtValue1 (at least 1%)
+        uint64 debtDelta = uint64((uint256(debtValue1) * deltaPercentBP) / 10000);
+        if (debtDelta == 0) debtDelta = 1;
+        uint64 debtValue2 = debtValue1 + debtDelta;
 
         uint256 cr1 = (uint256(collateralValue) * Constants.PRECISION_18) / uint256(debtValue1);
         uint256 cr2 = (uint256(collateralValue) * Constants.PRECISION_18) / uint256(debtValue2);
@@ -85,17 +87,13 @@ contract CollateralMathFuzzTest is Test {
 
     /// @notice Fuzz test: Liquidation threshold check
     function testFuzz_Liquidation_ThresholdCheck(
-        uint128 collateralValue,
-        uint128 debtValue,
+        uint64 collateralValue,  // Use uint64 to prevent overflow
+        uint64 debtValue,
         uint16 liquidationThresholdBP  // Liquidation threshold (e.g., 150% = 15000 BP)
     ) public pure {
-        vm.assume(collateralValue > 1000);
-        vm.assume(debtValue > 1000);
-        vm.assume(liquidationThresholdBP >= Constants.BPS_BASE); // At least 100%
-        vm.assume(liquidationThresholdBP <= 30000); // Max 300%
-
-        // Prevent overflow
-        vm.assume(uint256(collateralValue) * Constants.PRECISION_18 < type(uint256).max);
+        collateralValue = uint64(bound(collateralValue, 1001, type(uint64).max));
+        debtValue = uint64(bound(debtValue, 1001, type(uint64).max));
+        liquidationThresholdBP = uint16(bound(liquidationThresholdBP, Constants.BPS_BASE, 30000));
 
         // Calculate current CR
         uint256 cr = (uint256(collateralValue) * Constants.PRECISION_18) / uint256(debtValue);
@@ -119,8 +117,8 @@ contract CollateralMathFuzzTest is Test {
         uint64 liquidatedDebt,
         uint16 penaltyBP  // Liquidation penalty percentage
     ) public pure {
-        vm.assume(liquidatedDebt > 1e6);
-        vm.assume(penaltyBP > 0 && penaltyBP <= 2000); // 0-20% penalty
+        liquidatedDebt = uint64(bound(liquidatedDebt, 1e6 + 1, type(uint64).max));
+        penaltyBP = uint16(bound(penaltyBP, 1, 2000)); // 0-20% penalty
 
         // Calculate penalty
         uint256 penalty = (uint256(liquidatedDebt) * uint256(penaltyBP)) / Constants.BPS_BASE;
@@ -143,9 +141,9 @@ contract CollateralMathFuzzTest is Test {
         uint128 collateralValue,
         uint16 liquidationPercentBP  // Liquidation percentage
     ) public pure {
-        vm.assume(totalDebt > 1000);
-        vm.assume(collateralValue > 1000);
-        vm.assume(liquidationPercentBP > 0 && liquidationPercentBP <= Constants.BPS_BASE);
+        totalDebt = uint128(bound(totalDebt, 1001, type(uint128).max));
+        collateralValue = uint128(bound(collateralValue, 1001, type(uint128).max));
+        liquidationPercentBP = uint16(bound(liquidationPercentBP, 1, Constants.BPS_BASE));
 
         // Calculate partially liquidated debt
         uint256 liquidatedDebt = (uint256(totalDebt) * uint256(liquidationPercentBP)) / Constants.BPS_BASE;
@@ -170,13 +168,10 @@ contract CollateralMathFuzzTest is Test {
         uint32 btcPrice,         // Current BTC price
         uint32 btbPrice          // BTB price
     ) public pure {
-        vm.assume(btdAmount > 1e6);
-        vm.assume(btdAmount < 1e15);
+        btdAmount = uint64(bound(btdAmount, 1e9, 1e15)); // Large enough for meaningful compensation
         uint32 btdPegPrice = 1e8; // BTD peg price $1
-        vm.assume(btcPrice > 1e6);
-        vm.assume(btcPrice < btdPegPrice); // Price below peg requires compensation
-        vm.assume(btbPrice > 1e6);
-        vm.assume(btbPrice < 1e8);
+        btcPrice = uint32(bound(btcPrice, 1e6, 9e7)); // Price significantly below peg (10%-90% of peg)
+        btbPrice = uint32(bound(btbPrice, 1e4, 1e7)); // BTB price lower bound for division to yield > 0
 
         // Calculate expected value and actual value
         uint256 expectedValue = uint256(btdAmount) * uint256(btdPegPrice);
@@ -188,7 +183,10 @@ contract CollateralMathFuzzTest is Test {
         // Calculate BTB compensation amount
         uint256 btbCompensation = shortfall / uint256(btbPrice);
 
-        // Verify: Compensation amount is reasonable
+        // Verify: Compensation amount is non-zero (given our bounds)
+        // Min shortfall = 1e9 * (1e8 - 9e7) = 1e9 * 1e7 = 1e16
+        // Max btbPrice = 1e7
+        // Min compensation = 1e16 / 1e7 = 1e9 > 0
         assertGt(btbCompensation, 0);
 
         // Verify: BTB compensation value approximates shortfall
@@ -202,14 +200,12 @@ contract CollateralMathFuzzTest is Test {
         uint32 btcPrice1,
         uint32 btbPrice
     ) public pure {
-        vm.assume(btdAmount > 1e6);
-        vm.assume(btdAmount < 1e15);
-        vm.assume(btbPrice > 1e6);
-        vm.assume(btbPrice < 1e8);
+        btdAmount = uint64(bound(btdAmount, 1e6 + 1, 1e15 - 1));
+        btbPrice = uint32(bound(btbPrice, 1e6 + 1, 1e8 - 1));
 
         uint32 btdPegPrice = 1e8;
-        vm.assume(btcPrice1 > 1e6);
-        vm.assume(btcPrice1 < btdPegPrice);
+        // btcPrice1 must be > 2e6 to allow btcPrice2 = btcPrice1/2 > 1e6
+        btcPrice1 = uint32(bound(btcPrice1, 2e6 + 1, btdPegPrice - 1));
 
         // price2 fixed at half of price1 to ensure relationship
         uint32 btcPrice2 = btcPrice1 / 2;
@@ -232,16 +228,14 @@ contract CollateralMathFuzzTest is Test {
         uint64 collateralValue,
         uint16 minCollateralRatioBP  // Minimum collateral ratio requirement
     ) public pure {
-        vm.assume(collateralValue > 1e9);
-        vm.assume(collateralValue < 1e17);
-        vm.assume(minCollateralRatioBP >= Constants.BPS_BASE); // At least 100%
-        vm.assume(minCollateralRatioBP <= 50000); // Max 500%
+        collateralValue = uint64(bound(collateralValue, 1e9 + 1, 1e17 - 1));
+        minCollateralRatioBP = uint16(bound(minCollateralRatioBP, Constants.BPS_BASE, 50000));
 
         // Calculate max mintable = collateralValue / (minCR / 100%)
         uint256 maxMintable = (uint256(collateralValue) * Constants.BPS_BASE) / uint256(minCollateralRatioBP);
 
-        // Verify: After minting max amount, CR equals minimum requirement
-        vm.assume(maxMintable > 1000);
+        // Early return if maxMintable too small
+        if (maxMintable <= 1000) return;
 
         uint256 resultingCR = (uint256(collateralValue) * Constants.PRECISION_18) / maxMintable;
         uint256 expectedCR = (uint256(minCollateralRatioBP) * Constants.PRECISION_18) / Constants.BPS_BASE;
@@ -251,19 +245,15 @@ contract CollateralMathFuzzTest is Test {
 
     /// @notice Fuzz test: Safety buffer calculation
     function testFuzz_SafetyBuffer_Calculation(
-        uint128 collateralValue,
-        uint128 debtValue,
+        uint64 collateralValue,  // Use uint64 to prevent overflow
+        uint64 debtValue,
         uint16 minCollateralRatioBP,
         uint16 targetCollateralRatioBP
     ) public pure {
-        vm.assume(collateralValue > 1000);
-        vm.assume(debtValue > 1000);
-        vm.assume(minCollateralRatioBP >= Constants.BPS_BASE);
-        vm.assume(targetCollateralRatioBP > minCollateralRatioBP);
-        vm.assume(targetCollateralRatioBP <= 50000);
-
-        // Prevent overflow
-        vm.assume(uint256(collateralValue) * Constants.PRECISION_18 < type(uint256).max);
+        collateralValue = uint64(bound(collateralValue, 1001, type(uint64).max));
+        debtValue = uint64(bound(debtValue, 1001, type(uint64).max));
+        minCollateralRatioBP = uint16(bound(minCollateralRatioBP, Constants.BPS_BASE, 49999));
+        targetCollateralRatioBP = uint16(bound(targetCollateralRatioBP, uint256(minCollateralRatioBP) + 1, 50000));
 
         // Calculate current CR
         uint256 currentCR = (uint256(collateralValue) * Constants.PRECISION_18) / uint256(debtValue);
@@ -291,13 +281,10 @@ contract CollateralMathFuzzTest is Test {
         uint16 priceDropBP,  // Price drop percentage
         uint32 debtValue
     ) public pure {
-        vm.assume(collateralAmount > 1e6);
-        vm.assume(collateralAmount < 1e9);
-        vm.assume(initialPrice > 1e6);
-        vm.assume(initialPrice < 1e9);
-        vm.assume(priceDropBP > 0 && priceDropBP < Constants.BPS_BASE);
-        vm.assume(debtValue > 1e6);
-        vm.assume(debtValue < 1e10);
+        collateralAmount = uint32(bound(collateralAmount, 1e6 + 1, 1e9 - 1));
+        initialPrice = uint32(bound(initialPrice, 1e6 + 1, 1e9 - 1));
+        priceDropBP = uint16(bound(priceDropBP, 1, Constants.BPS_BASE - 1));
+        debtValue = uint32(bound(debtValue, 1e6 + 1, 1e10 - 1));
 
         // Calculate initial collateral value and CR
         uint256 initialCollateralValue = uint256(collateralAmount) * uint256(initialPrice);
@@ -319,11 +306,9 @@ contract CollateralMathFuzzTest is Test {
         uint16 currentCRBP,
         uint16 minCRBP
     ) public pure {
-        vm.assume(currentCRBP > minCRBP);
-        vm.assume(minCRBP >= Constants.BPS_BASE);
-        vm.assume(minCRBP < 30000);
-        vm.assume(currentCRBP > minCRBP + 1000);  // Ensure sufficient difference
-        vm.assume(currentCRBP <= 50000);
+        minCRBP = uint16(bound(minCRBP, Constants.BPS_BASE, 29999));
+        // currentCRBP must be > minCRBP + 1000 and <= 50000
+        currentCRBP = uint16(bound(currentCRBP, uint256(minCRBP) + 1001, 50000));
 
         // Calculate how much price can drop without triggering liquidation
         // maxDrop = (currentCR - minCR) / currentCR
@@ -339,16 +324,13 @@ contract CollateralMathFuzzTest is Test {
 
     /// @notice Fuzz test: 100% collateral ratio boundary
     function testFuzz_100PercentCR_Boundary(
-        uint128 value
+        uint64 value  // Use uint64 to prevent overflow
     ) public pure {
-        vm.assume(value > 1000);
+        value = uint64(bound(value, 1001, type(uint64).max));
 
         // Collateral value = debt value
         uint256 collateralValue = value;
         uint256 debtValue = value;
-
-        // Prevent overflow
-        vm.assume(collateralValue * Constants.PRECISION_18 < type(uint256).max);
 
         // Calculate CR
         uint256 cr = (collateralValue * Constants.PRECISION_18) / debtValue;
@@ -361,7 +343,7 @@ contract CollateralMathFuzzTest is Test {
     function testFuzz_ZeroDebt_InfiniteCR(
         uint128 collateralValue
     ) public pure {
-        vm.assume(collateralValue > 0);
+        collateralValue = uint128(bound(collateralValue, 1, type(uint128).max));
 
         uint256 debtValue = 0;
 
@@ -377,12 +359,9 @@ contract CollateralMathFuzzTest is Test {
     function testFuzz_ZeroCollateral_ZeroCR(
         uint128 debtValue
     ) public pure {
-        vm.assume(debtValue > 0);
+        debtValue = uint128(bound(debtValue, 1, type(uint128).max));
 
         uint256 collateralValue = 0;
-
-        // Prevent overflow
-        vm.assume(collateralValue * Constants.PRECISION_18 < type(uint256).max);
 
         // Calculate CR
         uint256 cr = (collateralValue * Constants.PRECISION_18) / debtValue;
@@ -393,15 +372,12 @@ contract CollateralMathFuzzTest is Test {
 
     /// @notice Fuzz test: Very high collateral ratio
     function testFuzz_VeryHighCR(
-        uint128 collateralValue,
+        uint64 collateralValue,  // Use uint64 to prevent overflow
         uint64 debtValue
     ) public pure {
-        vm.assume(collateralValue > 1e24); // Large collateral
-        vm.assume(debtValue > 1000 && debtValue < 1e18); // Small debt
-        vm.assume(collateralValue > uint256(debtValue) * 1000); // CR > 100000%
-
-        // Prevent overflow
-        vm.assume(uint256(collateralValue) * Constants.PRECISION_18 < type(uint256).max);
+        // Ensure collateralValue > debtValue * 1000 for CR > 100000%
+        debtValue = uint64(bound(debtValue, 1001, 1e12)); // Small debt
+        collateralValue = uint64(bound(collateralValue, uint256(debtValue) * 1000 + 1, type(uint64).max));
 
         // Calculate high CR
         uint256 cr = (uint256(collateralValue) * Constants.PRECISION_18) / uint256(debtValue);
@@ -412,18 +388,13 @@ contract CollateralMathFuzzTest is Test {
 
     /// @notice Fuzz test: Collateral ratio invariance
     function testFuzz_CR_Invariant_ScaleUp(
-        uint64 collateralValue,
-        uint64 debtValue,
+        uint32 collateralValue,  // Use uint32 to allow safe multiplication
+        uint32 debtValue,
         uint16 scaleFactor
     ) public pure {
-        vm.assume(collateralValue > 1000);
-        vm.assume(debtValue > 1000);
-        vm.assume(scaleFactor > 1 && scaleFactor <= 1000);
-
-        // Prevent overflow
-        vm.assume(uint256(collateralValue) * Constants.PRECISION_18 < type(uint256).max);
-        vm.assume(uint256(collateralValue) * uint256(scaleFactor) < type(uint128).max);
-        vm.assume(uint256(debtValue) * uint256(scaleFactor) < type(uint128).max);
+        collateralValue = uint32(bound(collateralValue, 1001, type(uint32).max));
+        debtValue = uint32(bound(debtValue, 1001, type(uint32).max));
+        scaleFactor = uint16(bound(scaleFactor, 2, 1000));
 
         // Calculate original CR
         uint256 cr1 = (uint256(collateralValue) * Constants.PRECISION_18) / uint256(debtValue);
@@ -431,8 +402,6 @@ contract CollateralMathFuzzTest is Test {
         // Scale up both collateral and debt
         uint256 scaledCollateral = uint256(collateralValue) * uint256(scaleFactor);
         uint256 scaledDebt = uint256(debtValue) * uint256(scaleFactor);
-
-        vm.assume(scaledCollateral * Constants.PRECISION_18 < type(uint256).max);
 
         // Calculate CR after scaling
         uint256 cr2 = (scaledCollateral * Constants.PRECISION_18) / scaledDebt;

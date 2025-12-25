@@ -148,7 +148,7 @@ describe("Config Architecture (ConfigCore + ConfigGov - Viem)", function () {
     });
 
     it("should allow owner to set max BTB rate", async function () {
-      const maxRate = 5n * 10n ** 16n; // 5% APR (18 decimals)
+      const maxRate = 500n; // 5% APR (500 bps)
       await configGov.write.setParam([3n, maxRate], { account: owner.account });
       expect(await configGov.read.maxBTBRate()).to.equal(maxRate);
     });
@@ -163,15 +163,16 @@ describe("Config Architecture (ConfigCore + ConfigGov - Viem)", function () {
     });
 
     it("should allow batch parameter updates", async function () {
+      // ParamType: 0=MINT_FEE_BP, 1=INTEREST_FEE_BP, 2=MIN_BTB_PRICE, 3=MAX_BTB_RATE (bps)
       await configGov.write.setParamsBatch(
-        [[0n, 1n, 2n, 3n], [100n, 200n, 5n * 10n ** 17n, 5n * 10n ** 16n]],
+        [[0n, 1n, 2n, 3n], [100n, 200n, 5n * 10n ** 17n, 500n]],  // 500 bps = 5%
         { account: owner.account }
       );
 
       expect(await configGov.read.mintFeeBP()).to.equal(100n);
       expect(await configGov.read.interestFeeBP()).to.equal(200n);
       expect(await configGov.read.minBTBPrice()).to.equal(5n * 10n ** 17n);
-      expect(await configGov.read.maxBTBRate()).to.equal(5n * 10n ** 16n);
+      expect(await configGov.read.maxBTBRate()).to.equal(500n);  // 500 bps = 5%
     });
 
     it("should reject parameter updates from non-owner", async function () {
@@ -274,8 +275,9 @@ describe("Config Architecture (ConfigCore + ConfigGov - Viem)", function () {
     });
 
     it("should batch parameter updates efficiently", async function () {
+      // ParamType: 0=MINT_FEE_BP, 1=INTEREST_FEE_BP, 2=MIN_BTB_PRICE, 3=MAX_BTB_RATE (bps)
       const hash = await configGov.write.setParamsBatch(
-        [[0n, 1n, 2n, 3n], [100n, 200n, 5n * 10n ** 17n, 5n * 10n ** 16n]],
+        [[0n, 1n, 2n, 3n], [100n, 200n, 5n * 10n ** 17n, 500n]],  // 500 bps = 5%
         { account: owner.account }
       );
 
@@ -284,7 +286,7 @@ describe("Config Architecture (ConfigCore + ConfigGov - Viem)", function () {
       expect(await configGov.read.mintFeeBP()).to.equal(100n);
       expect(await configGov.read.interestFeeBP()).to.equal(200n);
       expect(await configGov.read.minBTBPrice()).to.equal(5n * 10n ** 17n);
-      expect(await configGov.read.maxBTBRate()).to.equal(5n * 10n ** 16n);
+      expect(await configGov.read.maxBTBRate()).to.equal(500n);  // 500 bps = 5%
     });
   });
 

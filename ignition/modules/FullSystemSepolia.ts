@@ -7,11 +7,9 @@ import { keccak256, toHex } from "viem";
  * Differences from local (FullSystem.ts):
  * - Uses real Chainlink BTC/USD price feed on Sepolia
  * - Deploys mock WBTC/BTC oracle (1:1 ratio, no real feed on Sepolia)
- * - Uses official testnet tokens instead of deploying mocks:
- *   - WETH: Uniswap WETH9 (users can wrap ETH)
- *   - USDC: Circle official (available from faucet.circle.com)
- *   - WBTC: Aave V3 testnet token (available from Aave faucet)
- *   - USDT: Aave V3 testnet token (available from Aave faucet)
+ * - Token strategy:
+ *   - WETH: Uses official Uniswap WETH9 (users can wrap ETH directly)
+ *   - WBTC/USDC/USDT: Deploys our own mock tokens (official faucets give too little)
  * - Still deploys our own UniswapV2 pairs (no official V2 on Sepolia)
  * - No guardian/price-sync needed (real network)
  */
@@ -22,18 +20,8 @@ const SEPOLIA_CHAINLINK = {
   ETH_USD: "0x694AA1769357215DE4FAC081bf1f309aDC325306",
 };
 
-// Official Sepolia testnet token addresses
-// Using established testnet tokens allows users to get tokens from standard faucets
-const SEPOLIA_TOKENS = {
-  // Uniswap official WETH9 - users can wrap ETH directly
-  WETH: "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14",
-  // Circle official USDC - available from faucet.circle.com
-  USDC: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-  // Aave V3 testnet WBTC (8 decimals) - available from Aave faucet
-  WBTC: "0x29f2D40B0605204364af54EC677bD022dA425d03",
-  // Aave V3 testnet USDT - available from Aave faucet
-  USDT: "0xaA8E23Fb1079EA71e0a56F48a2aA51851D8433D0",
-};
+// Official Uniswap WETH9 on Sepolia (users can wrap ETH directly)
+const SEPOLIA_WETH = "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14";
 
 // Default parameters
 const DEFAULTS = {
@@ -47,12 +35,13 @@ const DEFAULTS = {
 export default buildModule("FullSystemSepolia", (m) => {
   const deployer = m.getAccount(0);
 
-  // ===== 1. Use official Sepolia testnet tokens =====
-  // Users can get these from standard faucets (Circle, Aave, or wrap ETH for WETH)
-  const wbtc = m.contractAt("IERC20", SEPOLIA_TOKENS.WBTC, { id: "WBTC" });
-  const usdc = m.contractAt("IERC20", SEPOLIA_TOKENS.USDC, { id: "USDC" });
-  const usdt = m.contractAt("IERC20", SEPOLIA_TOKENS.USDT, { id: "USDT" });
-  const weth = m.contractAt("IERC20", SEPOLIA_TOKENS.WETH, { id: "WETH" });
+  // ===== 1. Tokens =====
+  // Deploy mock WBTC/USDC/USDT (official faucets give too little for testing)
+  const wbtc = m.contract("contracts/local/MockWBTC.sol:MockWBTC", [deployer], { id: "WBTC" });
+  const usdc = m.contract("contracts/local/MockUSDC.sol:MockUSDC", [deployer], { id: "USDC" });
+  const usdt = m.contract("contracts/local/MockUSDT.sol:MockUSDT", [deployer], { id: "USDT" });
+  // Use official Uniswap WETH9 (users can wrap ETH directly)
+  const weth = m.contractAt("IERC20", SEPOLIA_WETH, { id: "WETH" });
 
   // ===== 2. Core tokens =====
   const brs = m.contract("BRS", [deployer], { id: "BRS" });

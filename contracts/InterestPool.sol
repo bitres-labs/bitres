@@ -18,27 +18,31 @@ import "./libraries/InterestMath.sol";
 /// @title InterestPool
 /// @notice Manages interest accrual for BTD and BTB deposited via stBTD/stBTB vaults.
 ///         Users cannot interact with this contract directly - they must use stBTD/stBTB vault contracts.
-///         BTD APR dynamically adjusts based on Collateral Ratio (CR):
-///         - CR 90%-120%: 4% (stable zone)
-///         - CR 30%-90%: 4%-20% (risk zone, stepwise increase)
-///         - CR 120%-200%: 4%-0% (over-collateralized, stepwise decrease)
-///         BTB APR is adjusted daily based on the BTB/BTD Uniswap price and constrained by Config.maxBTBRate().
+///
+///         BTD Deposit Rate (per whitepaper Section 4.1):
+///         - Price < 0.99 IUSD & Falling: Raise rate
+///         - Price < 0.99 IUSD & Rising: Unchanged
+///         - Price in [0.99, 1.01] IUSD: Unchanged
+///         - Price > 1.01 IUSD & Falling: Unchanged
+///         - Price > 1.01 IUSD & Rising: Lower rate
+///
+///         BTB Bond Rate (per whitepaper Section 4.2):
+///         - Price < 0.99 BTD & Falling: Raise rate
+///         - Price < 0.99 BTD & Rising: Unchanged
+///         - Price in [0.99, 1.01] BTD: Unchanged
+///         - Price > 1.01 BTD & Falling: Unchanged
+///         - Price > 1.01 BTD & Rising: Lower rate
+///
 /// @dev Only stBTD and stBTB vault contracts are authorized to call deposit/withdraw functions.
 contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
     using SafeERC20 for IMintableERC20;
 
-    uint256 private constant LOWER_PRICE_THRESHOLD = (Constants.PRECISION_18 * 99) / 100; // 0.99 BTD
-    uint256 private constant UPPER_PRICE_THRESHOLD = (Constants.PRECISION_18 * 101) / 100; // 1.01 BTD
+    // Price thresholds for rate adjustment (per whitepaper Table 3 & 4)
+    uint256 private constant LOWER_PRICE_THRESHOLD = (Constants.PRECISION_18 * 99) / 100; // 0.99
+    uint256 private constant UPPER_PRICE_THRESHOLD = (Constants.PRECISION_18 * 101) / 100; // 1.01
 
-    // BTD rate adjustment thresholds (CR-based)
-    uint256 private constant CR_MIN = (Constants.PRECISION_18 * 30) / 100;  // 30%
-    uint256 private constant CR_LOW = (Constants.PRECISION_18 * 90) / 100;  // 90%
-    uint256 private constant CR_HIGH = (Constants.PRECISION_18 * 120) / 100; // 120%
-    uint256 private constant CR_MAX = (Constants.PRECISION_18 * 200) / 100; // 200%
-
-    uint256 private constant BTD_BASE_RATE = 400;   // 4% in bps
-    uint256 private constant BTD_MAX_RATE = 2000;   // 20% in bps
-    uint256 private constant BTD_MIN_RATE = 0;      // 0% in bps
+    // Rate limits
+    uint256 private constant BTD_BASE_RATE = 400;   // 4% in bps (initial rate)
 
     ConfigCore public immutable core;
     ConfigGov public gov;
@@ -63,6 +67,11 @@ contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
     mapping(address => UserInfo) private btdUsers;
     mapping(address => UserInfo) private btbUsers;
 
+    // BTD price tracking (for whitepaper-compliant rate adjustment)
+    uint256 public btdLastPrice; // Last recorded BTD/IUSD price ratio (18 decimals)
+    uint256 public btdLastRateUpdate; // Timestamp of the last BTD rate adjustment
+
+    // BTB price tracking
     uint256 public btbLastPrice; // Last recorded BTB price in BTD (18 decimals)
     uint256 public btbLastRateUpdate; // Timestamp of the last BTB rate adjustment
 
@@ -137,93 +146,74 @@ contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
         emit RateOracleUpdated(newOracle);
     }
 
-    /// @notice Sets Federal Funds Rate oracle address
-    /// @dev Only contract owner can call
-    /// @param _ffrOracle FFR oracle contract address
-
-
-    /// @notice Dynamically updates BTD annual rate (APR) based on CR
-    /// @dev Stepwise adjustment logic:
-    ///      - CR 90%-120%: maintain 4% (stable zone)
-    ///      - CR 30%-90%: stepwise increase 4%-20% (risk zone, incentivize redemption)
-    ///      - CR 120%-200%: stepwise decrease 4%-0% (over-collateralized zone, incentivize minting)
-    ///      Only rate oracle or contract owner can call
+    /// @notice Dynamically updates BTD annual rate (APR) based on BTD/IUSD price
+    /// @dev Per whitepaper Section 4.1 (Table 3 - Deposit Rate Policy):
+    ///      - Price < 0.99 IUSD & Falling: Raise rate (increase attractiveness)
+    ///      - Price < 0.99 IUSD & Rising: Unchanged
+    ///      - Price in [0.99, 1.01] IUSD: Unchanged (target range)
+    ///      - Price > 1.01 IUSD & Falling: Unchanged
+    ///      - Price > 1.01 IUSD & Rising: Lower rate
+    ///      Can only adjust once per day. Only rate oracle can call.
     function updateBTDAnnualRate() external onlyRateOracle {
+        if (btdLastRateUpdate != 0) {
+            require(block.timestamp >= btdLastRateUpdate + Constants.SECONDS_PER_DAY, "BTD rate already updated today");
+        }
+
         _accruePool(btdPool);
 
-        // Get current CR
-        uint256 cr = _getCurrentCR();
+        // Get BTD/IUSD price ratio
+        uint256 price = _currentBTDPriceInIUSD();
+        int256 changeBps = _calculateChangeBps(btdLastPrice, price);
+
         uint256 oldRate = btdPool.annualRateBps;
-        uint256 newRate = _calculateBTDRateByCR(cr);
+        uint256 newRate = oldRate;
+
+        if (btdLastPrice != 0) {
+            // Per whitepaper Table 3: Deposit Rate Policy
+            if (price < LOWER_PRICE_THRESHOLD && changeBps < 0) {
+                // Price < 0.99 IUSD and falling: raise rate
+                uint256 delta = uint256(-changeBps);
+                newRate += delta;
+            } else if (price > UPPER_PRICE_THRESHOLD && changeBps > 0) {
+                // Price > 1.01 IUSD and rising: lower rate
+                uint256 delta = uint256(changeBps);
+                if (delta >= newRate) {
+                    newRate = 0;
+                } else {
+                    newRate -= delta;
+                }
+            }
+            // Other cases: rate unchanged (per whitepaper)
+        }
+
+        // Apply maximum rate cap from governance
+        uint256 maxRate = gov.maxBTDRate();
+        if (newRate > maxRate) {
+            newRate = maxRate;
+        }
 
         btdPool.annualRateBps = newRate;
+        btdLastPrice = price;
+        btdLastRateUpdate = block.timestamp;
+
         emit BTDAnnualRateUpdated(oldRate, newRate);
     }
 
-    /// @notice Calculates BTD rate based on CR
-    /// @dev Stepwise calculation:
-    ///      CR < 30%: 20%
-    ///      CR 30%-90%: linear interpolation 20% -> 4%
-    ///      CR 90%-120%: 4%
-    ///      CR 120%-200%: linear interpolation 4% -> 0%
-    ///      CR > 200%: 0%
-    function _calculateBTDRateByCR(uint256 cr) internal pure returns (uint256) {
-        if (cr <= CR_MIN) {
-            // CR <= 30%: maximum rate 20%
-            return BTD_MAX_RATE;
-        } else if (cr < CR_LOW) {
-            // CR 30%-90%: linear decrease from 20% to 4%
-            // rate = 20% - (cr - 30%) * (16% / 60%)
-            uint256 range = CR_LOW - CR_MIN; // 60%
-            uint256 rateRange = BTD_MAX_RATE - BTD_BASE_RATE; // 1600 bps
-            uint256 decrease = ((cr - CR_MIN) * rateRange) / range;
-            return BTD_MAX_RATE - decrease;
-        } else if (cr <= CR_HIGH) {
-            // CR 90%-120%: stable at 4%
-            return BTD_BASE_RATE;
-        } else if (cr < CR_MAX) {
-            // CR 120%-200%: linear decrease from 4% to 0%
-            // rate = 4% - (cr - 120%) * (4% / 80%)
-            uint256 range = CR_MAX - CR_HIGH; // 80%
-            uint256 rateRange = BTD_BASE_RATE - BTD_MIN_RATE; // 400 bps
-            uint256 decrease = ((cr - CR_HIGH) * rateRange) / range;
-            return BTD_BASE_RATE - decrease;
-        } else {
-            // CR >= 200%: minimum rate 0%
-            return BTD_MIN_RATE;
-        }
-    }
-
-    /// @notice Gets current Collateral Ratio (CR)
-    /// @dev CR = (WBTC value) / (BTD equivalent total value)
-    ///      BTD equivalent total = BTD supply + stBTD converted to BTD amount
-    function _getCurrentCR() internal view returns (uint256) {
+    /// @notice Gets current BTD/IUSD price ratio
+    /// @dev BTD/IUSD = BTD_USD_Price / IUSD_Price
+    ///      Returns 1e18 when BTD = 1 IUSD (perfect peg)
+    /// @return BTD/IUSD price ratio (18 decimals, 1e18 = 1.0)
+    function _currentBTDPriceInIUSD() internal view returns (uint256) {
         IPriceOracle oracle = IPriceOracle(core.PRICE_ORACLE());
-        uint256 wbtcPrice = oracle.getWBTCPrice();
-        uint256 iusdPrice = oracle.getIUSDPrice();
+        uint256 btdPriceUSD = oracle.getBTDPrice();  // BTD market price in USD
+        uint256 iusdPrice = oracle.getIUSDPrice();   // IUSD price in USD
 
-        uint256 wbtcBalance = IERC20(core.WBTC()).balanceOf(core.TREASURY());
-        uint256 btdSupply = IERC20(core.BTD()).totalSupply();
-
-        // BTD liability = circulating BTD total supply
-        // Note: stBTD is just a wrapped token of BTD, should not be double counted
-        // BTD's totalSupply already includes all minted BTD (including those in stBTD vault)
-        if (btdSupply == 0) {
-            return Constants.PRECISION_18; // 100%, return 100% when no liability
+        if (iusdPrice == 0) {
+            return Constants.PRECISION_18; // Default to 1.0 if IUSD price unavailable
         }
 
-        // CR = (wbtcBalance * wbtcPrice / 1e8) / (btdSupply * iusdPrice / 1e18)
-        // Optimization: multiply first then divide to avoid precision loss
-        // CR = (wbtcBalance * wbtcPrice * 1e18 * 1e18) / (1e8 * btdSupply * iusdPrice)
-        //    = (wbtcBalance * wbtcPrice * 1e28) / (btdSupply * iusdPrice)
-        // Note: need to check if btdSupply * iusdPrice is 0
-        uint256 liabilityNumerator = btdSupply * iusdPrice;
-        if (liabilityNumerator == 0) {
-            return Constants.PRECISION_18;
-        }
-
-        // Using 1e28 = 1e18 (CR precision) * 1e18 (iusdPrice precision) / 1e8 (wbtcPrice precision)
-        return (wbtcBalance * wbtcPrice * 1e28) / liabilityNumerator;
+        // BTD/IUSD = BTD_USD / IUSD_USD
+        return (btdPriceUSD * Constants.PRECISION_18) / iusdPrice;
     }
 
     /// @notice Updates BTB annual rate (APR)

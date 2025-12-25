@@ -13,14 +13,11 @@ contract GovernorFuzzTest is Test {
 
     /// @notice Fuzz test: Voting power calculation
     function testFuzz_VotingPower_Calculation(
-        uint128 tokenBalance,
-        uint128 totalSupply
+        uint64 tokenBalance,  // Use uint64 to prevent overflow
+        uint64 totalSupply
     ) public pure {
-        vm.assume(tokenBalance > 0);
-        vm.assume(totalSupply >= tokenBalance);
-
-        // Calculate voting power percentage
-        vm.assume(uint256(tokenBalance) * Constants.PRECISION_18 < type(uint256).max);
+        tokenBalance = uint64(bound(tokenBalance, 1, type(uint64).max));
+        totalSupply = uint64(bound(totalSupply, tokenBalance, type(uint64).max));
 
         uint256 votingPower = (uint256(tokenBalance) * Constants.PRECISION_18) / uint256(totalSupply);
 
@@ -38,8 +35,8 @@ contract GovernorFuzzTest is Test {
         uint128 totalSupply,
         uint16 quorumBP  // Quorum percentage (basis points)
     ) public pure {
-        vm.assume(totalSupply > 1000);  // Total supply large enough
-        vm.assume(quorumBP > 0 && quorumBP <= Constants.BPS_BASE);
+        totalSupply = uint128(bound(totalSupply, 1001, type(uint128).max));  // Total supply large enough
+        quorumBP = uint16(bound(quorumBP, 1, Constants.BPS_BASE));
 
         // Calculate quorum
         uint256 quorum = (uint256(totalSupply) * uint256(quorumBP)) / Constants.BPS_BASE;
@@ -62,9 +59,9 @@ contract GovernorFuzzTest is Test {
         uint128 totalSupply,
         uint16 quorumBP
     ) public pure {
-        vm.assume(totalSupply > 1000);
-        vm.assume(totalVotes <= totalSupply);
-        vm.assume(quorumBP > 0 && quorumBP <= Constants.BPS_BASE);
+        totalSupply = uint128(bound(totalSupply, 1001, type(uint128).max));
+        totalVotes = uint128(bound(totalVotes, 0, totalSupply));
+        quorumBP = uint16(bound(quorumBP, 1, Constants.BPS_BASE));
 
         uint256 quorum = (uint256(totalSupply) * uint256(quorumBP)) / Constants.BPS_BASE;
         bool quorumReached = totalVotes >= quorum;
@@ -87,12 +84,11 @@ contract GovernorFuzzTest is Test {
         uint16 quorumBP,
         uint16 passThresholdBP  // Pass threshold (e.g., 50% = 5000 BP)
     ) public pure {
-        vm.assume(totalSupply > 1000);
-        vm.assume(votesFor <= totalSupply);
-        vm.assume(votesAgainst <= totalSupply);
-        vm.assume(uint256(votesFor) + uint256(votesAgainst) <= totalSupply);
-        vm.assume(quorumBP > 0 && quorumBP <= Constants.BPS_BASE);
-        vm.assume(passThresholdBP > 0 && passThresholdBP <= Constants.BPS_BASE);
+        totalSupply = uint128(bound(totalSupply, 1001, type(uint128).max));
+        votesFor = uint128(bound(votesFor, 0, totalSupply));
+        votesAgainst = uint128(bound(votesAgainst, 0, totalSupply - votesFor));
+        quorumBP = uint16(bound(quorumBP, 1, Constants.BPS_BASE));
+        passThresholdBP = uint16(bound(passThresholdBP, 1, Constants.BPS_BASE));
 
         uint256 totalVotes = uint256(votesFor) + uint256(votesAgainst);
         uint256 quorum = (uint256(totalSupply) * uint256(quorumBP)) / Constants.BPS_BASE;
@@ -126,9 +122,9 @@ contract GovernorFuzzTest is Test {
         uint32 votingPeriod
     ) public pure {
         // Limit startTime to avoid addition overflow (safe until year 2106 in practice)
-        vm.assume(proposalStartTime < type(uint32).max - 30 days);
-        vm.assume(currentTime >= proposalStartTime);
-        vm.assume(votingPeriod > 0 && votingPeriod <= 30 days);
+        proposalStartTime = uint32(bound(proposalStartTime, 0, type(uint32).max - 30 days - 1));
+        currentTime = uint32(bound(currentTime, proposalStartTime, type(uint32).max));
+        votingPeriod = uint32(bound(votingPeriod, 1, 30 days));
 
         uint32 proposalEndTime = proposalStartTime + votingPeriod;
 
@@ -153,9 +149,9 @@ contract GovernorFuzzTest is Test {
         uint32 timelockDelay
     ) public pure {
         // Limit approvedTime to avoid addition overflow
-        vm.assume(proposalApprovedTime < type(uint32).max - 7 days);
-        vm.assume(currentTime >= proposalApprovedTime);
-        vm.assume(timelockDelay > 0 && timelockDelay <= 7 days);
+        proposalApprovedTime = uint32(bound(proposalApprovedTime, 0, type(uint32).max - 7 days - 1));
+        currentTime = uint32(bound(currentTime, proposalApprovedTime, type(uint32).max));
+        timelockDelay = uint32(bound(timelockDelay, 1, 7 days));
 
         uint32 executeTime = proposalApprovedTime + timelockDelay;
 
@@ -176,10 +172,9 @@ contract GovernorFuzzTest is Test {
         uint32 expirationPeriod
     ) public pure {
         // Limit approvedTime to avoid addition overflow (safe until year 2106 in practice)
-        vm.assume(proposalApprovedTime < type(uint32).max - 30 days);
-        vm.assume(currentTime >= proposalApprovedTime);
-        vm.assume(expirationPeriod > 0);
-        vm.assume(expirationPeriod <= 30 days);
+        proposalApprovedTime = uint32(bound(proposalApprovedTime, 0, type(uint32).max - 30 days - 1));
+        currentTime = uint32(bound(currentTime, proposalApprovedTime, type(uint32).max));
+        expirationPeriod = uint32(bound(expirationPeriod, 1, 30 days));
 
         uint32 expirationTime = proposalApprovedTime + expirationPeriod;
 
@@ -201,9 +196,9 @@ contract GovernorFuzzTest is Test {
         uint128 totalSupply,
         uint16 proposalThresholdBP
     ) public pure {
-        vm.assume(totalSupply > 1000);
-        vm.assume(proposerBalance <= totalSupply);
-        vm.assume(proposalThresholdBP > 0 && proposalThresholdBP <= Constants.BPS_BASE);
+        totalSupply = uint128(bound(totalSupply, 1001, type(uint128).max));
+        proposerBalance = uint128(bound(proposerBalance, 0, totalSupply));
+        proposalThresholdBP = uint16(bound(proposalThresholdBP, 1, Constants.BPS_BASE));
 
         uint256 requiredBalance = (uint256(totalSupply) * uint256(proposalThresholdBP)) / Constants.BPS_BASE;
         bool canPropose = proposerBalance >= requiredBalance;
@@ -225,9 +220,10 @@ contract GovernorFuzzTest is Test {
         uint64 vote3,
         uint64 totalSupply
     ) public pure {
-        vm.assume(vote1 > 0 && vote2 > 0 && vote3 > 0);
-        vm.assume(uint256(vote1) + uint256(vote2) + uint256(vote3) <= totalSupply);
-        vm.assume(totalSupply > 0);
+        totalSupply = uint64(bound(totalSupply, 3, type(uint64).max));
+        vote1 = uint64(bound(vote1, 1, totalSupply / 3));
+        vote2 = uint64(bound(vote2, 1, totalSupply / 3));
+        vote3 = uint64(bound(vote3, 1, totalSupply / 3));
 
         uint256 totalVotes = uint256(vote1) + uint256(vote2) + uint256(vote3);
 
@@ -237,23 +233,19 @@ contract GovernorFuzzTest is Test {
 
     /// @notice Fuzz test: Voting power invariance
     function testFuzz_VotingPower_Invariant(
-        uint128 balance1,
-        uint128 balance2,
-        uint128 totalSupply
+        uint64 balance1,  // Use uint64 to prevent overflow
+        uint64 balance2,
+        uint64 totalSupply
     ) public pure {
-        vm.assume(totalSupply > 1000);
-        vm.assume(balance1 > 0 && balance2 > 0);
-        vm.assume(uint256(balance1) + uint256(balance2) <= totalSupply);
-
-        vm.assume(uint256(balance1) * Constants.PRECISION_18 < type(uint256).max);
-        vm.assume(uint256(balance2) * Constants.PRECISION_18 < type(uint256).max);
+        totalSupply = uint64(bound(totalSupply, 1001, type(uint64).max));
+        balance1 = uint64(bound(balance1, 1, totalSupply / 2));
+        balance2 = uint64(bound(balance2, 1, totalSupply - balance1));
 
         uint256 power1 = (uint256(balance1) * Constants.PRECISION_18) / uint256(totalSupply);
         uint256 power2 = (uint256(balance2) * Constants.PRECISION_18) / uint256(totalSupply);
         uint256 totalPower = power1 + power2;
 
         uint256 combinedBalance = uint256(balance1) + uint256(balance2);
-        vm.assume(combinedBalance * Constants.PRECISION_18 < type(uint256).max);
         uint256 combinedPower = (combinedBalance * Constants.PRECISION_18) / uint256(totalSupply);
 
         // Verify: Combined voting power equals sum of individual powers (allow rounding error)
@@ -264,20 +256,18 @@ contract GovernorFuzzTest is Test {
 
     /// @notice Fuzz test: Vote delegation
     function testFuzz_VoteDelegation(
-        uint128 delegatorBalance,
-        uint128 delegateOriginalBalance,
-        uint128 totalSupply
+        uint64 delegatorBalance,  // Use uint64 to prevent overflow
+        uint64 delegateOriginalBalance,
+        uint64 totalSupply
     ) public pure {
-        vm.assume(totalSupply > 1000);
-        vm.assume(delegatorBalance > 0);
-        vm.assume(delegateOriginalBalance >= 0);
-        vm.assume(uint256(delegatorBalance) + uint256(delegateOriginalBalance) <= totalSupply);
+        totalSupply = uint64(bound(totalSupply, 1001, type(uint64).max));
+        delegatorBalance = uint64(bound(delegatorBalance, 1, totalSupply / 2));
+        delegateOriginalBalance = uint64(bound(delegateOriginalBalance, 0, totalSupply - delegatorBalance));
 
         // After delegation, delegate's voting power increases
         uint256 delegatePowerBefore = (uint256(delegateOriginalBalance) * Constants.PRECISION_18) / uint256(totalSupply);
 
         uint256 combinedBalance = uint256(delegateOriginalBalance) + uint256(delegatorBalance);
-        vm.assume(combinedBalance * Constants.PRECISION_18 < type(uint256).max);
 
         uint256 delegatePowerAfter = (combinedBalance * Constants.PRECISION_18) / uint256(totalSupply);
 
@@ -292,8 +282,8 @@ contract GovernorFuzzTest is Test {
         uint128 totalSupply,
         uint16 quorumBP
     ) public pure {
-        vm.assume(totalSupply > 1000);
-        vm.assume(quorumBP > 0);
+        totalSupply = uint128(bound(totalSupply, 1001, type(uint128).max));
+        quorumBP = uint16(bound(quorumBP, 1, Constants.BPS_BASE));
 
         uint256 totalVotes = 0;
         uint256 quorum = (uint256(totalSupply) * uint256(quorumBP)) / Constants.BPS_BASE;
@@ -310,7 +300,7 @@ contract GovernorFuzzTest is Test {
     function testFuzz_Unanimous_Approval(
         uint128 totalSupply
     ) public pure {
-        vm.assume(totalSupply > 1000);
+        totalSupply = uint128(bound(totalSupply, 1001, type(uint128).max));
 
         uint256 votesFor = totalSupply;
         uint256 votesAgainst = 0;
@@ -333,15 +323,15 @@ contract GovernorFuzzTest is Test {
     function testFuzz_MajorityVote_Boundary(
         uint128 totalVotes
     ) public pure {
-        vm.assume(totalVotes >= 1000);  // At least 1000 votes to avoid precision issues
-        vm.assume(totalVotes < type(uint128).max / Constants.BPS_BASE); // Prevent overflow
+        // At least 1000 votes to avoid precision issues, bounded to prevent overflow
+        totalVotes = uint128(bound(totalVotes, 1000, type(uint128).max / Constants.BPS_BASE - 1));
 
         // Calculate > 50% votes: simply use totalVotes/2 + 1 to ensure strictly > half
         uint256 votesFor = (uint256(totalVotes) / 2) + (totalVotes / 100);  // ~51%
         uint256 votesAgainst = totalVotes - votesFor;
 
-        vm.assume(votesFor > totalVotes / 2);  // Ensure indeed > 50%
-        vm.assume(votesAgainst > 0);  // Ensure some against votes
+        // Early return if conditions can't be met
+        if (votesFor <= totalVotes / 2 || votesAgainst == 0) return;
 
         uint256 forPercentage = (votesFor * Constants.BPS_BASE) / totalVotes;
 

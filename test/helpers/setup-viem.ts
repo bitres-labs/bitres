@@ -78,13 +78,11 @@ export async function deployTokens() {
 
   // Deploy USDC (6 decimals)
   const usdc = await viem.deployContract("contracts/local/MockUSDC.sol:MockUSDC", [
-    owner.account.address,
     owner.account.address
   ]);
 
   // Deploy USDT (6 decimals)
   const usdt = await viem.deployContract("contracts/local/MockUSDT.sol:MockUSDT", [
-    owner.account.address,
     owner.account.address
   ]);
 
@@ -230,7 +228,7 @@ export async function deployConfig(
 ) {
   const [owner] = await getWallets();
 
-  // Deploy ConfigCore (22 immutable addresses, excluding the 5 circular core contracts)
+  // Deploy ConfigCore (11 constructor params: tokens + oracles)
   const configCore = await viem.deployContract(
     "contracts/ConfigCore.sol:ConfigCore",
     [
@@ -245,16 +243,6 @@ export async function deployConfig(
       oracles.mockWbtcBtc.address,                          // _chainlinkWbtcBtc
       oracles.mockPyth.address,                             // _pythWbtc
       oracles.mockRedstone.address,                         // _redstoneWbtc
-      additionalAddresses.stakingRouter,                    // _stakingRouter
-      additionalAddresses.farmingPool,                      // _farmingPool
-      additionalAddresses.stBTD,                            // _stBTD
-      additionalAddresses.stBTB,                            // _stBTB
-      additionalAddresses.governor,                         // _governor
-      additionalAddresses.twapOracle,                       // _twapOracle
-      pools.mockPoolWbtcUsdc.address,                       // _poolWbtcUsdc
-      pools.mockPoolBtdUsdc.address,                        // _poolBtdUsdc
-      pools.mockPoolBtbBtd.address,                         // _poolBtbBtd
-      pools.mockPoolBrsBtd.address                          // _poolBrsBtd
     ]
   );
 
@@ -476,6 +464,20 @@ export async function deployFullSystem(): Promise<SystemContracts> {
     priceOracle.address,
     idealUSDManager.address,
     interestPool.address
+  ]);
+
+  // Step 14b: Set peripheral contracts in ConfigCore
+  await tempConfigCore.core.write.setPeripheralContracts([
+    stakingRouter.address,    // _stakingRouter
+    farmingPool.address,      // _farmingPool
+    stBTD.address,            // _stBTD
+    stBTB.address,            // _stBTB
+    governor,                 // _governor (already an address string)
+    twapOracle,               // _twapOracle (already an address string)
+    pools.mockPoolWbtcUsdc.address,  // _poolWbtcUsdc
+    pools.mockPoolBtdUsdc.address,   // _poolBtdUsdc
+    pools.mockPoolBtbBtd.address,    // _poolBtbBtd
+    pools.mockPoolBrsBtd.address     // _poolBrsBtd
   ]);
 
   // Now tempConfigCore is complete with all addresses!

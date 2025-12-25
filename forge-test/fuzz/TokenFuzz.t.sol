@@ -240,12 +240,11 @@ contract TokenFuzzTest is Test {
         uint256 amount,
         uint8 decimals
     ) public pure {
-        vm.assume(decimals <= 18);
-        vm.assume(amount > 0);
+        decimals = uint8(bound(decimals, 0, 18));
 
         // Convert to minimum unit
         uint256 minUnit = 10 ** decimals;
-        vm.assume(amount >= minUnit);
+        amount = bound(amount, minUnit, type(uint256).max);
 
         // Verify: Can correctly handle minimum unit
         uint256 wholeUnits = amount / minUnit;
@@ -259,11 +258,11 @@ contract TokenFuzzTest is Test {
         uint128 amount,
         uint16 percentage // Percentage (0-10000 = 0-100%)
     ) public pure {
-        vm.assume(percentage <= 10000);
-        vm.assume(amount > 0);
+        percentage = uint16(bound(percentage, 0, 10000));
+        amount = uint128(bound(amount, 1, type(uint128).max));
 
-        // Calculate percentage
-        vm.assume(uint256(amount) * uint256(percentage) < type(uint256).max);
+        // Calculate percentage - with uint128 and uint16, overflow is not possible
+        // uint128.max * 10000 < type(uint256).max
 
         uint256 result = (uint256(amount) * uint256(percentage)) / 10000;
 
@@ -309,11 +308,9 @@ contract TokenFuzzTest is Test {
 
     // ==================== Special Value Tests ====================
 
-    /// @notice Fuzz test: Maximum value transfer
-    function testFuzz_MaxValue_Transfer(
-        uint128 balance
-    ) public pure {
-        vm.assume(balance == type(uint128).max);
+    /// @notice Test: Maximum value transfer (not a fuzz test - specific value)
+    function test_MaxValue_Transfer() public pure {
+        uint128 balance = type(uint128).max;
 
         // Transfer maximum value
         uint256 amount = balance;

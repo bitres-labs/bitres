@@ -1,0 +1,22 @@
+# Halmos Configuration for Formal Verification
+# Documentation: https://github.com/a16z/halmos
+
+[global]
+# Default solver timeout (milliseconds)
+solver-timeout-assertion = 60000
+solver-timeout-branching = 60000
+
+# Loop unrolling depth
+loop = 5
+
+# Storage slots to track (higher = more precise but slower)
+storage-layout = "solidity"
+
+# Verbose output
+verbose = 1
+
+# Parallel solver threads
+solver-parallel = true
+
+# Contracts to verify formally
+match-contract = ".*FormalTest$"

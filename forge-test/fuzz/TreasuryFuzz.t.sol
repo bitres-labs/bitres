@@ -67,9 +67,9 @@ contract TreasuryFuzzTest is Test {
         uint64 btcPrice,    // Changed to uint64 to avoid overflow
         uint64 brsPrice     // Changed to uint64
     ) public pure {
-        vm.assume(btdAmount > 1e18); // At least 1 BTD
-        vm.assume(btcPrice > 1e6 && btcPrice < 8e7); // BTC price $0.01-$0.80
-        vm.assume(brsPrice > 1e12 && brsPrice < 1e16); // BRS price reasonable range
+        btdAmount = uint128(bound(btdAmount, 1e18 + 1, type(uint128).max)); // At least 1 BTD
+        btcPrice = uint64(bound(btcPrice, 1e6 + 1, 8e7 - 1)); // BTC price $0.01-$0.80
+        brsPrice = uint64(bound(brsPrice, 1e12 + 1, 1e16 - 1)); // BRS price reasonable range
 
         // Assume minimum price is $1 (1e8), compensation needed when current price < minimum
         uint256 minPrice = 1e8;
@@ -95,8 +95,8 @@ contract TreasuryFuzzTest is Test {
         uint64 btdAmount,
         uint32 btcPriceBP   // Use basis points to represent price percentage
     ) public pure {
-        vm.assume(btdAmount > 1e16); // At least 0.01 BTD
-        vm.assume(btcPriceBP > 2000 && btcPriceBP < 8000); // 20%-80% of minimum price
+        btdAmount = uint64(bound(btdAmount, 1e16 + 1, type(uint64).max)); // At least 0.01 BTD
+        btcPriceBP = uint32(bound(btcPriceBP, 2001, 7999)); // 20%-80% of minimum price
 
         // Assume minimum price is $1 (1e8), create two prices: btcPrice1 and lower btcPrice2
         uint256 btcPrice1 = (1e8 * uint256(btcPriceBP)) / 10000;
@@ -135,12 +135,15 @@ contract TreasuryFuzzTest is Test {
         uint128 btdPrice,  // BTD/USD
         uint128 brsPrice   // BRS/USD
     ) public pure {
-        vm.assume(btdAmount > 1e18); // At least 1 BTD
-        vm.assume(btdPrice > 1e15 && btdPrice < 1e20); // Reasonable price range
-        vm.assume(brsPrice > 1e12 && brsPrice < 1e18); // BRS price reasonable range
+        btdAmount = uint128(bound(btdAmount, 1e18 + 1, type(uint128).max)); // At least 1 BTD
+        btdPrice = uint128(bound(btdPrice, 1e15 + 1, 1e20 - 1)); // Reasonable price range
+        brsPrice = uint128(bound(brsPrice, 1e12 + 1, 1e18 - 1)); // BRS price reasonable range
 
-        // Prevent overflow
-        vm.assume(uint256(btdAmount) * uint256(btdPrice) < type(uint256).max);
+        // Bound btdAmount to prevent overflow: btdAmount * btdPrice < type(uint256).max
+        // btdAmount < type(uint256).max / btdPrice
+        if (uint256(btdAmount) * uint256(btdPrice) >= type(uint256).max) {
+            btdAmount = uint128(type(uint256).max / uint256(btdPrice) - 1);
+        }
 
         // Calculate buyback BRS amount
         uint256 btdValue = uint256(btdAmount) * uint256(btdPrice);
@@ -156,9 +159,9 @@ contract TreasuryFuzzTest is Test {
         uint128 expectedBRS,
         uint16 maxSlippageBP  // Max slippage (basis points)
     ) public pure {
-        vm.assume(btdAmount > 1e18); // At least 1 BTD
-        vm.assume(expectedBRS > 1e18); // Expected at least 1 BRS
-        vm.assume(maxSlippageBP > 0 && maxSlippageBP <= 1000); // 0-10% slippage
+        btdAmount = uint128(bound(btdAmount, 1e18 + 1, type(uint128).max)); // At least 1 BTD
+        expectedBRS = uint128(bound(expectedBRS, 1e18 + 1, type(uint128).max)); // Expected at least 1 BRS
+        maxSlippageBP = uint16(bound(maxSlippageBP, 1, 1000)); // 0-10% slippage
 
         // Calculate minimum acceptable BRS amount
         uint256 minBRS = (uint256(expectedBRS) * (Constants.BPS_BASE - uint256(maxSlippageBP))) / Constants.BPS_BASE;
@@ -257,11 +260,15 @@ contract TreasuryFuzzTest is Test {
         uint128 availableLiquidity,
         uint128 totalLiability
     ) public pure {
-        vm.assume(availableLiquidity > 1e18); // At least 1 unit of liquidity
-        vm.assume(totalLiability > 1e18 && totalLiability < type(uint64).max); // Reasonable liability range
+        availableLiquidity = uint128(bound(availableLiquidity, 1e18 + 1, type(uint128).max)); // At least 1 unit of liquidity
+        totalLiability = uint128(bound(totalLiability, 1e18 + 1, type(uint64).max - 1)); // Reasonable liability range
 
-        // Prevent overflow
-        vm.assume(uint256(availableLiquidity) * Constants.PRECISION_18 < type(uint256).max);
+        // Bound availableLiquidity to prevent overflow
+        // availableLiquidity * PRECISION_18 < type(uint256).max
+        uint256 maxLiquidity = type(uint256).max / Constants.PRECISION_18;
+        if (availableLiquidity > maxLiquidity) {
+            availableLiquidity = uint128(maxLiquidity - 1);
+        }
 
         // Calculate liquidity ratio
         uint256 liquidityRatio = (uint256(availableLiquidity) * Constants.PRECISION_18) / uint256(totalLiability);
@@ -314,8 +321,8 @@ contract TreasuryFuzzTest is Test {
         uint128 totalBalance,
         uint8 withdrawCount
     ) public pure {
-        vm.assume(totalBalance > 1000);
-        vm.assume(withdrawCount > 1 && withdrawCount <= 10);
+        totalBalance = uint128(bound(totalBalance, 1001, type(uint128).max));
+        withdrawCount = uint8(bound(withdrawCount, 2, 10));
 
         // Calculate amount per withdrawal
         uint256 amountPerWithdraw = uint256(totalBalance) / uint256(withdrawCount);

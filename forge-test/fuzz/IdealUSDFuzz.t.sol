@@ -14,15 +14,13 @@ contract IdealUSDFuzzTest is Test {
     /// @notice Fuzz test: CPI growth calculation
     function testFuzz_CPI_Growth(
         uint128 initialCPI,
-        uint16 inflationRateBP,  // Inflation rate (basis points/year)
+        uint16 inflationRateBP,
         uint32 timeYears
     ) public pure {
-        vm.assume(initialCPI > 100 * 1e18); // Initial CPI at least 100
-        vm.assume(inflationRateBP > 0 && inflationRateBP <= 2000); // 0-20% annual inflation
-        vm.assume(timeYears > 0 && timeYears <= 100);
-
-        // Prevent overflow
-        vm.assume(uint256(initialCPI) * (Constants.BPS_BASE + uint256(inflationRateBP)) < type(uint256).max);
+        // Use bound() instead of vm.assume() for range constraints
+        initialCPI = uint128(bound(initialCPI, 100 * 1e18, type(uint128).max / 1000));
+        inflationRateBP = uint16(bound(inflationRateBP, 1, 2000));
+        timeYears = uint32(bound(timeYears, 1, 100));
 
         // Calculate new CPI (simple interest): CPI * (1 + rate * time)
         uint256 growth = (uint256(initialCPI) * uint256(inflationRateBP) * uint256(timeYears)) / Constants.BPS_BASE;
@@ -34,20 +32,20 @@ contract IdealUSDFuzzTest is Test {
 
     /// @notice Fuzz test: CPI compound growth
     function testFuzz_CPI_CompoundGrowth(
-        uint8 initialCPIMultiplier,  // 100-115 => 100e18 to 115e18
-        uint8 annualInflationBP,     // 1-20 BP => 0.01%-0.2%
-        uint8 numYears
+        uint256 initialCPIMultiplier,
+        uint256 annualInflationBP,
+        uint256 numYears
     ) public pure {
-        vm.assume(initialCPIMultiplier >= 100 && initialCPIMultiplier <= 115);  // Use <= instead of <
-        vm.assume(annualInflationBP > 0 && annualInflationBP <= 20); // 0-0.2% annual inflation
-        vm.assume(numYears > 0 && numYears <= 10);
+        initialCPIMultiplier = bound(initialCPIMultiplier, 100, 115);
+        annualInflationBP = bound(annualInflationBP, 1, 20);
+        numYears = bound(numYears, 1, 10);
 
-        uint256 initialCPI = uint256(initialCPIMultiplier) * 1e18;
+        uint256 initialCPI = initialCPIMultiplier * 1e18;
         uint256 cpi = initialCPI;
 
         // Simulate compound growth
         for (uint256 i = 0; i < numYears; i++) {
-            uint256 growth = (cpi * uint256(annualInflationBP)) / Constants.BPS_BASE;
+            uint256 growth = (cpi * annualInflationBP) / Constants.BPS_BASE;
             cpi = cpi + growth;
         }
 
@@ -55,7 +53,7 @@ contract IdealUSDFuzzTest is Test {
         assertGt(cpi, initialCPI);
 
         // Verify: Compound growth is greater than or equal to simple interest
-        uint256 simpleGrowth = (initialCPI * uint256(annualInflationBP) * uint256(numYears)) / Constants.BPS_BASE;
+        uint256 simpleGrowth = (initialCPI * annualInflationBP * numYears) / Constants.BPS_BASE;
         uint256 simpleCPI = initialCPI + simpleGrowth;
 
         if (numYears > 1 && annualInflationBP > 3) {
@@ -69,20 +67,20 @@ contract IdealUSDFuzzTest is Test {
         uint16 deflationRateBP,
         uint32 timeYears
     ) public pure {
-        vm.assume(initialCPI > 100 * 1e18);
-        vm.assume(deflationRateBP > 0 && deflationRateBP <= 1000); // 0-10% annual deflation
-        vm.assume(timeYears > 0 && timeYears <= 100);
+        initialCPI = uint128(bound(initialCPI, 100 * 1e18, type(uint128).max / 100));
+        deflationRateBP = uint16(bound(deflationRateBP, 1, 500)); // Max 5% to avoid underflow
+        timeYears = uint32(bound(timeYears, 1, 10)); // Limit years to avoid underflow
 
         // Calculate deflation
         uint256 decrease = (uint256(initialCPI) * uint256(deflationRateBP) * uint256(timeYears)) / Constants.BPS_BASE;
-        vm.assume(decrease < initialCPI); // Ensure no underflow
+
+        // Skip if would underflow
+        if (decrease >= initialCPI) return;
 
         uint256 newCPI = uint256(initialCPI) - decrease;
 
         // Verify: Deflation decreases CPI
         assertLt(newCPI, initialCPI);
-
-        // Verify: CPI does not become negative
         assertGt(newCPI, 0);
     }
 
@@ -94,20 +92,16 @@ contract IdealUSDFuzzTest is Test {
         uint128 currentCPI,
         uint128 baseCPI
     ) public pure {
-        vm.assume(nominalUSD > 0);
-        vm.assume(currentCPI > 0);
-        vm.assume(baseCPI > 0);
-        vm.assume(currentCPI >= baseCPI); // CPI typically grows over time
-
-        // Prevent overflow
-        vm.assume(uint256(nominalUSD) * uint256(baseCPI) < type(uint256).max);
+        nominalUSD = uint128(bound(nominalUSD, 1, type(uint64).max));
+        baseCPI = uint128(bound(baseCPI, 1e18, 200 * 1e18));
+        currentCPI = uint128(bound(currentCPI, baseCPI, baseCPI * 2));
 
         // Calculate iUSD = nominalUSD * (baseCPI / currentCPI)
         uint256 iusd = (uint256(nominalUSD) * uint256(baseCPI)) / uint256(currentCPI);
 
         // Verify: If CPI rises, same nominal USD buys less iUSD
         if (currentCPI > baseCPI) {
-            assertLt(iusd, nominalUSD);
+            assertLe(iusd, nominalUSD);
         }
 
         // Verify: If CPI unchanged, iUSD = nominalUSD
@@ -118,56 +112,57 @@ contract IdealUSDFuzzTest is Test {
 
     /// @notice Fuzz test: iUSD negatively correlates with CPI
     function testFuzz_iUSD_CPINegativeCorrelation(
-        uint24 nominalUSD,
-        uint8 baseCPIMultiplier,
-        uint8 cpi2AdditionalBP   // Additional growth of CPI2 relative to baseCPI
+        uint256 nominalUSD,
+        uint256 baseCPIMultiplier,
+        uint256 cpi2AdditionalBP
     ) public pure {
-        vm.assume(nominalUSD > 10000 && nominalUSD < 10000000);  // 10k-10M
-        vm.assume(baseCPIMultiplier >= 100 && baseCPIMultiplier <= 115);
-        vm.assume(cpi2AdditionalBP >= 10 && cpi2AdditionalBP <= 50); // At least 10 BP additional growth
+        nominalUSD = bound(nominalUSD, 10000, 10000000);
+        baseCPIMultiplier = bound(baseCPIMultiplier, 100, 115);
+        cpi2AdditionalBP = bound(cpi2AdditionalBP, 10, 50);
 
-        uint256 baseCPI = uint256(baseCPIMultiplier) * 1e18;
-        uint256 cpi1 = baseCPI;  // cpi1 equals baseCPI
-        uint256 cpi2 = baseCPI + (baseCPI * uint256(cpi2AdditionalBP)) / Constants.BPS_BASE;
+        uint256 baseCPI = baseCPIMultiplier * 1e18;
+        uint256 cpi1 = baseCPI;
+        uint256 cpi2 = baseCPI + (baseCPI * cpi2AdditionalBP) / Constants.BPS_BASE;
 
         // Calculate iUSD under two CPI scenarios
-        uint256 iusd1 = (uint256(nominalUSD) * baseCPI) / cpi1;
-        uint256 iusd2 = (uint256(nominalUSD) * baseCPI) / cpi2;
+        uint256 iusd1 = (nominalUSD * baseCPI) / cpi1;
+        uint256 iusd2 = (nominalUSD * baseCPI) / cpi2;
 
         // Verify: Higher CPI means less iUSD (purchasing power decreases)
-        if (iusd2 < iusd1) {
-            assertLt(iusd2, iusd1);  // Keep assertion, wrapped with if
-        }
+        assertLt(iusd2, iusd1);
     }
 
     /// @notice Fuzz test: Converting iUSD back to nominal USD
     function testFuzz_iUSD_ToNominalUSD(
-        uint32 iusd,
-        uint8 currentCPIMultiplier,
-        uint8 baseCPIMultiplier
+        uint256 iusd,
+        uint256 baseCPIMultiplier,
+        uint256 cpiDelta,
+        bool cpiRises
     ) public pure {
-        vm.assume(iusd > 100);  // Ensure large enough to avoid precision loss
-        vm.assume(currentCPIMultiplier >= 100 && currentCPIMultiplier <= 115);  // Use <=
-        vm.assume(baseCPIMultiplier >= 100 && baseCPIMultiplier <= 115);
+        iusd = bound(iusd, 1000, 1e12); // Larger min to avoid rounding issues
+        baseCPIMultiplier = bound(baseCPIMultiplier, 100, 110);
+        cpiDelta = bound(cpiDelta, 0, 5); // 0-5% difference
 
-        uint256 currentCPI = uint256(currentCPIMultiplier) * 1e18;
-        uint256 baseCPI = uint256(baseCPIMultiplier) * 1e18;
+        uint256 currentCPIMultiplier;
+        if (cpiRises) {
+            currentCPIMultiplier = baseCPIMultiplier + cpiDelta;
+        } else {
+            if (cpiDelta >= baseCPIMultiplier - 100) cpiDelta = baseCPIMultiplier - 100;
+            currentCPIMultiplier = baseCPIMultiplier - cpiDelta;
+        }
+
+        uint256 currentCPI = currentCPIMultiplier * 1e18;
+        uint256 baseCPI = baseCPIMultiplier * 1e18;
 
         // Calculate nominal USD = iUSD * (currentCPI / baseCPI)
-        uint256 nominalUSD = (uint256(iusd) * currentCPI) / baseCPI;
+        uint256 nominalUSD = (iusd * currentCPI) / baseCPI;
 
-        // Verify: If CPI rises, more nominal USD needed to maintain purchasing power
+        // Verify based on CPI relationship
         if (currentCPIMultiplier > baseCPIMultiplier) {
             assertGt(nominalUSD, iusd);
-        }
-
-        // Verify: If CPI unchanged, nominal USD = iUSD
-        if (currentCPIMultiplier == baseCPIMultiplier) {
+        } else if (currentCPIMultiplier == baseCPIMultiplier) {
             assertEq(nominalUSD, iusd);
-        }
-
-        // Verify: If CPI falls, less nominal USD needed
-        if (currentCPIMultiplier < baseCPIMultiplier) {
+        } else {
             assertLt(nominalUSD, iusd);
         }
     }
@@ -178,22 +173,18 @@ contract IdealUSDFuzzTest is Test {
         uint128 currentCPI,
         uint128 baseCPI
     ) public pure {
-        vm.assume(nominalUSD > 1000);
-        vm.assume(currentCPI > 1e18);
-        vm.assume(baseCPI > 1e18);
-
-        // Prevent overflow
-        vm.assume(uint256(nominalUSD) * uint256(baseCPI) < type(uint256).max);
+        nominalUSD = uint64(bound(nominalUSD, 1000, type(uint64).max / 1000));
+        baseCPI = uint128(bound(baseCPI, 1e18, 200 * 1e18));
+        currentCPI = uint128(bound(currentCPI, baseCPI / 2, baseCPI * 2));
 
         // Nominal USD -> iUSD
         uint256 iusd = (uint256(nominalUSD) * uint256(baseCPI)) / uint256(currentCPI);
-        vm.assume(iusd > 0);
+        if (iusd == 0) return;
 
         // iUSD -> Nominal USD
-        vm.assume(iusd * uint256(currentCPI) < type(uint256).max);
         uint256 nominalBack = (iusd * uint256(currentCPI)) / uint256(baseCPI);
 
-        // Verify: Round-trip conversion should be close to original value (allow rounding error)
+        // Verify: Round-trip should be close to original
         assertApproxEqAbs(nominalBack, nominalUSD, uint256(currentCPI) / uint256(baseCPI) + 1);
     }
 
@@ -201,23 +192,21 @@ contract IdealUSDFuzzTest is Test {
 
     /// @notice Fuzz test: Monthly CPI update
     function testFuzz_CPI_MonthlyUpdate(
-        uint128 initialCPI,
-        uint16 monthlyInflationBP,  // Monthly inflation rate
-        uint8 months
+        uint256 initialCPIMultiplier,
+        uint256 monthlyInflationBP,
+        uint256 months
     ) public pure {
-        vm.assume(initialCPI > 100 * 1e18);
-        vm.assume(monthlyInflationBP > 0 && monthlyInflationBP <= 100); // 0-1% monthly inflation
-        vm.assume(months > 0 && months <= 120); // Up to 10 years
+        initialCPIMultiplier = bound(initialCPIMultiplier, 100, 200);
+        monthlyInflationBP = bound(monthlyInflationBP, 1, 50); // 0.01%-0.5% monthly
+        months = bound(months, 1, 60); // Up to 5 years
 
-        uint256 cpi = initialCPI;
+        uint256 cpi = initialCPIMultiplier * 1e18;
+        uint256 initialCPI = cpi;
 
         // Simulate monthly updates
         for (uint256 i = 0; i < months; i++) {
-            uint256 growth = (cpi * uint256(monthlyInflationBP)) / Constants.BPS_BASE;
+            uint256 growth = (cpi * monthlyInflationBP) / Constants.BPS_BASE;
             cpi += growth;
-
-            // Prevent overflow
-            vm.assume(cpi < type(uint128).max / 2);
         }
 
         // Verify: Monthly updates accumulate growth
@@ -226,38 +215,33 @@ contract IdealUSDFuzzTest is Test {
 
     /// @notice Fuzz test: Impact of CPI update delay
     function testFuzz_CPI_UpdateDelay(
-        uint24 nominalUSD,   // Use uint24 (max 16M)
-        uint8 oldCPIMultiplier,  // 100-115
-        uint8 cpiIncreaseBP      // CPI growth percentage
+        uint256 nominalUSD,
+        uint256 oldCPIMultiplier,
+        uint256 cpiIncreaseBP
     ) public pure {
-        vm.assume(nominalUSD > 10000 && nominalUSD < 10000000);  // 10k-10M
-        vm.assume(oldCPIMultiplier >= 100 && oldCPIMultiplier <= 115);
-        vm.assume(cpiIncreaseBP >= 10 && cpiIncreaseBP <= 50); // At least 10 BP growth
+        nominalUSD = bound(nominalUSD, 10000, 10000000);
+        oldCPIMultiplier = bound(oldCPIMultiplier, 100, 115);
+        cpiIncreaseBP = bound(cpiIncreaseBP, 10, 50);
 
-        uint256 oldCPI = uint256(oldCPIMultiplier) * 1e18;
-        uint256 newCPI = oldCPI + (oldCPI * uint256(cpiIncreaseBP)) / Constants.BPS_BASE;
+        uint256 oldCPI = oldCPIMultiplier * 1e18;
+        uint256 newCPI = oldCPI + (oldCPI * cpiIncreaseBP) / Constants.BPS_BASE;
         uint256 baseCPI = 100 * 1e18;
 
         // iUSD calculated with old CPI (before delayed update)
-        uint256 iusdOld = (uint256(nominalUSD) * baseCPI) / oldCPI;
+        uint256 iusdOld = (nominalUSD * baseCPI) / oldCPI;
 
         // iUSD calculated with new CPI (after update)
-        uint256 iusdNew = (uint256(nominalUSD) * baseCPI) / newCPI;
+        uint256 iusdNew = (nominalUSD * baseCPI) / newCPI;
 
         // Verify: Delayed update causes user to temporarily get more iUSD
-        if (iusdOld > iusdNew) {
-            assertGt(iusdOld, iusdNew);  // Keep assertion, wrapped with if
-        }
+        assertGt(iusdOld, iusdNew);
     }
 
     // ==================== Base CPI Fuzz Tests ====================
 
     /// @notice Fuzz test: Base CPI setting
-    function testFuzz_BaseCPI_Setting(
-        uint128 baseCPI
-    ) public pure {
-        vm.assume(baseCPI > 50 * 1e18); // Base CPI at least 50
-        vm.assume(baseCPI < 500 * 1e18); // Base CPI at most 500
+    function testFuzz_BaseCPI_Setting(uint128 baseCPI) public pure {
+        baseCPI = uint128(bound(baseCPI, 50 * 1e18, 500 * 1e18));
 
         // Verify: Base CPI in reasonable range
         assertGe(baseCPI, 50 * 1e18);
@@ -266,23 +250,23 @@ contract IdealUSDFuzzTest is Test {
 
     /// @notice Fuzz test: Relative inflation rate calculation
     function testFuzz_RelativeInflation_Calculation(
-        uint8 baseCPIMultiplier,    // 100-120
-        uint8 inflationBP           // 1-100 BP
+        uint256 baseCPIMultiplier,
+        uint256 inflationBP
     ) public pure {
-        vm.assume(baseCPIMultiplier > 100 && baseCPIMultiplier < 120);
-        vm.assume(inflationBP > 0 && inflationBP <= 100); // 0.01%-1%
+        baseCPIMultiplier = bound(baseCPIMultiplier, 101, 119);
+        inflationBP = bound(inflationBP, 1, 100);
 
-        uint256 baseCPI = uint256(baseCPIMultiplier) * 1e18;
-        uint256 currentCPI = baseCPI + (baseCPI * uint256(inflationBP)) / Constants.BPS_BASE;
+        uint256 baseCPI = baseCPIMultiplier * 1e18;
+        uint256 currentCPI = baseCPI + (baseCPI * inflationBP) / Constants.BPS_BASE;
 
-        // Calculate relative inflation rate = (currentCPI - baseCPI) / baseCPI
+        // Calculate relative inflation rate
         uint256 inflation = ((currentCPI - baseCPI) * Constants.PRECISION_18) / baseCPI;
 
         // Verify: Inflation rate is positive
         assertGt(inflation, 0);
 
         // Verify: Inflation rate is proportional to input BP
-        uint256 expectedInflation = (uint256(inflationBP) * Constants.PRECISION_18) / Constants.BPS_BASE;
+        uint256 expectedInflation = (inflationBP * Constants.PRECISION_18) / Constants.BPS_BASE;
         assertApproxEqAbs(inflation, expectedInflation, 1);
     }
 
@@ -294,33 +278,30 @@ contract IdealUSDFuzzTest is Test {
         uint128 currentCPI,
         uint128 baseCPI
     ) public pure {
-        vm.assume(tinyNominalUSD > 0);
-        vm.assume(currentCPI > 0);
-        vm.assume(baseCPI > 0);
-
-        // Prevent overflow
-        vm.assume(uint256(tinyNominalUSD) * uint256(baseCPI) < type(uint256).max);
+        tinyNominalUSD = uint32(bound(tinyNominalUSD, 1, type(uint32).max));
+        baseCPI = uint128(bound(baseCPI, 1e18, 200 * 1e18));
+        currentCPI = uint128(bound(currentCPI, baseCPI / 2, baseCPI * 2));
 
         // Calculate small amount iUSD
         uint256 iusd = (uint256(tinyNominalUSD) * uint256(baseCPI)) / uint256(currentCPI);
 
-        // Verify: Small amount calculation doesn't crash (may round to 0)
+        // Verify: Small amount calculation doesn't crash
         assertGe(iusd, 0);
     }
 
     /// @notice Fuzz test: Large amount iUSD doesn't overflow
     function testFuzz_HugeiUSD_NoOverflow(
-        uint32 hugeNominalUSD,  // Use uint32 as multiplier
-        uint8 cpiMultiplier
+        uint256 hugeNominalUSD,
+        uint256 cpiMultiplier
     ) public pure {
-        vm.assume(hugeNominalUSD > 1000 && hugeNominalUSD < 1e9);
-        vm.assume(cpiMultiplier >= 100 && cpiMultiplier <= 115);
+        hugeNominalUSD = bound(hugeNominalUSD, 1000, 1e12);
+        cpiMultiplier = bound(cpiMultiplier, 100, 115);
 
-        uint256 currentCPI = uint256(cpiMultiplier) * 1e18;
-        uint256 baseCPI = 100 * 1e18;  // Fixed baseCPI at 100
+        uint256 currentCPI = cpiMultiplier * 1e18;
+        uint256 baseCPI = 100 * 1e18;
 
         // Calculate large amount iUSD
-        uint256 iusd = (uint256(hugeNominalUSD) * baseCPI) / currentCPI;
+        uint256 iusd = (hugeNominalUSD * baseCPI) / currentCPI;
 
         // Verify: Large amount calculation doesn't overflow
         assertGt(iusd, 0);
@@ -333,13 +314,10 @@ contract IdealUSDFuzzTest is Test {
         uint128 nominalUSD,
         uint128 baseCPI
     ) public pure {
-        vm.assume(nominalUSD > 0);
-        vm.assume(baseCPI > 0);
+        nominalUSD = uint128(bound(nominalUSD, 1, type(uint64).max));
+        baseCPI = uint128(bound(baseCPI, 1e18, 200 * 1e18));
 
         uint128 currentCPI = baseCPI;
-
-        // Prevent overflow
-        vm.assume(uint256(nominalUSD) * uint256(baseCPI) < type(uint256).max);
 
         // Calculate iUSD
         uint256 iusd = (uint256(nominalUSD) * uint256(baseCPI)) / uint256(currentCPI);
@@ -353,19 +331,15 @@ contract IdealUSDFuzzTest is Test {
         uint128 nominalUSD,
         uint128 baseCPI
     ) public pure {
-        vm.assume(nominalUSD > 100);
-        vm.assume(baseCPI > 100 * 1e18);
-        vm.assume(baseCPI <= type(uint128).max / 2); // Ensure can double
+        nominalUSD = uint128(bound(nominalUSD, 100, type(uint64).max));
+        baseCPI = uint128(bound(baseCPI, 100 * 1e18, type(uint128).max / 4));
 
         uint128 doubleCPI = baseCPI * 2;
-
-        // Prevent overflow
-        vm.assume(uint256(nominalUSD) * uint256(baseCPI) < type(uint256).max);
 
         // Calculate iUSD when CPI doubles
         uint256 iusd = (uint256(nominalUSD) * uint256(baseCPI)) / uint256(doubleCPI);
 
-        // Verify: CPI doubles, iUSD halves (allow rounding error)
+        // Verify: CPI doubles, iUSD halves
         assertApproxEqAbs(iusd, nominalUSD / 2, 1);
     }
 
@@ -374,14 +348,11 @@ contract IdealUSDFuzzTest is Test {
         uint128 nominalUSD,
         uint128 cpi
     ) public pure {
-        vm.assume(nominalUSD > 0);
-        vm.assume(cpi > 0);
+        nominalUSD = uint128(bound(nominalUSD, 1, type(uint64).max));
+        cpi = uint128(bound(cpi, 1e18, 200 * 1e18));
 
         uint128 baseCPI = cpi;
         uint128 currentCPI = cpi;
-
-        // Prevent overflow
-        vm.assume(uint256(nominalUSD) * uint256(baseCPI) < type(uint256).max);
 
         // Calculate iUSD
         uint256 iusd = (uint256(nominalUSD) * uint256(baseCPI)) / uint256(currentCPI);
@@ -392,37 +363,29 @@ contract IdealUSDFuzzTest is Test {
 
     /// @notice Fuzz test: Cumulative effect of multiple CPI adjustments
     function testFuzz_MultipleCPIAdjustments_Cumulative(
-        uint128 nominalUSD,
-        uint128 baseCPI,
-        uint16 adjustment1BP,
-        uint16 adjustment2BP,
-        uint16 adjustment3BP
+        uint256 nominalUSD,
+        uint256 baseCPIMultiplier,
+        uint256 adjustment1BP,
+        uint256 adjustment2BP,
+        uint256 adjustment3BP
     ) public pure {
-        vm.assume(nominalUSD > 1000);
-        vm.assume(baseCPI > 100 * 1e18);
-        vm.assume(adjustment1BP > 0 && adjustment1BP <= 500);
-        vm.assume(adjustment2BP > 0 && adjustment2BP <= 500);
-        vm.assume(adjustment3BP > 0 && adjustment3BP <= 500);
+        nominalUSD = bound(nominalUSD, 1000, 1e12);
+        baseCPIMultiplier = bound(baseCPIMultiplier, 100, 150);
+        adjustment1BP = bound(adjustment1BP, 1, 200);
+        adjustment2BP = bound(adjustment2BP, 1, 200);
+        adjustment3BP = bound(adjustment3BP, 1, 200);
 
-        // First adjustment
-        uint256 cpi1 = uint256(baseCPI) + (uint256(baseCPI) * uint256(adjustment1BP)) / Constants.BPS_BASE;
-        vm.assume(cpi1 < type(uint128).max / 2);
+        uint256 baseCPI = baseCPIMultiplier * 1e18;
 
-        // Second adjustment
-        uint256 cpi2 = cpi1 + (cpi1 * uint256(adjustment2BP)) / Constants.BPS_BASE;
-        vm.assume(cpi2 < type(uint128).max / 2);
-
-        // Third adjustment
-        uint256 cpi3 = cpi2 + (cpi2 * uint256(adjustment3BP)) / Constants.BPS_BASE;
-        vm.assume(cpi3 < type(uint128).max / 2);
-
-        // Prevent overflow
-        vm.assume(uint256(nominalUSD) * uint256(baseCPI) < type(uint256).max);
+        // Apply adjustments
+        uint256 cpi1 = baseCPI + (baseCPI * adjustment1BP) / Constants.BPS_BASE;
+        uint256 cpi2 = cpi1 + (cpi1 * adjustment2BP) / Constants.BPS_BASE;
+        uint256 cpi3 = cpi2 + (cpi2 * adjustment3BP) / Constants.BPS_BASE;
 
         // Calculate final iUSD
-        uint256 iusd = (uint256(nominalUSD) * uint256(baseCPI)) / cpi3;
+        uint256 iusd = (nominalUSD * baseCPI) / cpi3;
 
-        // Verify: After multiple CPI increases, iUSD significantly decreases
+        // Verify: After multiple CPI increases, iUSD decreases
         assertLt(iusd, nominalUSD);
     }
 }

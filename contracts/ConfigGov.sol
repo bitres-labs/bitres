@@ -20,9 +20,10 @@ contract ConfigGov is Ownable {
         MINT_FEE_BP,        // 0 - Minting fee rate (basis points)
         INTEREST_FEE_BP,    // 1 - Interest fee rate (basis points)
         MIN_BTB_PRICE,      // 2 - BTB minimum price (18 decimals)
-        MAX_BTB_RATE,       // 3 - BTB maximum interest rate (18 decimals)
+        MAX_BTB_RATE,       // 3 - BTB maximum interest rate (basis points)
         PCE_MAX_DEVIATION,  // 4 - PCE maximum deviation rate (18 decimals, e.g., 2e16 = 2%)
-        REDEEM_FEE_BP       // 5 - Redemption fee rate (basis points)
+        REDEEM_FEE_BP,      // 5 - Redemption fee rate (basis points)
+        MAX_BTD_RATE        // 6 - BTD maximum interest rate (basis points)
         // Future extensions: LIQUIDATION_FEE, STABILITY_FEE, etc.
     }
 
@@ -99,8 +100,11 @@ contract ConfigGov is Ownable {
             require(value >= 1e17, "ConfigGov: min BTB price too low"); // Minimum 0.1 BTD
             require(value <= 2e18, "ConfigGov: min BTB price too high"); // Maximum 2 BTD
         } else if (paramType == ParamType.MAX_BTB_RATE) {
-            require(value >= 1e16, "ConfigGov: max BTB rate too low"); // Minimum 1% APR
-            require(value <= 2e17, "ConfigGov: max BTB rate too high"); // Maximum 20% APR
+            require(value >= 100, "ConfigGov: max BTB rate too low"); // Minimum 1% APR (100 bps)
+            require(value <= 2000, "ConfigGov: max BTB rate too high"); // Maximum 20% APR (2000 bps)
+        } else if (paramType == ParamType.MAX_BTD_RATE) {
+            require(value >= 100, "ConfigGov: max BTD rate too low"); // Minimum 1% APR (100 bps)
+            require(value <= 2000, "ConfigGov: max BTD rate too high"); // Maximum 20% APR (2000 bps)
         } else if (paramType == ParamType.PCE_MAX_DEVIATION) {
             require(value >= 1e15, "ConfigGov: PCE deviation too low"); // Minimum 0.1%
             require(value <= 1e17, "ConfigGov: PCE deviation too high"); // Maximum 10%
@@ -157,6 +161,15 @@ contract ConfigGov is Ownable {
 
     function maxBTBRate() external view returns (uint256) {
         return _params[ParamType.MAX_BTB_RATE];
+    }
+
+    /**
+     * @notice Gets BTD maximum interest rate
+     * @dev Used to cap BTD deposit rate per whitepaper
+     * @return BTD maximum interest rate (basis points, e.g., 2000 = 20%)
+     */
+    function maxBTDRate() external view returns (uint256) {
+        return _params[ParamType.MAX_BTD_RATE];
     }
 
     /**

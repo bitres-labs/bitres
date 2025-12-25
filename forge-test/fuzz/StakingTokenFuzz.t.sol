@@ -17,15 +17,11 @@ contract StakingTokenFuzzTest is Test {
         uint128 totalAssets,
         uint128 totalShares
     ) public pure {
-        vm.assume(assets > 0);
-        vm.assume(totalAssets >= assets);
-        vm.assume(totalShares > 0);
-        vm.assume(totalAssets > 0);
+        assets = uint128(bound(assets, 1, type(uint128).max));
+        totalAssets = uint128(bound(totalAssets, assets, type(uint128).max));
+        totalShares = uint128(bound(totalShares, 1, type(uint128).max));
 
-        // Prevent overflow
-        vm.assume(uint256(assets) * uint256(totalShares) < type(uint256).max);
-
-        // Calculate shares = (assets * totalShares) / totalAssets
+        // Calculate shares = (assets * totalShares) / totalAssets (uint128 * uint128 fits in uint256)
         uint256 shares = (uint256(assets) * uint256(totalShares)) / uint256(totalAssets);
 
         // Verify: Shares do not exceed total shares ratio
@@ -43,15 +39,11 @@ contract StakingTokenFuzzTest is Test {
         uint128 totalShares,
         uint128 totalAssets
     ) public pure {
-        vm.assume(shares > 0);
-        vm.assume(totalShares >= shares);
-        vm.assume(totalAssets > 0);
-        vm.assume(totalShares > 0);
+        shares = uint128(bound(shares, 1, type(uint128).max));
+        totalShares = uint128(bound(totalShares, shares, type(uint128).max));
+        totalAssets = uint128(bound(totalAssets, 1, type(uint128).max));
 
-        // Prevent overflow
-        vm.assume(uint256(shares) * uint256(totalAssets) < type(uint256).max);
-
-        // Calculate assets = (shares * totalAssets) / totalShares
+        // Calculate assets = (shares * totalAssets) / totalShares (uint128 * uint128 fits in uint256)
         uint256 assets = (uint256(shares) * uint256(totalAssets)) / uint256(totalShares);
 
         // Verify: Assets do not exceed total assets ratio
@@ -69,20 +61,17 @@ contract StakingTokenFuzzTest is Test {
         uint128 totalAssets,
         uint128 totalShares
     ) public pure {
-        vm.assume(assets > 1000);
-        vm.assume(totalAssets >= assets);
-        vm.assume(totalShares > 1000);
-        vm.assume(totalAssets > 1000);
+        assets = uint64(bound(assets, 1001, type(uint64).max));
+        totalAssets = uint128(bound(totalAssets, assets, type(uint128).max));
+        totalShares = uint128(bound(totalShares, 1001, type(uint128).max));
 
-        // Prevent overflow
-        vm.assume(uint256(assets) * uint256(totalShares) < type(uint256).max);
-
-        // Assets -> Shares
+        // Assets -> Shares (uint64 * uint128 fits in uint256)
         uint256 shares = (uint256(assets) * uint256(totalShares)) / uint256(totalAssets);
-        vm.assume(shares > 0);
+
+        // If shares is 0, skip (rounding loss)
+        if (shares == 0) return;
 
         // Shares -> Assets
-        vm.assume(shares * uint256(totalAssets) < type(uint256).max);
         uint256 assetsBack = (shares * uint256(totalAssets)) / uint256(totalShares);
 
         // Verify: Round trip conversion should be close to original (allow rounding error)
@@ -95,17 +84,12 @@ contract StakingTokenFuzzTest is Test {
         uint128 shares,
         uint128 rewardAdded
     ) public pure {
-        vm.assume(initialAssets > 1e18); // At least 1 asset unit
-        vm.assume(shares > 1e18); // At least 1 share unit
-        vm.assume(shares < type(uint64).max); // Limit shares to avoid overflow
-        vm.assume(rewardAdded > 0 && rewardAdded < initialAssets); // Reward does not exceed initial assets
+        initialAssets = uint128(bound(initialAssets, 1e18 + 1, type(uint128).max / 2)); // At least 1 asset unit
+        shares = uint128(bound(shares, 1e18 + 1, type(uint64).max - 1)); // At least 1 share unit, limit to avoid overflow
+        rewardAdded = uint128(bound(rewardAdded, 1, initialAssets - 1)); // Reward does not exceed initial assets
 
         uint256 totalAssetsBefore = initialAssets;
         uint256 totalAssetsAfter = uint256(initialAssets) + uint256(rewardAdded);
-
-        // Prevent multiplication overflow (cast to uint256 first then multiply)
-        vm.assume(uint256(shares) * totalAssetsBefore < type(uint256).max / Constants.PRECISION_18);
-        vm.assume(uint256(shares) * totalAssetsAfter < type(uint256).max / Constants.PRECISION_18);
 
         // Calculate share value before and after reward
         uint256 valuePerShareBefore = (totalAssetsBefore * Constants.PRECISION_18) / uint256(shares);
@@ -121,7 +105,7 @@ contract StakingTokenFuzzTest is Test {
     function testFuzz_FirstDeposit_OneToOne(
         uint128 assets
     ) public pure {
-        vm.assume(assets > 0);
+        assets = uint128(bound(assets, 1, type(uint128).max));
 
         // First deposit: totalAssets = 0, totalShares = 0
         // Should be 1:1 conversion
@@ -138,15 +122,13 @@ contract StakingTokenFuzzTest is Test {
         uint128 totalAssets,
         uint128 totalShares
     ) public pure {
-        vm.assume(deposit1 > 100 && deposit2 > 100);
-        vm.assume(totalAssets > 1000);
-        vm.assume(totalShares > 1000);
-        vm.assume(totalAssets >= uint256(deposit1) + uint256(deposit2));
+        deposit1 = uint64(bound(deposit1, 101, type(uint64).max / 2));
+        deposit2 = uint64(bound(deposit2, 101, type(uint64).max / 2));
+        uint256 totalDeposit = uint256(deposit1) + uint256(deposit2);
+        totalAssets = uint128(bound(totalAssets, totalDeposit, type(uint128).max));
+        totalShares = uint128(bound(totalShares, 1001, type(uint128).max));
 
-        vm.assume(uint256(deposit1) * uint256(totalShares) < type(uint256).max);
-        vm.assume(uint256(deposit2) * uint256(totalShares) < type(uint256).max);
-
-        // Shares from first deposit
+        // Shares from first deposit (uint64 * uint128 fits in uint256)
         uint256 shares1 = (uint256(deposit1) * uint256(totalShares)) / uint256(totalAssets);
 
         // Shares from second deposit
@@ -156,7 +138,6 @@ contract StakingTokenFuzzTest is Test {
         uint256 totalSharesReceived = shares1 + shares2;
 
         // Verify: Total shares should correspond to total deposit
-        uint256 totalDeposit = uint256(deposit1) + uint256(deposit2);
         uint256 expectedShares = (totalDeposit * uint256(totalShares)) / uint256(totalAssets);
 
         assertApproxEqAbs(totalSharesReceived, expectedShares, 2);
@@ -169,14 +150,12 @@ contract StakingTokenFuzzTest is Test {
         uint128 totalAssets,
         uint128 withdrawShares
     ) public pure {
-        vm.assume(userShares > 0);
-        vm.assume(totalShares >= userShares);
-        vm.assume(totalAssets > 0);
-        vm.assume(withdrawShares <= userShares);
+        userShares = uint128(bound(userShares, 1, type(uint128).max));
+        totalShares = uint128(bound(totalShares, userShares, type(uint128).max));
+        totalAssets = uint128(bound(totalAssets, 1, type(uint128).max));
+        withdrawShares = uint128(bound(withdrawShares, 0, userShares));
 
-        vm.assume(uint256(withdrawShares) * uint256(totalAssets) < type(uint256).max);
-
-        // Calculate withdrawable assets
+        // Calculate withdrawable assets (uint128 * uint128 fits in uint256)
         uint256 withdrawAssets = (uint256(withdrawShares) * uint256(totalAssets)) / uint256(totalShares);
 
         // Calculate user total assets
@@ -194,13 +173,11 @@ contract StakingTokenFuzzTest is Test {
         uint128 totalShares,
         uint128 totalReward
     ) public pure {
-        vm.assume(userShares > 0);
-        vm.assume(totalShares >= userShares);
-        vm.assume(totalReward > 0);
+        userShares = uint64(bound(userShares, 1, type(uint64).max));
+        totalShares = uint128(bound(totalShares, userShares, type(uint128).max));
+        totalReward = uint128(bound(totalReward, 1, type(uint128).max));
 
-        vm.assume(uint256(userShares) * uint256(totalReward) < type(uint256).max);
-
-        // Calculate user reward = (userShares / totalShares) * totalReward
+        // Calculate user reward = (userShares / totalShares) * totalReward (uint64 * uint128 fits in uint256)
         uint256 userReward = (uint256(userShares) * uint256(totalReward)) / uint256(totalShares);
 
         // Verify: User reward does not exceed total reward
@@ -219,17 +196,14 @@ contract StakingTokenFuzzTest is Test {
         uint64 shares3,
         uint128 totalReward
     ) public pure {
-        vm.assume(shares1 > 0 && shares2 > 0 && shares3 > 0);
-        vm.assume(totalReward > 1000);
+        shares1 = uint64(bound(shares1, 1, type(uint64).max / 3));
+        shares2 = uint64(bound(shares2, 1, type(uint64).max / 3));
+        shares3 = uint64(bound(shares3, 1, type(uint64).max / 3));
+        totalReward = uint128(bound(totalReward, 1001, type(uint128).max));
 
         uint256 totalShares = uint256(shares1) + uint256(shares2) + uint256(shares3);
-        vm.assume(totalShares < type(uint128).max);
 
-        vm.assume(uint256(shares1) * uint256(totalReward) < type(uint256).max);
-        vm.assume(uint256(shares2) * uint256(totalReward) < type(uint256).max);
-        vm.assume(uint256(shares3) * uint256(totalReward) < type(uint256).max);
-
-        // Calculate each user's reward
+        // Calculate each user's reward (uint64 * uint128 fits in uint256)
         uint256 reward1 = (uint256(shares1) * uint256(totalReward)) / totalShares;
         uint256 reward2 = (uint256(shares2) * uint256(totalReward)) / totalShares;
         uint256 reward3 = (uint256(shares3) * uint256(totalReward)) / totalShares;
@@ -247,10 +221,10 @@ contract StakingTokenFuzzTest is Test {
         uint16 rewardRateBP,  // Reward rate per period (basis points)
         uint8 compounds      // Number of compound periods
     ) public pure {
-        vm.assume(initialShares > 1000);
-        vm.assume(initialAssets >= initialShares);
-        vm.assume(rewardRateBP > 0 && rewardRateBP <= 1000); // Max 10% per period
-        vm.assume(compounds > 0 && compounds <= 10);
+        initialShares = uint128(bound(initialShares, 1001, type(uint64).max));
+        initialAssets = uint128(bound(initialAssets, initialShares, type(uint64).max)); // Limit to prevent overflow in loop
+        rewardRateBP = uint16(bound(rewardRateBP, 1, 1000)); // Max 10% per period
+        compounds = uint8(bound(compounds, 1, 10));
 
         uint256 totalAssets = initialAssets;
 
@@ -259,8 +233,8 @@ contract StakingTokenFuzzTest is Test {
             uint256 reward = (totalAssets * uint256(rewardRateBP)) / Constants.BPS_BASE;
             totalAssets += reward;
 
-            // Prevent overflow
-            vm.assume(totalAssets < type(uint128).max / 2);
+            // Safety check for overflow
+            if (totalAssets >= type(uint128).max / 2) break;
         }
 
         // Calculate final value per share
@@ -279,13 +253,11 @@ contract StakingTokenFuzzTest is Test {
         uint128 totalShares,
         uint128 totalAssets
     ) public pure {
-        vm.assume(tinyShares > 0);
-        vm.assume(totalShares > uint256(tinyShares) * 1000); // Total shares much larger than tiny shares
-        vm.assume(totalAssets > 1e18); // Total assets large enough
+        tinyShares = uint32(bound(tinyShares, 1, type(uint32).max / 1000));
+        totalShares = uint128(bound(totalShares, uint256(tinyShares) * 1000 + 1, type(uint128).max)); // Total shares much larger than tiny shares
+        totalAssets = uint128(bound(totalAssets, 1e18 + 1, type(uint128).max)); // Total assets large enough
 
-        vm.assume(uint256(tinyShares) * uint256(totalAssets) < type(uint256).max);
-
-        // Calculate assets corresponding to tiny shares
+        // Calculate assets corresponding to tiny shares (uint32 * uint128 fits in uint256)
         uint256 assets = (uint256(tinyShares) * uint256(totalAssets)) / uint256(totalShares);
 
         // Verify: Even very small shares should have corresponding assets (may be 0 due to rounding which is normal)
@@ -299,14 +271,11 @@ contract StakingTokenFuzzTest is Test {
         uint128 totalShares,
         uint128 totalAssets
     ) public pure {
-        vm.assume(hugeShares > 1e24); // At least 1 million tokens
-        vm.assume(totalShares >= hugeShares);
-        vm.assume(totalAssets > 1e18);
+        hugeShares = uint128(bound(hugeShares, 1e24 + 1, type(uint128).max)); // At least 1 million tokens
+        totalShares = uint128(bound(totalShares, hugeShares, type(uint128).max));
+        totalAssets = uint128(bound(totalAssets, 1e18 + 1, type(uint128).max));
 
-        // Prevent overflow
-        vm.assume(uint256(hugeShares) <= type(uint256).max / uint256(totalAssets));
-
-        // Calculate assets corresponding to huge shares
+        // Calculate assets corresponding to huge shares (uint128 * uint128 fits in uint256)
         uint256 assets = (uint256(hugeShares) * uint256(totalAssets)) / uint256(totalShares);
 
         // Verify: Large calculation does not overflow
@@ -322,24 +291,20 @@ contract StakingTokenFuzzTest is Test {
         uint128 totalAssets,
         uint64 newDeposit
     ) public pure {
-        vm.assume(otherUserShares > 1000);
-        vm.assume(totalShares >= otherUserShares);
-        vm.assume(totalAssets > 1000);
-        vm.assume(newDeposit > 100);
+        otherUserShares = uint128(bound(otherUserShares, 1001, type(uint64).max));
+        totalShares = uint128(bound(totalShares, otherUserShares, type(uint64).max));
+        totalAssets = uint128(bound(totalAssets, 1001, type(uint64).max)); // Limit to prevent overflow with PRECISION_18
+        newDeposit = uint64(bound(newDeposit, 101, type(uint64).max / 2));
 
         // Other user's value per share before new deposit
-        vm.assume(uint256(totalAssets) * Constants.PRECISION_18 < type(uint256).max);
         uint256 valuePerShareBefore = (uint256(totalAssets) * Constants.PRECISION_18) / uint256(totalShares);
 
-        // New user deposit gets shares
-        vm.assume(uint256(newDeposit) * uint256(totalShares) < type(uint256).max);
+        // New user deposit gets shares (uint64 * uint128 fits in uint256)
         uint256 newShares = (uint256(newDeposit) * uint256(totalShares)) / uint256(totalAssets);
 
         // New total assets and total shares
         uint256 newTotalAssets = uint256(totalAssets) + uint256(newDeposit);
         uint256 newTotalShares = uint256(totalShares) + newShares;
-
-        vm.assume(newTotalAssets * Constants.PRECISION_18 < type(uint256).max);
 
         // Other user's value per share after new deposit
         uint256 valuePerShareAfter = (newTotalAssets * Constants.PRECISION_18) / newTotalShares;
@@ -358,10 +323,8 @@ contract StakingTokenFuzzTest is Test {
         uint128 totalAssets,
         uint128 totalShares
     ) public pure {
-        vm.assume(totalAssets > 1000);
-        vm.assume(totalShares > 1000);
-
-        vm.assume(uint256(totalAssets) * Constants.PRECISION_18 < type(uint256).max);
+        totalAssets = uint128(bound(totalAssets, 1001, type(uint64).max)); // Limit to prevent overflow with PRECISION_18
+        totalShares = uint128(bound(totalShares, 1001, type(uint128).max));
 
         uint256 valuePerShareBefore = (uint256(totalAssets) * Constants.PRECISION_18) / uint256(totalShares);
 
@@ -379,16 +342,13 @@ contract StakingTokenFuzzTest is Test {
         uint128 totalShares,
         uint128 totalAssets
     ) public pure {
-        vm.assume(totalShares > 1e18); // At least 1 share unit
-        vm.assume(totalAssets > 1e18); // At least 1 asset unit
-
-        // Prevent overflow
-        vm.assume(uint256(totalShares) * uint256(totalAssets) < type(uint256).max);
+        totalShares = uint128(bound(totalShares, 1e18 + 1, type(uint128).max)); // At least 1 share unit
+        totalAssets = uint128(bound(totalAssets, 1e18 + 1, type(uint128).max)); // At least 1 asset unit
 
         // User owns all shares
         uint256 userShares = totalShares;
 
-        // Withdraw all shares
+        // Withdraw all shares (uint128 * uint128 fits in uint256)
         uint256 withdrawAssets = (uint256(userShares) * uint256(totalAssets)) / uint256(totalShares);
 
         // After withdrawal
@@ -406,10 +366,9 @@ contract StakingTokenFuzzTest is Test {
         uint64 mintShares,
         uint64 burnShares
     ) public pure {
-        vm.assume(totalShares > 1000);
-        vm.assume(mintShares > 0);
-        vm.assume(burnShares > 0);
-        vm.assume(burnShares <= mintShares); // Ensure no underflow
+        totalShares = uint128(bound(totalShares, 1001, type(uint128).max));
+        mintShares = uint64(bound(mintShares, 1, type(uint64).max));
+        burnShares = uint64(bound(burnShares, 1, mintShares)); // Ensure no underflow
 
         // Mint shares
         uint256 afterMint = uint256(totalShares) + uint256(mintShares);

@@ -14,17 +14,13 @@ contract FarmingPoolFuzzTest is Test {
 
     /// @notice Fuzz test: Reward calculation does not overflow
     function testFuzz_RewardCalculation_NoOverflow(
-        uint128 stakedAmount,
-        uint128 rewardPerBlock,
+        uint64 stakedAmount,  // Use uint64 to prevent overflow
+        uint64 rewardPerBlock,
         uint32 blockElapsed
     ) public pure {
-        vm.assume(stakedAmount > 0);
-        vm.assume(rewardPerBlock > 0);
-        vm.assume(blockElapsed > 0);
-        vm.assume(blockElapsed <= 365 days / 12); // Max 1 year of blocks
-
-        // Prevent multiplication overflow
-        vm.assume(uint256(rewardPerBlock) * uint256(blockElapsed) < type(uint256).max / 2);
+        stakedAmount = uint64(bound(stakedAmount, 1, type(uint64).max));
+        rewardPerBlock = uint64(bound(rewardPerBlock, 1, type(uint64).max));
+        blockElapsed = uint32(bound(blockElapsed, 1, 365 days / 12)); // Max 1 year of blocks
 
         // Calculate total reward (using uint256)
         uint256 totalReward = uint256(rewardPerBlock) * uint256(blockElapsed);
@@ -37,24 +33,19 @@ contract FarmingPoolFuzzTest is Test {
 
     /// @notice Fuzz test: User reward proportional to stake share
     function testFuzz_UserReward_Proportional(
-        uint128 userStake,
-        uint128 totalStake,
-        uint128 rewardPerBlock,
-        uint32 blockElapsed
+        uint64 userStake,  // Use uint64 to prevent overflow
+        uint64 totalStake,
+        uint64 rewardPerBlock,
+        uint16 blockElapsed
     ) public pure {
-        vm.assume(userStake > 0);
-        vm.assume(totalStake >= userStake);
-        vm.assume(rewardPerBlock > 0);
-        vm.assume(blockElapsed > 0);
-        vm.assume(blockElapsed <= 10000);
+        userStake = uint64(bound(userStake, 1, type(uint64).max));
+        totalStake = uint64(bound(totalStake, userStake, type(uint64).max));
+        rewardPerBlock = uint64(bound(rewardPerBlock, 1, type(uint64).max));
+        blockElapsed = uint16(bound(blockElapsed, 1, 10000));
 
         uint256 totalReward = uint256(rewardPerBlock) * uint256(blockElapsed);
-        vm.assume(totalReward < type(uint256).max / Constants.PRECISION_18);
-        // Ensure userReward is not 0 due to precision loss
-        // Prevent overflow in multiplication
-        vm.assume(totalReward <= type(uint128).max);
-        vm.assume(uint256(userStake) <= type(uint128).max);
-        vm.assume(totalReward * uint256(userStake) >= totalStake); // Ensure userReward is not 0
+        // Early return if userReward would be 0 due to precision loss
+        if (totalReward * uint256(userStake) < totalStake) return;
 
         // Calculate user reward
         uint256 userReward = (totalReward * uint256(userStake)) / uint256(totalStake);
@@ -81,10 +72,10 @@ contract FarmingPoolFuzzTest is Test {
         uint16 rewardUnits,         // Reward units
         uint16 blockElapsed
     ) public pure {
-        vm.assume(userStakeUnits > 0 && userStakeUnits < 1000);
-        vm.assume(totalStakeMultiplier >= 3 && totalStakeMultiplier < 20);
-        vm.assume(rewardUnits > 0 && rewardUnits < 1000);
-        vm.assume(blockElapsed >= 10 && blockElapsed < 1000);
+        userStakeUnits = uint16(bound(userStakeUnits, 1, 999));
+        totalStakeMultiplier = uint8(bound(totalStakeMultiplier, 3, 19));
+        rewardUnits = uint16(bound(rewardUnits, 1, 999));
+        blockElapsed = uint16(bound(blockElapsed, 10, 999));
 
         // Construct parameters (using 1e18 as base)
         uint256 userStake = uint256(userStakeUnits) * 1e18;
@@ -106,18 +97,16 @@ contract FarmingPoolFuzzTest is Test {
 
     /// @notice Fuzz test: Share calculation does not overflow
     function testFuzz_ShareCalculation_NoOverflow(
-        uint128 depositAmount,
-        uint128 totalShares,
-        uint128 totalAssets
+        uint64 depositAmount,  // Use uint64 to prevent overflow
+        uint64 totalShares,
+        uint64 totalAssets
     ) public pure {
-        vm.assume(depositAmount > 0);
-        vm.assume(totalAssets > 0);
-        vm.assume(totalShares > 0);
+        depositAmount = uint64(bound(depositAmount, 1, type(uint64).max));
+        totalAssets = uint64(bound(totalAssets, 1, type(uint64).max));
+        totalShares = uint64(bound(totalShares, 1, type(uint64).max));
 
-        // Calculate new shares = (deposit * totalShares) / totalAssets
-        vm.assume(uint256(depositAmount) * uint256(totalShares) < type(uint256).max / 2);
-        // Ensure newShares is not 0
-        vm.assume(uint256(depositAmount) * uint256(totalShares) >= totalAssets);
+        // Early return if newShares would be 0 due to precision loss
+        if (uint256(depositAmount) * uint256(totalShares) < totalAssets) return;
 
         uint256 newShares = (uint256(depositAmount) * uint256(totalShares)) / uint256(totalAssets);
 
@@ -129,7 +118,7 @@ contract FarmingPoolFuzzTest is Test {
     function testFuzz_FirstDeposit_SharesEqualAmount(
         uint128 depositAmount
     ) public pure {
-        vm.assume(depositAmount > 0);
+        depositAmount = uint128(bound(depositAmount, 1, type(uint128).max));
 
         // First deposit: totalShares = 0, totalAssets = 0
         // New shares should equal deposit amount
@@ -140,16 +129,13 @@ contract FarmingPoolFuzzTest is Test {
 
     /// @notice Fuzz test: Share value preservation
     function testFuzz_ShareValue_Preservation(
-        uint128 userShares,
-        uint128 totalShares,
-        uint128 totalAssets
+        uint64 userShares,  // Use uint64 to prevent overflow
+        uint64 totalShares,
+        uint64 totalAssets
     ) public pure {
-        vm.assume(userShares > 0);
-        vm.assume(totalShares >= userShares);
-        vm.assume(totalAssets > 0);
-
-        // Calculate user asset value
-        vm.assume(uint256(userShares) * uint256(totalAssets) < type(uint256).max / 2);
+        userShares = uint64(bound(userShares, 1, type(uint64).max));
+        totalShares = uint64(bound(totalShares, userShares, type(uint64).max));
+        totalAssets = uint64(bound(totalAssets, 1, type(uint64).max));
 
         uint256 userAssetValue = (uint256(userShares) * uint256(totalAssets)) / uint256(totalShares);
 
@@ -166,16 +152,13 @@ contract FarmingPoolFuzzTest is Test {
 
     /// @notice Fuzz test: APR calculation does not overflow
     function testFuzz_APR_NoOverflow(
-        uint128 rewardPerYear,
-        uint128 totalStaked
+        uint64 rewardPerYear,  // Use uint64 to prevent overflow
+        uint64 totalStaked
     ) public pure {
-        vm.assume(rewardPerYear > 0);
-        vm.assume(totalStaked > 0);
-        // Ensure APR is not 0 due to precision loss
-        vm.assume(uint256(rewardPerYear) * Constants.PRECISION_18 >= totalStaked);
-
-        // APR = (annual reward / total staked) * 100%
-        vm.assume(uint256(rewardPerYear) * Constants.PRECISION_18 < type(uint256).max / 2);
+        rewardPerYear = uint64(bound(rewardPerYear, 1, type(uint64).max));
+        totalStaked = uint64(bound(totalStaked, 1, type(uint64).max));
+        // Early return if APR would be 0 due to precision loss
+        if (uint256(rewardPerYear) * Constants.PRECISION_18 < totalStaked) return;
 
         uint256 apr = (uint256(rewardPerYear) * Constants.PRECISION_18) / uint256(totalStaked);
 
@@ -185,19 +168,14 @@ contract FarmingPoolFuzzTest is Test {
 
     /// @notice Fuzz test: APR positively correlated with reward rate
     function testFuzz_APR_RewardPositiveCorrelation(
-        uint128 rewardRate1,
-        uint128 rewardRate2,
-        uint128 totalStaked
+        uint64 rewardRate1,  // Use uint64 to prevent overflow
+        uint64 rateDelta,    // Use delta to ensure rewardRate2 > rewardRate1
+        uint64 totalStaked
     ) public pure {
-        vm.assume(totalStaked > 0);
-        vm.assume(rewardRate2 > rewardRate1);
-        vm.assume(rewardRate1 > 0);
-        // Ensure APR1 is not 0
-        vm.assume(uint256(rewardRate1) * Constants.PRECISION_18 / totalStaked > 0);
-        vm.assume(uint256(rewardRate2) * Constants.PRECISION_18 / totalStaked > uint256(rewardRate1) * Constants.PRECISION_18 / totalStaked);
-
-        vm.assume(uint256(rewardRate1) * Constants.PRECISION_18 < type(uint256).max / 2);
-        vm.assume(uint256(rewardRate2) * Constants.PRECISION_18 < type(uint256).max / 2);
+        totalStaked = uint64(bound(totalStaked, 1e6, 1e18)); // Reasonable stake range
+        rewardRate1 = uint64(bound(rewardRate1, 1e6, 1e15)); // Leave room for delta
+        rateDelta = uint64(bound(rateDelta, 1e3, 1e12)); // Meaningful delta
+        uint64 rewardRate2 = rewardRate1 + rateDelta; // Guaranteed > rewardRate1
 
         uint256 apr1 = (uint256(rewardRate1) * Constants.PRECISION_18) / uint256(totalStaked);
         uint256 apr2 = (uint256(rewardRate2) * Constants.PRECISION_18) / uint256(totalStaked);
@@ -211,15 +189,11 @@ contract FarmingPoolFuzzTest is Test {
         uint64 rewardRate,    // Changed to uint64 to avoid overflow
         uint64 totalStaked1
     ) public pure {
-        vm.assume(rewardRate > 1e12); // Large enough reward rate
-        vm.assume(totalStaked1 > 1e16); // Large enough stake
-        vm.assume(totalStaked1 < type(uint64).max / 4); // Ensure can *2
+        rewardRate = uint64(bound(rewardRate, 1e12 + 1, type(uint64).max)); // Large enough reward rate
+        totalStaked1 = uint64(bound(totalStaked1, 1e16 + 1, type(uint64).max / 4 - 1)); // Large enough stake, ensure can *2
 
-        // totalStaked2 is 2x totalStaked1 (fixed relationship, avoid vm.assume rejection)
+        // totalStaked2 is 2x totalStaked1 (fixed relationship)
         uint256 totalStaked2 = uint256(totalStaked1) * 2;
-
-        // Ensure no overflow
-        vm.assume(uint256(rewardRate) * Constants.PRECISION_18 < type(uint256).max / 2);
 
         uint256 apr1 = (uint256(rewardRate) * Constants.PRECISION_18) / uint256(totalStaked1);
         uint256 apr2 = (uint256(rewardRate) * Constants.PRECISION_18) / totalStaked2;
@@ -237,10 +211,8 @@ contract FarmingPoolFuzzTest is Test {
         uint64 apr,
         uint16 compoundFrequency
     ) public pure {
-        vm.assume(apr > 0);
-        vm.assume(apr <= Constants.PRECISION_18); // APR <= 100%
-        vm.assume(compoundFrequency > 1);
-        vm.assume(compoundFrequency <= 365); // Max daily compounding
+        apr = uint64(bound(apr, 1, Constants.PRECISION_18)); // APR <= 100%
+        compoundFrequency = uint16(bound(compoundFrequency, 2, 365)); // Max daily compounding
 
         // Simplified APY calculation: APY approximately APR * compoundFrequency (linear approximation)
         uint256 apy = (uint256(apr) * uint256(compoundFrequency)) / 365;
@@ -261,14 +233,13 @@ contract FarmingPoolFuzzTest is Test {
         uint64 rewardPerBlock,
         uint16 blockElapsed
     ) public pure {
-        vm.assume(stake1 > 0);
-        vm.assume(stake2 > 0);
-        vm.assume(stake3 > 0);
-        vm.assume(rewardPerBlock > 0);
-        vm.assume(blockElapsed > 0);
+        stake1 = uint64(bound(stake1, 1, type(uint64).max / 3));
+        stake2 = uint64(bound(stake2, 1, type(uint64).max / 3));
+        stake3 = uint64(bound(stake3, 1, type(uint64).max / 3));
+        rewardPerBlock = uint64(bound(rewardPerBlock, 1, type(uint64).max));
+        blockElapsed = uint16(bound(blockElapsed, 1, type(uint16).max));
 
         uint256 totalStake = uint256(stake1) + uint256(stake2) + uint256(stake3);
-        vm.assume(totalStake <= type(uint128).max);
 
         uint256 totalReward = uint256(rewardPerBlock) * uint256(blockElapsed);
 
@@ -289,9 +260,9 @@ contract FarmingPoolFuzzTest is Test {
         uint128 rewardPerBlock,
         uint32 blockElapsed
     ) public pure {
-        vm.assume(totalStake > 0);
-        vm.assume(rewardPerBlock > 0);
-        vm.assume(blockElapsed > 0);
+        totalStake = uint128(bound(totalStake, 1, type(uint128).max));
+        rewardPerBlock = uint128(bound(rewardPerBlock, 1, type(uint128).max));
+        blockElapsed = uint32(bound(blockElapsed, 1, type(uint32).max));
 
         uint256 userStake = 0;
         uint256 totalReward = uint256(rewardPerBlock) * uint256(blockElapsed);
@@ -310,13 +281,14 @@ contract FarmingPoolFuzzTest is Test {
         uint16 lockDays,
         uint16 bonusBPPerDay
     ) public pure {
-        vm.assume(baseReward > 100); // At least 100 for noticeable reward
-        vm.assume(lockDays >= 7 && lockDays <= 365);
-        vm.assume(bonusBPPerDay > 0 && bonusBPPerDay <= 10); // Max 0.1% per day
+        baseReward = uint128(bound(baseReward, 101, type(uint128).max)); // At least 100 for noticeable reward
+        lockDays = uint16(bound(lockDays, 7, 365));
+        bonusBPPerDay = uint16(bound(bonusBPPerDay, 1, 10)); // Max 0.1% per day
 
         // Calculate lock bonus = baseReward * (1 + lockDays * bonusBP)
         uint256 bonusBP = uint256(lockDays) * uint256(bonusBPPerDay);
-        vm.assume(bonusBP > 0 && bonusBP <= Constants.BPS_BASE); // Bonus > 0 and max 100%
+        // Early return if bonusBP exceeds 100%
+        if (bonusBP > Constants.BPS_BASE) return;
 
         uint256 bonusReward = (uint256(baseReward) * bonusBP) / Constants.BPS_BASE;
         uint256 totalReward = uint256(baseReward) + bonusReward;
@@ -338,8 +310,8 @@ contract FarmingPoolFuzzTest is Test {
         uint128 stakedAmount,
         uint16 penaltyBP
     ) public pure {
-        vm.assume(stakedAmount > 100); // At least 100 for noticeable penalty
-        vm.assume(penaltyBP > 0 && penaltyBP < Constants.BPS_BASE); // Penalty rate < 100%
+        stakedAmount = uint128(bound(stakedAmount, 101, type(uint128).max)); // At least 100 for noticeable penalty
+        penaltyBP = uint16(bound(penaltyBP, 1, Constants.BPS_BASE - 1)); // Penalty rate < 100%
 
         // Calculate penalty amount
         uint256 penalty = (uint256(stakedAmount) * uint256(penaltyBP)) / Constants.BPS_BASE;
@@ -365,9 +337,9 @@ contract FarmingPoolFuzzTest is Test {
         uint128 totalStake,
         uint128 rewardPerBlock
     ) public pure {
-        vm.assume(stakedAmount > 0);
-        vm.assume(totalStake >= stakedAmount);
-        vm.assume(rewardPerBlock > 0);
+        stakedAmount = uint128(bound(stakedAmount, 1, type(uint128).max));
+        totalStake = uint128(bound(totalStake, stakedAmount, type(uint128).max));
+        rewardPerBlock = uint128(bound(rewardPerBlock, 1, type(uint128).max));
 
         // Single block reward
         uint256 userReward = (uint256(rewardPerBlock) * uint256(stakedAmount)) / uint256(totalStake);
@@ -381,12 +353,8 @@ contract FarmingPoolFuzzTest is Test {
         uint64 rewardPerBlock,
         uint32 blockElapsed
     ) public pure {
-        vm.assume(rewardPerBlock > 0);
-        vm.assume(blockElapsed >= 365 days / 12); // At least 1 year
-        vm.assume(blockElapsed <= 10 * 365 days / 12); // Max 10 years
-
-        // Prevent overflow
-        vm.assume(uint256(rewardPerBlock) * uint256(blockElapsed) < type(uint256).max / 2);
+        rewardPerBlock = uint64(bound(rewardPerBlock, 1, type(uint64).max));
+        blockElapsed = uint32(bound(blockElapsed, 365 days / 12, 10 * 365 days / 12)); // At least 1 year, max 10 years
 
         uint256 totalReward = uint256(rewardPerBlock) * uint256(blockElapsed);
 

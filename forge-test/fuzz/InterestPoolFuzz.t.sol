@@ -18,14 +18,16 @@ contract InterestPoolFuzzTest is Test {
         uint32 rate,      // Annual interest rate (basis points, e.g., 500 = 5%)
         uint32 timeYears  // Time (years)
     ) public pure {
-        vm.assume(principal > 0);
-        vm.assume(rate > 0 && rate <= 10000); // Max 100%
-        vm.assume(timeYears > 0 && timeYears <= 100);
-        // Ensure interest is not 0
-        vm.assume(uint256(principal) * uint256(rate) * uint256(timeYears) >= Constants.BPS_BASE);
+        // Use bound() to avoid rejection
+        principal = uint128(bound(principal, 1, type(uint128).max));
+        rate = uint32(bound(rate, 1, 10000)); // Max 100%
+        timeYears = uint32(bound(timeYears, 1, 100));
+
+        // Early return if interest would be 0
+        if (uint256(principal) * uint256(rate) * uint256(timeYears) < Constants.BPS_BASE) return;
 
         // Simple interest = principal * rate * time / BP_DIVISOR
-        vm.assume(uint256(principal) * uint256(rate) < type(uint256).max / uint256(timeYears));
+        // uint128 * uint32 * uint32 is always < type(uint256).max
 
         uint256 interest = (uint256(principal) * uint256(rate) * uint256(timeYears)) / Constants.BPS_BASE;
 
@@ -40,15 +42,17 @@ contract InterestPoolFuzzTest is Test {
         uint16 rate,
         uint16 periods
     ) public pure {
-        vm.assume(principal > 1000); // At least 1000 to see compound effect
-        vm.assume(rate > 0 && rate <= 1000); // Max 10% per period
-        vm.assume(periods > 0 && periods <= 120); // Max 120 periods (10 years monthly)
+        // Use bound() to avoid rejection
+        principal = uint64(bound(principal, 1001, type(uint64).max)); // At least 1000 to see compound effect
+        rate = uint16(bound(rate, 1, 1000)); // Max 10% per period
+        periods = uint16(bound(periods, 1, 120)); // Max 120 periods (10 years monthly)
 
         // Compound formula: A = P * (1 + r)^n
         // Using approximation: A ≈ P * (1 + n*r) to avoid power overflow
         uint256 totalRate = uint256(rate) * uint256(periods);
-        vm.assume(totalRate <= Constants.BPS_BASE * 10); // Max total return 1000%
-        vm.assume(totalRate > 0); // Ensure growth
+
+        // Early return if totalRate exceeds max allowed
+        if (totalRate > Constants.BPS_BASE * 10) return; // Max total return 1000%
 
         uint256 finalAmount = uint256(principal) * (Constants.BPS_BASE + totalRate) / Constants.BPS_BASE;
 
@@ -67,12 +71,14 @@ contract InterestPoolFuzzTest is Test {
         uint16 rate2,
         uint32 time
     ) public pure {
-        vm.assume(principal > 0);
-        vm.assume(rate1 > 0 && rate1 <= 5000);
-        vm.assume(rate2 > rate1 && rate2 <= 5000);
-        vm.assume(time > 0 && time <= 365 days);
-        // Ensure interest1 is not 0
-        vm.assume(uint256(principal) * uint256(rate1) * uint256(time) >= Constants.BPS_BASE * 365 days);
+        // Use bound() to avoid rejection
+        principal = uint128(bound(principal, 1, type(uint128).max));
+        rate1 = uint16(bound(rate1, 1, 4999)); // Leave room for rate2
+        rate2 = uint16(bound(rate2, rate1 + 1, 5000)); // rate2 > rate1
+        time = uint32(bound(time, 1, 365 days));
+
+        // Early return if interest1 would be 0
+        if (uint256(principal) * uint256(rate1) * uint256(time) < Constants.BPS_BASE * 365 days) return;
 
         uint256 interest1 = (uint256(principal) * uint256(rate1) * uint256(time)) / (Constants.BPS_BASE * 365 days);
         uint256 interest2 = (uint256(principal) * uint256(rate2) * uint256(time)) / (Constants.BPS_BASE * 365 days);
@@ -92,15 +98,16 @@ contract InterestPoolFuzzTest is Test {
         uint16 rate,
         uint32 time
     ) public pure {
-        vm.assume(principal1 > 1000); // At least 1000 for noticeable difference
-        vm.assume(principal2 > principal1);
-        vm.assume(rate > 0 && rate <= 5000);
-        vm.assume(time > 0 && time <= 365 days);
-        // Ensure interest1 is not 0
-        vm.assume(uint256(principal1) * uint256(rate) * uint256(time) >= Constants.BPS_BASE * 365 days);
+        // Use bound() to avoid rejection
+        principal1 = uint128(bound(principal1, 1001, type(uint128).max / 2 - 1)); // At least 1000, leave room for principal2
+        principal2 = uint128(bound(principal2, principal1 + 1, type(uint128).max / 2)); // principal2 > principal1
+        rate = uint16(bound(rate, 1, 5000));
+        time = uint32(bound(time, 1, 365 days));
 
-        vm.assume(uint256(principal1) * uint256(rate) * uint256(time) < type(uint256).max / 2);
-        vm.assume(uint256(principal2) * uint256(rate) * uint256(time) < type(uint256).max / 2);
+        // Early return if interest1 would be 0
+        if (uint256(principal1) * uint256(rate) * uint256(time) < Constants.BPS_BASE * 365 days) return;
+
+        // uint128/2 * uint16 * uint32 is always < type(uint256).max / 2
 
         uint256 interest1 = (uint256(principal1) * uint256(rate) * uint256(time)) / (Constants.BPS_BASE * 365 days);
         uint256 interest2 = (uint256(principal2) * uint256(rate) * uint256(time)) / (Constants.BPS_BASE * 365 days);
@@ -116,9 +123,8 @@ contract InterestPoolFuzzTest is Test {
     function testFuzz_APR_ToPerSecondRate(
         uint32 aprBP  // Annual interest rate (basis points)
     ) public pure {
-        vm.assume(aprBP > 0 && aprBP <= 50000); // Max 500% APR
-        // Ensure perSecondRate is meaningful
-        vm.assume(aprBP >= 100); // At least 1% to be meaningful
+        // Use bound() to avoid rejection
+        aprBP = uint32(bound(aprBP, 100, 50000)); // At least 1% to be meaningful, max 500% APR
 
         // Convert to per-second rate
         uint256 perSecondRate = uint256(aprBP) * Constants.PRECISION_18 / (Constants.BPS_BASE * 365 days);
@@ -138,15 +144,16 @@ contract InterestPoolFuzzTest is Test {
         uint32 ratePerSecond,  // Unit: 1e18
         uint32 timeSeconds
     ) public pure {
-        vm.assume(principal > 0);
-        vm.assume(ratePerSecond > 0);
-        vm.assume(ratePerSecond <= Constants.PRECISION_18 / 365 days); // Reasonable per-second rate
-        vm.assume(timeSeconds > 0 && timeSeconds <= 365 days);
-        // Ensure accumulated interest is not 0
-        vm.assume(uint256(principal) * uint256(ratePerSecond) * uint256(timeSeconds) >= Constants.PRECISION_18);
+        // Use bound() to avoid rejection
+        principal = uint128(bound(principal, 1, type(uint128).max));
+        ratePerSecond = uint32(bound(ratePerSecond, 1, uint32(Constants.PRECISION_18 / 365 days))); // Reasonable per-second rate
+        timeSeconds = uint32(bound(timeSeconds, 1, 365 days));
+
+        // Early return if accumulated interest would be 0
+        if (uint256(principal) * uint256(ratePerSecond) * uint256(timeSeconds) < Constants.PRECISION_18) return;
 
         // Accumulated interest = principal * rate * time / PRECISION
-        vm.assume(uint256(principal) * uint256(ratePerSecond) < type(uint256).max / uint256(timeSeconds));
+        // uint128 * uint32 * uint32 is always < type(uint256).max
 
         uint256 interest = (uint256(principal) * uint256(ratePerSecond) * uint256(timeSeconds)) / Constants.PRECISION_18;
 
@@ -162,12 +169,13 @@ contract InterestPoolFuzzTest is Test {
         uint128 totalShares,
         uint128 totalAssets
     ) public pure {
-        vm.assume(userShares > 0);
-        vm.assume(totalShares >= userShares);
-        vm.assume(totalAssets > 0);
+        // Use bound() to avoid rejection
+        userShares = uint128(bound(userShares, 1, type(uint128).max));
+        totalShares = uint128(bound(totalShares, userShares, type(uint128).max)); // totalShares >= userShares
+        totalAssets = uint128(bound(totalAssets, 1, type(uint128).max));
 
         // Calculate user assets = (userShares * totalAssets) / totalShares
-        vm.assume(uint256(userShares) * uint256(totalAssets) < type(uint256).max / 2);
+        // uint128 * uint128 is always < type(uint256).max / 2
 
         uint256 userAssets = (uint256(userShares) * uint256(totalAssets)) / uint256(totalShares);
 
@@ -187,18 +195,20 @@ contract InterestPoolFuzzTest is Test {
         uint128 totalAssets,
         uint32 growthBP
     ) public pure {
-        vm.assume(userShares > 100); // At least 100 to be meaningful
-        vm.assume(totalShares >= userShares);
-        vm.assume(totalAssets > 0);
-        vm.assume(growthBP > 0 && growthBP <= 10000); // Growth rate > 0
+        // Use bound() to avoid rejection
+        userShares = uint128(bound(userShares, 101, type(uint128).max / 2)); // At least 100 to be meaningful
+        totalShares = uint128(bound(totalShares, userShares, type(uint128).max)); // totalShares >= userShares
+        totalAssets = uint128(bound(totalAssets, 1, type(uint128).max / 2)); // Leave room for growth
+        growthBP = uint32(bound(growthBP, 1, 10000)); // Growth rate > 0
 
         // After asset growth
         uint256 newTotalAssets = uint256(totalAssets) * (Constants.BPS_BASE + uint256(growthBP)) / Constants.BPS_BASE;
-        vm.assume(newTotalAssets <= type(uint128).max);
+
+        // Early return if newTotalAssets exceeds max
+        if (newTotalAssets > type(uint128).max) return;
 
         // Calculate user assets before and after growth
-        vm.assume(uint256(userShares) * uint256(totalAssets) < type(uint256).max / 2);
-        vm.assume(uint256(userShares) * newTotalAssets < type(uint256).max / 2);
+        // uint128/2 * uint128/2 is always < type(uint256).max / 2
 
         uint256 userAssetsBefore = (uint256(userShares) * uint256(totalAssets)) / uint256(totalShares);
         uint256 userAssetsAfter = (uint256(userShares) * newTotalAssets) / uint256(totalShares);
@@ -217,9 +227,10 @@ contract InterestPoolFuzzTest is Test {
         uint128 accruedInterest,
         uint16 penaltyBP
     ) public pure {
-        vm.assume(principal > 0);
-        vm.assume(accruedInterest > 0);
-        vm.assume(penaltyBP <= Constants.BPS_BASE);
+        // Use bound() to avoid rejection
+        principal = uint128(bound(principal, 1, type(uint128).max));
+        accruedInterest = uint128(bound(accruedInterest, 1, type(uint128).max));
+        penaltyBP = uint16(bound(penaltyBP, 0, Constants.BPS_BASE));
 
         // Calculate penalty (only penalize interest portion)
         uint256 penalty = (uint256(accruedInterest) * uint256(penaltyBP)) / Constants.BPS_BASE;
@@ -271,15 +282,16 @@ contract InterestPoolFuzzTest is Test {
         uint16 aprBP,
         uint16 frequency
     ) public pure {
-        vm.assume(principal > 1000); // At least 1000 to see compound effect
-        vm.assume(aprBP > 0 && aprBP <= 2000); // Max 20% APR
-        vm.assume(frequency >= 1 && frequency <= 365);
+        // Use bound() to avoid rejection
+        principal = uint64(bound(principal, 1001, type(uint64).max)); // At least 1000 to see compound effect
+        aprBP = uint16(bound(aprBP, 10, 2000)); // At least 0.1%, max 20% APR
+        frequency = uint16(bound(frequency, 1, 365));
 
         // Calculate rate per period
         uint256 ratePerPeriod = uint256(aprBP) / uint256(frequency);
-        vm.assume(ratePerPeriod > 0);
-        // Ensure noticeable growth
-        vm.assume(aprBP >= 10); // At least 0.1%
+
+        // Early return if ratePerPeriod is 0
+        if (ratePerPeriod == 0) return;
 
         // Simplified calculation: Final amount ≈ principal * (1 + apr/frequency)^frequency
         // Using linear approximation: ≈ principal * (1 + apr)
@@ -304,10 +316,10 @@ contract InterestPoolFuzzTest is Test {
         uint16 rate,
         uint32 time
     ) public pure {
-        vm.assume(principal > 0);
-        vm.assume(principal <= 1e6); // Max 0.01 token (18 decimals)
-        vm.assume(rate > 0 && rate <= 1000);
-        vm.assume(time > 0 && time <= 365 days);
+        // Use bound() to avoid rejection
+        principal = uint32(bound(principal, 1, 1e6)); // Max 0.01 token (18 decimals)
+        rate = uint16(bound(rate, 1, 1000));
+        time = uint32(bound(time, 1, 365 days));
 
         uint256 interest = (uint256(principal) * uint256(rate) * uint256(time)) / (Constants.BPS_BASE * 365 days);
 
@@ -321,14 +333,13 @@ contract InterestPoolFuzzTest is Test {
         uint16 rate,
         uint32 numYears
     ) public pure {
-        vm.assume(principal > 0);
-        vm.assume(rate > 0 && rate <= 1000);
-        vm.assume(numYears >= 10 && numYears <= 100);
-        // Ensure principal is large enough to produce meaningful interest
-        vm.assume(principal >= 10000);
+        // Use bound() to avoid rejection
+        principal = uint64(bound(principal, 10000, type(uint64).max)); // At least 10000 for meaningful interest
+        rate = uint16(bound(rate, 1, 1000));
+        numYears = uint32(bound(numYears, 10, 100));
 
         // Simple interest: Long-term can be very large
-        vm.assume(uint256(principal) * uint256(rate) * uint256(numYears) < type(uint256).max / Constants.BPS_BASE);
+        // uint64 * uint16 * uint32 is always < type(uint256).max / Constants.BPS_BASE
 
         uint256 interest = (uint256(principal) * uint256(rate) * uint256(numYears)) / Constants.BPS_BASE;
 
@@ -348,10 +359,11 @@ contract InterestPoolFuzzTest is Test {
         uint64 stake3,
         uint64 totalInterest
     ) public pure {
-        vm.assume(stake1 > 0);
-        vm.assume(stake2 > 0);
-        vm.assume(stake3 > 0);
-        vm.assume(totalInterest > 0);
+        // Use bound() to avoid rejection
+        stake1 = uint64(bound(stake1, 1, type(uint64).max));
+        stake2 = uint64(bound(stake2, 1, type(uint64).max));
+        stake3 = uint64(bound(stake3, 1, type(uint64).max));
+        totalInterest = uint64(bound(totalInterest, 1, type(uint64).max));
 
         uint256 totalStake = uint256(stake1) + uint256(stake2) + uint256(stake3);
 
@@ -373,8 +385,9 @@ contract InterestPoolFuzzTest is Test {
         uint128 principal,
         uint32 time
     ) public pure {
-        vm.assume(principal > 0);
-        vm.assume(time > 0);
+        // Use bound() to avoid rejection
+        principal = uint128(bound(principal, 1, type(uint128).max));
+        time = uint32(bound(time, 1, type(uint32).max));
 
         uint256 rate = 0;
         uint256 interest = (uint256(principal) * rate * uint256(time)) / (Constants.BPS_BASE * 365 days);
@@ -388,8 +401,9 @@ contract InterestPoolFuzzTest is Test {
         uint128 principal,
         uint16 rate
     ) public pure {
-        vm.assume(principal > 0);
-        vm.assume(rate > 0);
+        // Use bound() to avoid rejection
+        principal = uint128(bound(principal, 1, type(uint128).max));
+        rate = uint16(bound(rate, 1, type(uint16).max));
 
         uint256 time = 0;
         uint256 interest = (uint256(principal) * uint256(rate) * time) / (Constants.BPS_BASE * 365 days);
@@ -403,8 +417,9 @@ contract InterestPoolFuzzTest is Test {
         uint128 principal,
         uint16 aprBP
     ) public pure {
-        vm.assume(principal >= 1e18); // At least 1 full token
-        vm.assume(aprBP >= 100 && aprBP <= 10000); // 1% - 100% APR
+        // Use bound() to avoid rejection
+        principal = uint128(bound(principal, 1e18, type(uint128).max)); // At least 1 full token
+        aprBP = uint16(bound(aprBP, 100, 10000)); // 1% - 100% APR
 
         uint256 time = 1; // 1 second
         uint256 interest = (uint256(principal) * uint256(aprBP) * time) / (Constants.BPS_BASE * 365 days);

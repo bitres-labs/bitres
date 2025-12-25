@@ -17,9 +17,9 @@ contract ConfigFuzzTest is Test {
         uint16 redeemFeeBP,
         uint16 stakingFeeBP
     ) public pure {
-        vm.assume(mintFeeBP <= Constants.BPS_BASE);
-        vm.assume(redeemFeeBP <= Constants.BPS_BASE);
-        vm.assume(stakingFeeBP <= Constants.BPS_BASE);
+        mintFeeBP = uint16(bound(mintFeeBP, 0, Constants.BPS_BASE));
+        redeemFeeBP = uint16(bound(redeemFeeBP, 0, Constants.BPS_BASE));
+        stakingFeeBP = uint16(bound(stakingFeeBP, 0, Constants.BPS_BASE));
 
         // Verify: Fee rate doesn't exceed 100%
         assertLe(mintFeeBP, Constants.BPS_BASE);
@@ -33,17 +33,17 @@ contract ConfigFuzzTest is Test {
         uint8 gap1,
         uint8 gap2
     ) public pure {
-        vm.assume(minCR_Multiplier > 0 && minCR_Multiplier < 20);  // 100%-200%
-        vm.assume(gap1 > 0 && gap1 < 10);  // Gap
-        vm.assume(gap2 > 0 && gap2 < 10);
+        minCR_Multiplier = uint8(bound(minCR_Multiplier, 1, 19));  // 100%-200%
+        gap1 = uint8(bound(gap1, 1, 9));  // Gap
+        gap2 = uint8(bound(gap2, 1, 9));
 
         // Construct increasing collateral ratios
         uint16 minCR_BP = 10000 + uint16(minCR_Multiplier) * 1000;
         uint16 targetCR_BP = minCR_BP + uint16(gap1) * 1000;
         uint16 maxCR_BP = targetCR_BP + uint16(gap2) * 1000;
 
-        // Ensure maxCR doesn't exceed 50000
-        vm.assume(maxCR_BP <= 50000);
+        // Early return if maxCR exceeds 50000
+        if (maxCR_BP > 50000) return;
 
         // Verify: Collateral ratio increasing relationship
         assertGt(targetCR_BP, minCR_BP);
@@ -57,8 +57,8 @@ contract ConfigFuzzTest is Test {
         uint16 btdInterestBP,
         uint16 btbInterestBP
     ) public pure {
-        vm.assume(btdInterestBP <= 2000); // Max 20%
-        vm.assume(btbInterestBP <= 1500); // Max 15%
+        btdInterestBP = uint16(bound(btdInterestBP, 0, 2000)); // Max 20%
+        btbInterestBP = uint16(bound(btbInterestBP, 0, 1500)); // Max 15%
 
         // Verify: Interest rates are reasonable
         assertLe(btdInterestBP, 2000);
@@ -70,8 +70,8 @@ contract ConfigFuzzTest is Test {
         uint64 totalMiningReward,  // Changed to uint64
         uint32 miningDuration
     ) public pure {
-        vm.assume(totalMiningReward > 1e18); // At least 1 token
-        vm.assume(miningDuration > 0 && miningDuration <= 10 * 365 days); // Max 10 years
+        totalMiningReward = uint64(bound(totalMiningReward, 1e18 + 1, type(uint64).max)); // At least 1 token
+        miningDuration = uint32(bound(miningDuration, 1, 10 * 365 days)); // Max 10 years
 
         // Calculate mining rate per second
         uint256 rewardPerSecond = uint256(totalMiningReward) / uint256(miningDuration);
@@ -88,8 +88,8 @@ contract ConfigFuzzTest is Test {
         uint16 oldFeeBP,
         uint16 newFeeBP
     ) public pure {
-        vm.assume(oldFeeBP <= Constants.BPS_BASE);
-        vm.assume(newFeeBP <= Constants.BPS_BASE);
+        oldFeeBP = uint16(bound(oldFeeBP, 0, Constants.BPS_BASE));
+        newFeeBP = uint16(bound(newFeeBP, 0, Constants.BPS_BASE));
 
         // Verify: Both old and new values are valid
         assertLe(oldFeeBP, Constants.BPS_BASE);
@@ -108,9 +108,9 @@ contract ConfigFuzzTest is Test {
         uint16 redeemFeeBP,
         uint16 minCR_BP
     ) public pure {
-        vm.assume(mintFeeBP <= Constants.BPS_BASE);
-        vm.assume(redeemFeeBP <= Constants.BPS_BASE);
-        vm.assume(minCR_BP >= 10000 && minCR_BP <= 50000);
+        mintFeeBP = uint16(bound(mintFeeBP, 0, Constants.BPS_BASE));
+        redeemFeeBP = uint16(bound(redeemFeeBP, 0, Constants.BPS_BASE));
+        minCR_BP = uint16(bound(minCR_BP, 10000, 50000));
 
         // Verify: All parameters are valid
         assertLe(mintFeeBP, Constants.BPS_BASE);
@@ -125,8 +125,9 @@ contract ConfigFuzzTest is Test {
         uint32 currentTime,
         uint32 cooldownPeriod
     ) public pure {
-        vm.assume(currentTime > lastUpdateTime);
-        vm.assume(cooldownPeriod > 0 && cooldownPeriod <= 7 days);
+        lastUpdateTime = uint32(bound(lastUpdateTime, 0, type(uint32).max - 1));
+        currentTime = uint32(bound(currentTime, lastUpdateTime + 1, type(uint32).max));
+        cooldownPeriod = uint32(bound(cooldownPeriod, 1, 7 days));
 
         uint32 elapsed = currentTime - lastUpdateTime;
 
@@ -170,9 +171,9 @@ contract ConfigFuzzTest is Test {
         uint128 totalSupply,
         uint16 thresholdBP
     ) public pure {
-        vm.assume(totalSupply > 0);
-        vm.assume(voterBalance <= totalSupply);
-        vm.assume(thresholdBP > 0 && thresholdBP <= 1000); // 0-10%
+        totalSupply = uint128(bound(totalSupply, 1, type(uint128).max));
+        voterBalance = uint128(bound(voterBalance, 0, totalSupply));
+        thresholdBP = uint16(bound(thresholdBP, 1, 1000)); // 0-10%
 
         // Calculate proposal threshold
         uint256 threshold = (uint256(totalSupply) * uint256(thresholdBP)) / Constants.BPS_BASE;
@@ -194,9 +195,11 @@ contract ConfigFuzzTest is Test {
         uint128 totalSupply,
         uint16 quorumBP
     ) public pure {
-        vm.assume(totalSupply > 0);
-        vm.assume(uint256(forVotes) + uint256(againstVotes) <= totalSupply);
-        vm.assume(quorumBP >= 4000 && quorumBP <= 10000); // 40-100%
+        totalSupply = uint128(bound(totalSupply, 1, type(uint128).max));
+        // Ensure forVotes + againstVotes <= totalSupply
+        forVotes = uint128(bound(forVotes, 0, totalSupply));
+        againstVotes = uint128(bound(againstVotes, 0, totalSupply - forVotes));
+        quorumBP = uint16(bound(quorumBP, 4000, 10000)); // 40-100%
 
         // Calculate quorum
         uint256 quorum = (uint256(totalSupply) * uint256(quorumBP)) / Constants.BPS_BASE;
@@ -223,8 +226,8 @@ contract ConfigFuzzTest is Test {
         uint16 mintFeeBP,
         uint16 redeemFeeBP
     ) public pure {
-        vm.assume(mintFeeBP <= Constants.BPS_BASE);
-        vm.assume(redeemFeeBP <= Constants.BPS_BASE);
+        mintFeeBP = uint16(bound(mintFeeBP, 0, Constants.BPS_BASE));
+        redeemFeeBP = uint16(bound(redeemFeeBP, 0, Constants.BPS_BASE));
 
         // Verify: Both fee rates are valid
         assertLe(mintFeeBP, Constants.BPS_BASE);
@@ -239,8 +242,8 @@ contract ConfigFuzzTest is Test {
         uint16 btdInterestBP,
         uint16 btbInterestBP
     ) public pure {
-        vm.assume(btdInterestBP <= 2000);
-        vm.assume(btbInterestBP <= 1500);
+        btdInterestBP = uint16(bound(btdInterestBP, 0, 2000));
+        btbInterestBP = uint16(bound(btbInterestBP, 0, 1500));
 
         // Verify: Both interest rates are valid
         assertLe(btdInterestBP, 2000);
@@ -256,9 +259,9 @@ contract ConfigFuzzTest is Test {
         uint8 feeMinBP,          // Minimum fee (1-50, corresponding to 0.01%-0.5%)
         uint8 feeRangeBP         // Fee range (10-200, corresponding to 0.1%-2%)
     ) public pure {
-        vm.assume(crMultiplier > 0 && crMultiplier < 40);
-        vm.assume(feeMinBP > 0 && feeMinBP < 50);
-        vm.assume(feeRangeBP > 10 && feeRangeBP < 200);
+        crMultiplier = uint8(bound(crMultiplier, 1, 39));
+        feeMinBP = uint8(bound(feeMinBP, 1, 49));
+        feeRangeBP = uint8(bound(feeRangeBP, 11, 199));
 
         // Construct parameters
         uint16 minCR_BP = 10000;  // 100%
@@ -331,7 +334,8 @@ contract ConfigFuzzTest is Test {
         uint32 oldVersion,
         uint32 newVersion
     ) public pure {
-        vm.assume(newVersion > oldVersion);
+        oldVersion = uint32(bound(oldVersion, 0, type(uint32).max - 1));
+        newVersion = uint32(bound(newVersion, oldVersion + 1, type(uint32).max));
 
         // Verify: Version number increments
         assertGt(newVersion, oldVersion);
@@ -342,8 +346,8 @@ contract ConfigFuzzTest is Test {
         uint32 currentVersion,
         uint32 rollbackVersion
     ) public pure {
-        vm.assume(currentVersion > 0);
-        vm.assume(rollbackVersion < currentVersion);
+        currentVersion = uint32(bound(currentVersion, 1, type(uint32).max));
+        rollbackVersion = uint32(bound(rollbackVersion, 0, currentVersion - 1));
 
         // Verify: Rollback to old version is not allowed
         bool isRollback = rollbackVersion < currentVersion;
@@ -361,8 +365,9 @@ contract ConfigFuzzTest is Test {
         uint32 currentTime,
         uint32 delayPeriod
     ) public pure {
-        vm.assume(currentTime >= updateTime);
-        vm.assume(delayPeriod > 0 && delayPeriod <= 7 days);
+        updateTime = uint32(bound(updateTime, 0, type(uint32).max));
+        currentTime = uint32(bound(currentTime, updateTime, type(uint32).max));
+        delayPeriod = uint32(bound(delayPeriod, 1, 7 days));
 
         uint32 elapsed = currentTime - updateTime;
 
@@ -415,8 +420,8 @@ contract ConfigFuzzTest is Test {
         uint16 minCR_BP,
         uint16 targetCR_BP
     ) public pure {
-        vm.assume(minCR_BP >= 10000 && minCR_BP <= 50000);
-        vm.assume(targetCR_BP >= 10000 && targetCR_BP <= 50000);
+        minCR_BP = uint16(bound(minCR_BP, 10000, 50000));
+        targetCR_BP = uint16(bound(targetCR_BP, 10000, 50000));
 
         // Conflict: targetCR < minCR
         bool hasConflict = targetCR_BP <= minCR_BP;
@@ -436,11 +441,8 @@ contract ConfigFuzzTest is Test {
         uint128 amount,
         uint16 feeBP
     ) public pure {
-        vm.assume(amount > 0);
-        vm.assume(feeBP <= Constants.BPS_BASE);
-
-        // Prevent overflow
-        vm.assume(uint256(amount) * uint256(feeBP) < type(uint256).max);
+        amount = uint128(bound(amount, 1, type(uint128).max));
+        feeBP = uint16(bound(feeBP, 0, Constants.BPS_BASE));
 
         // Calculate fee
         uint256 fee = (uint256(amount) * uint256(feeBP)) / Constants.BPS_BASE;
@@ -454,11 +456,13 @@ contract ConfigFuzzTest is Test {
         uint64 collateralValue,  // Changed to uint64
         uint64 debtValue
     ) public pure {
-        vm.assume(collateralValue > 1e9);
-        vm.assume(collateralValue < 1e17);  // Limit upper bound to prevent overflow
-        vm.assume(debtValue > 1e9);
-        vm.assume(debtValue < 1e17);
-        vm.assume(debtValue <= collateralValue * 10); // Ensure CR is meaningful
+        collateralValue = uint64(bound(collateralValue, 1e9 + 1, 1e17 - 1));
+        debtValue = uint64(bound(debtValue, 1e9 + 1, 1e17 - 1));
+        // Ensure CR is meaningful (debt <= collateral * 10)
+        if (debtValue > collateralValue * 10) {
+            debtValue = uint64(collateralValue * 10);
+        }
+        if (debtValue < 1e9 + 1) return; // Early return if bounds can't be satisfied
 
         // Calculate collateral ratio
         uint256 cr = (uint256(collateralValue) * Constants.BPS_BASE) / uint256(debtValue);

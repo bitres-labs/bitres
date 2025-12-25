@@ -23,14 +23,30 @@ const config: HardhatUserConfig = defineConfig({
     artifacts: "./artifacts"
   },
   solidity: {
-    version: "0.8.30",
-    settings: {
-      optimizer: {
-        enabled: true,
-        runs: 200
-      },
-      viaIR: true,
-      evmVersion: "prague"
+    compilers: [
+      {
+        version: "0.8.30",
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 200
+          },
+          viaIR: true,
+          evmVersion: "prague"
+        }
+      }
+    ],
+    overrides: {
+      // SMTChecker configuration for formal verification
+      // Run with: npx hardhat compile --config hardhat.smt.config.ts
+      "contracts/libraries/CollateralMath.sol": {
+        version: "0.8.30",
+        settings: {
+          optimizer: { enabled: true, runs: 200 },
+          viaIR: true,
+          evmVersion: "prague"
+        }
+      }
     }
   },
   networks: {
@@ -45,6 +61,13 @@ const config: HardhatUserConfig = defineConfig({
       type: "http",
       url: "http://127.0.0.1:8545",
       timeout: 60000
+    },
+    sepolia: {
+      type: "http",
+      url: SEPOLIA_RPC_URL || "https://rpc.sepolia.org",
+      accounts: SEPOLIA_PRIVATE_KEY ? [SEPOLIA_PRIVATE_KEY] : [],
+      chainId: 11155111,
+      timeout: 120000
     }
   },
   etherscan: {

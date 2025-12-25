@@ -42,10 +42,10 @@ contract FuzzBasicTest is Test {
 
     // ==================== Using vm.assume to Constrain Input ====================
 
-    /// @notice Fuzz test 4: Using assume to filter invalid input
-    function testFuzz_WithAssume(uint256 x) public pure {
-        // Only test x in range [100, 1000]
-        vm.assume(x >= 100 && x <= 1000);
+    /// @notice Fuzz test 4: Using bound to constrain input (preferred over assume for ranges)
+    function testFuzz_WithBound(uint256 x) public pure {
+        // Use bound instead of assume for range constraints (more efficient)
+        x = bound(x, 100, 1000);
 
         // Verify x is indeed in range
         assertGe(x, 100);

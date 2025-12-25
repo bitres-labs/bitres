@@ -167,18 +167,21 @@ export default buildModule("FullSystemV2", (m) => {
   );
 
   // ===== 12. ConfigGov params =====
+  // ParamType enum: 0=MINT_FEE_BP, 1=INTEREST_FEE_BP, 2=MIN_BTB_PRICE, 3=MAX_BTB_RATE,
+  //                 4=PCE_MAX_DEVIATION, 5=REDEEM_FEE_BP, 6=MAX_BTD_RATE
   m.call(
     configGov,
     "setParamsBatch",
     [
-      [0, 1, 2, 3, 4, 5],
+      [0, 1, 2, 3, 4, 5, 6],
       [
         50, // mintFeeBP 0.5%
         1000, // interestFeeBP 10%
-        5n * 10n ** 17n, // minBTBPrice 0.5
-        5n * 10n ** 16n, // maxBTBRate 5%
+        5n * 10n ** 17n, // minBTBPrice 0.5 BTD
+        2000, // maxBTBRate 20% (2000 bps, per whitepaper)
         1n * 10n ** 16n, // PCE deviation 1%
         50, // redeemFeeBP 0.5%
+        2000, // maxBTDRate 20% (2000 bps, per whitepaper)
       ],
     ],
     { id: "ConfigGovSetParams" }
