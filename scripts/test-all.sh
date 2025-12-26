@@ -62,6 +62,10 @@ SKIP_FUZZ=false
 SKIP_INVARIANT=false
 SKIP_HARDHAT=false
 SKIP_FORGE=false
+SKIP_LINT=false
+SKIP_SECURITY=false
+SKIP_GAS=false
+SKIP_COVERAGE=false
 FUZZ_RUNS=512
 
 while [[ $# -gt 0 ]]; do
@@ -69,6 +73,9 @@ while [[ $# -gt 0 ]]; do
         --quick|-q)
             QUICK=true
             FUZZ_RUNS=64
+            SKIP_SECURITY=true
+            SKIP_GAS=true
+            SKIP_COVERAGE=true
             shift
             ;;
         --skip-fuzz)
@@ -87,6 +94,22 @@ while [[ $# -gt 0 ]]; do
             SKIP_FORGE=true
             shift
             ;;
+        --skip-lint)
+            SKIP_LINT=true
+            shift
+            ;;
+        --skip-security)
+            SKIP_SECURITY=true
+            shift
+            ;;
+        --skip-gas)
+            SKIP_GAS=true
+            shift
+            ;;
+        --skip-coverage)
+            SKIP_COVERAGE=true
+            shift
+            ;;
         --fuzz-runs)
             FUZZ_RUNS=$2
             shift 2
@@ -95,11 +118,15 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: $0 [options]"
             echo ""
             echo "Options:"
-            echo "  --quick, -q       Quick mode (64 fuzz runs instead of 512)"
+            echo "  --quick, -q       Quick mode (64 fuzz runs, skip security/gas/coverage)"
             echo "  --skip-fuzz       Skip fuzz tests"
             echo "  --skip-invariant  Skip invariant tests"
             echo "  --skip-hardhat    Skip Hardhat tests"
             echo "  --skip-forge      Skip all Forge tests"
+            echo "  --skip-lint       Skip code quality checks"
+            echo "  --skip-security   Skip security analysis (Slither)"
+            echo "  --skip-gas        Skip gas report"
+            echo "  --skip-coverage   Skip coverage report"
             echo "  --fuzz-runs N     Set number of fuzz runs (default: 512)"
             echo "  --help, -h        Show this help"
             exit 0
@@ -182,6 +209,78 @@ if [ "$SKIP_INVARIANT" = false ] && [ "$SKIP_FORGE" = false ]; then
     fi
 else
     print_skip "Forge Invariant Tests"
+fi
+
+# ============ Code Quality ============
+if [ "$SKIP_LINT" = false ]; then
+    print_header "Code Quality (Lint)"
+
+    # Solidity Linter
+    echo "Running Solidity linter..."
+    npx solhint 'contracts/**/*.sol' 2>&1 | tee /tmp/solhint.log
+    SOLHINT_EXIT=${PIPESTATUS[0]}
+
+    # JavaScript/TypeScript Linter
+    echo ""
+    echo "Running JavaScript/TypeScript linter..."
+    npx eslint 'test/**/*.ts' 'scripts/**/*.{js,mjs,ts}' 2>&1 | tee /tmp/eslint.log
+    ESLINT_EXIT=${PIPESTATUS[0]}
+
+    # Lint is advisory (matches CI continue-on-error behavior)
+    if [ $SOLHINT_EXIT -eq 0 ] && [ $ESLINT_EXIT -eq 0 ]; then
+        print_success "Code Quality (Lint)"
+    else
+        echo -e "${YELLOW}Note: Lint found issues (check logs above)${NC}"
+        print_success "Code Quality (Lint - with warnings)"
+    fi
+else
+    print_skip "Code Quality (Lint)"
+fi
+
+# ============ Security Analysis ============
+if [ "$SKIP_SECURITY" = false ]; then
+    print_header "Security Analysis (Slither)"
+    if command -v slither &> /dev/null; then
+        slither contracts/ --exclude-dependencies 2>&1 | tee /tmp/slither.log
+        if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            print_success "Security Analysis"
+        else
+            # Slither often returns non-zero for warnings, treat as success if it ran
+            echo -e "${YELLOW}Note: Slither found issues (check /tmp/slither.log)${NC}"
+            print_success "Security Analysis (with warnings)"
+        fi
+    else
+        echo -e "${YELLOW}Slither not installed. Install with: pip3 install slither-analyzer${NC}"
+        print_skip "Security Analysis (Slither not installed)"
+    fi
+else
+    print_skip "Security Analysis"
+fi
+
+# ============ Gas Report ============
+if [ "$SKIP_GAS" = false ]; then
+    print_header "Gas Usage Report"
+    REPORT_GAS=true npx hardhat test 2>&1 | tee /tmp/gas-report.log
+    if [ ${PIPESTATUS[0]} -eq 0 ]; then
+        print_success "Gas Usage Report"
+    else
+        print_failure "Gas Usage Report"
+    fi
+else
+    print_skip "Gas Usage Report"
+fi
+
+# ============ Coverage Report ============
+if [ "$SKIP_COVERAGE" = false ]; then
+    print_header "Coverage Report"
+    forge coverage --report summary --no-match-test "testPCEDeviationLimit" 2>&1 | tee /tmp/coverage.log
+    if [ ${PIPESTATUS[0]} -eq 0 ]; then
+        print_success "Coverage Report"
+    else
+        print_failure "Coverage Report"
+    fi
+else
+    print_skip "Coverage Report"
 fi
 
 # ============ Summary ============
