@@ -392,10 +392,7 @@ contract FarmingPool is Ownable, ReentrancyGuard, IFarmingPool {
         }
 
         if (amount > 0) {
-            _updateLPValueIfNeeded(pid, pool.kind);
-            uint256 stakeValue = _calculateStakeValueUSD(pool, amount, pool.kind);
-            require(stakeValue >= Constants.MIN_USD_VALUE, "FarmingPool: stake too small");
-            require(stakeValue <= Constants.MAX_USD_VALUE, "FarmingPool: stake too large");
+            _validateStakeAmount(pool, amount, pool.kind);
             pool.lpToken.safeTransferFrom(payer, address(this), amount);
             user.amount += amount;
             pool.totalStaked += amount;
@@ -430,12 +427,9 @@ contract FarmingPool is Ownable, ReentrancyGuard, IFarmingPool {
         IFarmingPool.UserInfo storage user = _userInfo[pid][ownerAddr];
         require(user.amount >= amount, "FarmingPool: withdraw exceeds staked");
 
-        // Validate withdraw amount USD value (prevent dust and overflow attacks)
+        // Validate withdraw amount (prevent dust and overflow attacks)
         if (amount > 0) {
-            _updateLPValueIfNeeded(pid, pool.kind);
-            uint256 withdrawValue = _calculateStakeValueUSD(pool, amount, pool.kind);
-            require(withdrawValue >= Constants.MIN_USD_VALUE, "FarmingPool: withdraw too small");
-            require(withdrawValue <= Constants.MAX_USD_VALUE, "FarmingPool: withdraw too large");
+            _validateStakeAmount(pool, amount, pool.kind);
         }
 
         updatePool(pid);
@@ -622,5 +616,68 @@ contract FarmingPool is Ownable, ReentrancyGuard, IFarmingPool {
             return 3_000e18;
         }
         revert("FarmingPool: unsupported token");
+    }
+
+    // ============ Token Amount Validation ============
+
+    /// @notice Validates token amount against system limits
+    /// @dev Uses token-specific min/max limits instead of USD value
+    /// @param token Token address
+    /// @param amount Token amount (in token's native decimals)
+    function _validateTokenAmount(address token, uint256 amount) internal view {
+        if (token == core.WBTC()) {
+            require(amount >= Constants.MIN_BTC_AMOUNT, "FarmingPool: amount too small");
+            require(amount <= Constants.MAX_WBTC_AMOUNT, "FarmingPool: amount too large");
+        } else if (token == core.USDC() || token == core.USDT()) {
+            require(amount >= Constants.MIN_STABLECOIN_6_AMOUNT, "FarmingPool: amount too small");
+            require(amount <= Constants.MAX_STABLECOIN_6_AMOUNT, "FarmingPool: amount too large");
+        } else if (token == core.WETH()) {
+            require(amount >= Constants.MIN_ETH_AMOUNT, "FarmingPool: amount too small");
+            require(amount <= Constants.MAX_ETH_AMOUNT, "FarmingPool: amount too large");
+        } else {
+            // 18-decimal tokens: BTD, BTB, BRS, stBTD, stBTB
+            require(amount >= Constants.MIN_STABLECOIN_18_AMOUNT, "FarmingPool: amount too small");
+            require(amount <= Constants.MAX_STABLECOIN_18_AMOUNT, "FarmingPool: amount too large");
+        }
+    }
+
+    /// @notice Validates LP token amount by checking underlying token amounts
+    /// @dev Calculates underlying amounts from LP and validates each
+    /// @param lpToken LP token address
+    /// @param lpAmount LP token amount
+    function _validateLPTokenAmount(IERC20 lpToken, uint256 lpAmount) internal view {
+        IUniswapV2Pair pair = IUniswapV2Pair(address(lpToken));
+        uint256 totalSupply = pair.totalSupply();
+        require(totalSupply > 0, "FarmingPool: zero LP supply");
+
+        (uint112 reserve0, uint112 reserve1, ) = pair.getReserves();
+        address token0 = pair.token0();
+        address token1 = pair.token1();
+
+        // Calculate underlying amounts
+        uint256 amount0 = Math.mulDiv(lpAmount, reserve0, totalSupply);
+        uint256 amount1 = Math.mulDiv(lpAmount, reserve1, totalSupply);
+
+        // Validate each underlying token amount
+        _validateTokenAmount(token0, amount0);
+        _validateTokenAmount(token1, amount1);
+    }
+
+    /// @notice Validates stake amount based on pool type
+    /// @dev For Single pools: validates token amount directly
+    ///      For LP pools: validates underlying token amounts
+    /// @param pool Pool info storage
+    /// @param amount Stake amount
+    /// @param kind Pool type
+    function _validateStakeAmount(
+        IFarmingPool.PoolInfo storage pool,
+        uint256 amount,
+        PoolKind kind
+    ) internal view {
+        if (kind == PoolKind.LP) {
+            _validateLPTokenAmount(pool.lpToken, amount);
+        } else {
+            _validateTokenAmount(address(pool.lpToken), amount);
+        }
     }
 }

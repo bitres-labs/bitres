@@ -20,8 +20,14 @@ const SEPOLIA_CHAINLINK = {
   ETH_USD: "0x694AA1769357215DE4FAC081bf1f309aDC325306",
 };
 
-// Official Uniswap WETH9 on Sepolia (users can wrap ETH directly)
-const SEPOLIA_WETH = "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14";
+// Note: We deploy our own MockWETH for simplicity
+// Users can still get ETH from faucets and the system will work the same
+
+// Fund distribution addresses (real addresses for testnet)
+const FUND_ADDRESSES = {
+  foundation: "0xb53f41e806ab204B2525bD8B43909D47b32a04ac",
+  team: "0x8F78bE5c6b41C2d7634d25C7db22b26409671ca9",
+};
 
 // Default parameters
 const DEFAULTS = {
@@ -40,8 +46,8 @@ export default buildModule("FullSystemSepolia", (m) => {
   const wbtc = m.contract("contracts/local/MockWBTC.sol:MockWBTC", [deployer], { id: "WBTC" });
   const usdc = m.contract("contracts/local/MockUSDC.sol:MockUSDC", [deployer], { id: "USDC" });
   const usdt = m.contract("contracts/local/MockUSDT.sol:MockUSDT", [deployer], { id: "USDT" });
-  // Use official Uniswap WETH9 (users can wrap ETH directly)
-  const weth = m.contractAt("IERC20", SEPOLIA_WETH, { id: "WETH" });
+  // Deploy our own MockWETH (simpler than using external WETH9)
+  const weth = m.contract("contracts/local/MockWETH.sol:MockWETH", [deployer], { id: "WETH" });
 
   // ===== 2. Core tokens =====
   const brs = m.contract("BRS", [deployer], { id: "BRS" });
@@ -128,10 +134,10 @@ export default buildModule("FullSystemSepolia", (m) => {
     id: "InterestPool",
   });
 
-  // FarmingPool fund split: Treasury 20%, Foundation(account1) 10%, Team(account2) 10%
-  // On Sepolia, we use deployer for all (can be changed later)
-  const farmingPool = m.contract("FarmingPool", [deployer, brs, configCore, [deployer, deployer, deployer], [20, 10, 10]], {
-    after: [configCore, brs],
+  // FarmingPool fund split: Treasury 20%, Foundation 10%, Team 10%
+  // Uses real addresses: Treasury (contract), Foundation, Team
+  const farmingPool = m.contract("FarmingPool", [deployer, brs, configCore, [treasury, FUND_ADDRESSES.foundation, FUND_ADDRESSES.team], [20, 10, 10]], {
+    after: [configCore, brs, treasury],
     id: "FarmingPool",
   });
 

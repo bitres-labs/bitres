@@ -117,4 +117,26 @@ contract MockPriceOracle is IPriceOracle {
     function getChainlinkBTCUSD() external view override returns (uint256) {
         return wbtcPrice; // Mock returns the same price
     }
+
+    // ============ TWAP Update Functions (no-op in mock) ============
+
+    function updateTWAPForWBTC() external override {
+        // No-op in mock - prices are set manually
+    }
+
+    function updateTWAPForBTD() external override {
+        // No-op in mock - prices are set manually
+    }
+
+    function updateTWAPForBTB() external override {
+        // No-op in mock - prices are set manually
+    }
+
+    function updateTWAPForBRS() external override {
+        // No-op in mock - prices are set manually
+    }
+
+    function updateTWAPAll() external override {
+        // No-op in mock - prices are set manually
+    }
 }

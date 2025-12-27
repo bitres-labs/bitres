@@ -12,7 +12,7 @@ const DEFAULTS = {
   iusdInitial: 10n ** 18n,
 };
 
-export default buildModule("FullSystemV2", (m) => {
+export default buildModule("FullSystemLocal", (m) => {
   const deployer = m.getAccount(0);
 
   // ===== 1. Mock tokens (collateral/stable) =====

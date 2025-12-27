@@ -202,6 +202,63 @@ contract PriceOracle is Ownable, IPriceOracle {
         return address(twapOracle);
     }
 
+    // ============ TWAP Update Functions ============
+
+    /**
+     * @notice Update TWAP for WBTC price query (WBTC/USDC pair)
+     * @dev Call before getWBTCPrice() if TWAP might be stale
+     */
+    function updateTWAPForWBTC() external {
+        if (useTWAP && address(twapOracle) != address(0)) {
+            twapOracle.updateIfNeeded(core.POOL_WBTC_USDC());
+        }
+    }
+
+    /**
+     * @notice Update TWAP for BTD price query (BTD/USDC pair)
+     * @dev Call before getBTDPrice() if TWAP might be stale
+     */
+    function updateTWAPForBTD() external {
+        if (useTWAP && address(twapOracle) != address(0)) {
+            twapOracle.updateIfNeeded(core.POOL_BTD_USDC());
+        }
+    }
+
+    /**
+     * @notice Update TWAP for BTB price query (BTB/BTD + BTD/USDC pairs)
+     * @dev Call before getBTBPrice() if TWAP might be stale
+     */
+    function updateTWAPForBTB() external {
+        if (useTWAP && address(twapOracle) != address(0)) {
+            twapOracle.updateIfNeeded(core.POOL_BTB_BTD());
+            twapOracle.updateIfNeeded(core.POOL_BTD_USDC());
+        }
+    }
+
+    /**
+     * @notice Update TWAP for BRS price query (BRS/BTD + BTD/USDC pairs)
+     * @dev Call before getBRSPrice() if TWAP might be stale
+     */
+    function updateTWAPForBRS() external {
+        if (useTWAP && address(twapOracle) != address(0)) {
+            twapOracle.updateIfNeeded(core.POOL_BRS_BTD());
+            twapOracle.updateIfNeeded(core.POOL_BTD_USDC());
+        }
+    }
+
+    /**
+     * @notice Update TWAP for all pairs (use when multiple prices needed)
+     * @dev Updates all 4 pairs: WBTC/USDC, BTD/USDC, BTB/BTD, BRS/BTD
+     */
+    function updateTWAPAll() external {
+        if (useTWAP && address(twapOracle) != address(0)) {
+            twapOracle.updateIfNeeded(core.POOL_WBTC_USDC());
+            twapOracle.updateIfNeeded(core.POOL_BTD_USDC());
+            twapOracle.updateIfNeeded(core.POOL_BTB_BTD());
+            twapOracle.updateIfNeeded(core.POOL_BRS_BTD());
+        }
+    }
+
     // ============ Chainlink Price Queries ============
 
     /**
@@ -516,7 +573,7 @@ contract PriceOracle is Ownable, IPriceOracle {
      * @param pool Uniswap V2 pool address
      * @param base Base token address
      * @param quote Quote token address
-     * @return Price (18 decimals)
+     * @return Price (18 decimals, quote per base)
      */
     function _getPriceTWAP(address pool, address base, address quote)
         internal view returns (uint256) {
@@ -537,14 +594,17 @@ contract PriceOracle is Ownable, IPriceOracle {
         uint8 baseDecimals = _getTokenDecimals(base);
         uint8 quoteDecimals = _getTokenDecimals(quote);
 
-        // Get TWAP price (already 18 decimals)
+        // TWAP price0 = token1/token0 (quote per base when token0==base)
+        // getTWAPPrice returns token1/token0 normalized to 18 decimals
         if (token0 == base) {
-            // token0/token1 = base/quote, we want quote/base
-            uint256 baseQuotePrice = twapOracle.getTWAPPrice(pool, baseDecimals, quoteDecimals);
-            return OracleMath.inversePrice(baseQuotePrice);
+            // token0 = base, token1 = quote
+            // getTWAPPrice returns: token1/token0 = quote/base (exactly what we want)
+            return twapOracle.getTWAPPrice(pool, baseDecimals, quoteDecimals);
         } else {
-            // token0/token1 = quote/base, exactly what we want
-            return twapOracle.getTWAPPrice(pool, quoteDecimals, baseDecimals);
+            // token0 = quote, token1 = base
+            // getTWAPPrice returns: token1/token0 = base/quote (need to invert)
+            uint256 basePerQuote = twapOracle.getTWAPPrice(pool, quoteDecimals, baseDecimals);
+            return OracleMath.inversePrice(basePerQuote);
         }
     }
 

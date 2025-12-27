@@ -17,6 +17,10 @@ contract UniswapV2Pair is ERC20 {
     address public token0;
     address public token1;
 
+    // Cumulative prices for TWAP oracle support
+    uint public price0CumulativeLast;
+    uint public price1CumulativeLast;
+
     uint public constant MINIMUM_LIQUIDITY = 10**3;
 
     uint private unlocked = 1;
@@ -76,11 +80,24 @@ contract UniswapV2Pair is ERC20 {
     }
 
     /**
-     * @notice Update reserves
+     * @notice Update reserves and cumulative prices for TWAP
      */
     function _update(uint balance0, uint balance1, uint112 _reserve0, uint112 _reserve1) private {
         require(balance0 <= type(uint112).max && balance1 <= type(uint112).max, 'UniswapV2: OVERFLOW');
         uint32 blockTimestamp = uint32(block.timestamp % 2**32);
+        uint32 timeElapsed;
+        unchecked {
+            timeElapsed = blockTimestamp - blockTimestampLast; // overflow is desired
+        }
+        if (timeElapsed > 0 && _reserve0 != 0 && _reserve1 != 0) {
+            // Update cumulative prices (Q112 format, overflow is desired)
+            // IMPORTANT: Cast to uint256 before bit shift, and use parentheses
+            // because division has higher precedence than bit shift
+            unchecked {
+                price0CumulativeLast += (uint256(_reserve1) << 112) / _reserve0 * timeElapsed;
+                price1CumulativeLast += (uint256(_reserve0) << 112) / _reserve1 * timeElapsed;
+            }
+        }
         reserve0 = uint112(balance0);
         reserve1 = uint112(balance1);
         blockTimestampLast = blockTimestamp;
@@ -228,10 +245,23 @@ contract UniswapV2Pair is ERC20 {
 
     /**
      * @notice Set reserves (for testing)
+     * @dev Also updates cumulative prices for TWAP support
      */
     function setReserves(uint112 _reserve0, uint112 _reserve1) external {
+        uint32 blockTimestamp = uint32(block.timestamp % 2**32);
+        uint32 timeElapsed;
+        unchecked {
+            timeElapsed = blockTimestamp - blockTimestampLast;
+        }
+        // Update cumulative prices if reserves exist
+        if (timeElapsed > 0 && reserve0 != 0 && reserve1 != 0) {
+            unchecked {
+                price0CumulativeLast += uint(uint224(reserve1) << 112 / reserve0) * timeElapsed;
+                price1CumulativeLast += uint(uint224(reserve0) << 112 / reserve1) * timeElapsed;
+            }
+        }
         reserve0 = _reserve0;
         reserve1 = _reserve1;
-        blockTimestampLast = uint32(block.timestamp % 2**32);
+        blockTimestampLast = blockTimestamp;
     }
 }

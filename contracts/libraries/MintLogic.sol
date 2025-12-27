@@ -79,7 +79,6 @@ library MintLogic {
 
         // Calculate gross mint amount (before fee)
         result.btdGross = Math.mulDiv(result.usdValue, Constants.PRECISION_18, inputs.iusdPrice);
-        require(result.btdGross > 1e14, "Mint amount too small");
 
         // Calculate fee
         result.fee = Math.mulDiv(result.btdGross, inputs.feeBP, Constants.BPS_BASE);
@@ -90,6 +89,5 @@ library MintLogic {
         // New liability based on gross mint amount (including fee)
         uint256 newBTDSupply = inputs.currentBTDSupply + result.btdGross;
         result.newLiabilityValue = Math.mulDiv(newBTDSupply, inputs.iusdPrice, Constants.PRECISION_18);
-        require(result.newLiabilityValue >= Constants.MIN_USD_VALUE, "Resulting liability too small");
     }
 }

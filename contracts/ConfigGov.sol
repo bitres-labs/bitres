@@ -98,13 +98,13 @@ contract ConfigGov is Ownable {
             require(value <= 1000, "ConfigGov: redeem fee too high");
         } else if (paramType == ParamType.MIN_BTB_PRICE) {
             require(value >= 1e17, "ConfigGov: min BTB price too low"); // Minimum 0.1 BTD
-            require(value <= 2e18, "ConfigGov: min BTB price too high"); // Maximum 2 BTD
+            require(value <= 1e18, "ConfigGov: min BTB price too high"); // Maximum 1 BTD
         } else if (paramType == ParamType.MAX_BTB_RATE) {
             require(value >= 100, "ConfigGov: max BTB rate too low"); // Minimum 1% APR (100 bps)
-            require(value <= 2000, "ConfigGov: max BTB rate too high"); // Maximum 20% APR (2000 bps)
+            require(value <= 3000, "ConfigGov: max BTB rate too high"); // Maximum 30% APR (3000 bps)
         } else if (paramType == ParamType.MAX_BTD_RATE) {
             require(value >= 100, "ConfigGov: max BTD rate too low"); // Minimum 1% APR (100 bps)
-            require(value <= 2000, "ConfigGov: max BTD rate too high"); // Maximum 20% APR (2000 bps)
+            require(value <= 3000, "ConfigGov: max BTD rate too high"); // Maximum 30% APR (3000 bps)
         } else if (paramType == ParamType.PCE_MAX_DEVIATION) {
             require(value >= 1e15, "ConfigGov: PCE deviation too low"); // Minimum 0.1%
             require(value <= 1e17, "ConfigGov: PCE deviation too high"); // Maximum 10%

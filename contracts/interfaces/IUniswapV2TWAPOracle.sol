@@ -33,4 +33,19 @@ interface IUniswapV2TWAPOracle {
      * @dev Should be called periodically to maintain accurate TWAP data
      */
     function update(address pair) external;
+
+    /**
+     * @notice Check if a pair needs TWAP update
+     * @param pair Uniswap V2 pair address
+     * @return true if >= PERIOD has passed since last update
+     */
+    function needsUpdate(address pair) external view returns (bool);
+
+    /**
+     * @notice Update TWAP only if needed (>= PERIOD since last update)
+     * @param pair Uniswap V2 pair address
+     * @return updated True if update was performed
+     * @dev Saves gas by skipping if recently updated
+     */
+    function updateIfNeeded(address pair) external returns (bool updated);
 }

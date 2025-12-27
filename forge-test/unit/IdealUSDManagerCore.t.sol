@@ -199,12 +199,13 @@ contract IdealUSDManagerCoreTest {
         }
         require(reverted, "should reject PCE change > 2%");
 
-        // Set max deviation to 0 (disable check)
-        configGov.setParam(ConfigGov.ParamType.PCE_MAX_DEVIATION, 0);
+        // Set max deviation to 10% (maximum allowed by ConfigGov)
+        configGov.setParam(ConfigGov.ParamType.PCE_MAX_DEVIATION, 1e17);
 
-        // Now large change should succeed
-        pce.setAnswer(int256(350_00_000_000)); // huge jump
+        // Now larger change should succeed (within 10% limit)
+        // Previous successful PCE was 304.5, so 9% increase = 331.9
+        pce.setAnswer(int256(331_90_000_000)); // 304.5 * 1.09 = 331.9
         mgr.updateIUSD();
-        require(mgr.getCurrentIUSD() > 0, "should succeed when check disabled");
+        require(mgr.getCurrentIUSD() > 0, "should succeed with higher limit");
     }
 }

@@ -41,7 +41,7 @@ function loadAddresses() {
   // remove prefix
   const map = {};
   for (const [k, v] of Object.entries(raw)) {
-    const key = k.replace("FullSystemV2#", "");
+    const key = k.replace("FullSystemLocal#", "");
     map[key] = v;
   }
   return map;
@@ -114,7 +114,7 @@ async function main() {
     await provider.send("evm_setAutomine", [true]);
   }
 
-  // 0.5) roles + oracle toggles
+  // 0.5) roles configuration
   console.log("=> configure roles...");
   const MINTER_ROLE = keccak256(stringToHex("MINTER_ROLE"));
   const btdAbi = loadAbi("contracts/BTD.sol/BTD.json");
@@ -151,7 +151,7 @@ async function main() {
     args: [MINTER_ROLE, minter.address],
     account: owner.account,
   });
-  // Disable TWAP during local init to avoid missing TWAP config
+  // Temporarily disable TWAP during LP setup (will enable after TWAP observations)
   await priceOracle.write.setUseTWAP([false], { account: owner.account });
 
   // 1) oracle prices
@@ -165,11 +165,12 @@ async function main() {
     account: owner.account,
   });
 
-  // 1.5) mint BTD/BTB needed for LP (minimal amounts)
-  // BTD: 1 (BTD/USDC) + 1 (BTB/BTD) + 1 (BRS/BTD) = 3, vault init mints separately
-  // BTB: 1 (BTB/BTD), vault init mints separately
-  const mintBtdAmount = parseEther("5"); // 3 needed + buffer
-  const mintBtbAmount = parseEther("2"); // 1 needed + buffer
+  // 1.5) mint BTD/BTB needed for LP (using system minimum amounts + buffer for MINIMUM_LIQUIDITY)
+  // BTD: 0.01 (BTD/USDC) + 0.001 (BTB/BTD) + 0.001 (BRS/BTD) + 0.001 vault = ~0.013
+  // BTB: 0.001 (BTB/BTD) + 0.001 vault = ~0.002
+  // Use 0.02 each for safety buffer
+  const mintBtdAmount = parseEther("0.02");
+  const mintBtbAmount = parseEther("0.02");
   await owner.writeContract({
     address: addresses.BTD,
     abi: btdAbi,
@@ -186,7 +187,10 @@ async function main() {
   });
 
   // 2) add real LP liquidity and mint LP
-  console.log("=> add LP liquidity and mint LP...");
+  // Use system minimum amounts: both tokens must meet their minimum requirements
+  // MIN_BTC_AMOUNT = 1 satoshi, MIN_STABLECOIN_6_AMOUNT = 1000, MIN_STABLECOIN_18_AMOUNT = 1e15
+  // Also sqrt(amt0 * amt1) > 1000 for Uniswap MINIMUM_LIQUIDITY
+  console.log("=> add LP liquidity and mint LP (using system minimum amounts)...");
   const addLP = async (pair, token0, token1, amt0, amt1, label) => {
     await token0.write.transfer([pair.address, amt0], { account: owner.account });
     await token1.write.transfer([pair.address, amt1], { account: owner.account });
@@ -200,53 +204,88 @@ async function main() {
     console.log(`   ✓ ${label} LP minted: ${lpBal.toString()}`);
     return lpBal;
   };
-  // Use minimal LP amounts - just enough to initialize pools (sqrt(a*b) > 1000)
-  // Price ratio must match oracle to pass 1% deviation check
+  // LP amounts: use minimum that satisfies both tokens' limits
+  // WBTC/USDC: 1000 satoshi (>= MIN_BTC_AMOUNT=1) + 1020000 USDC units (>= MIN_STABLECOIN_6_AMOUNT=1000)
+  // Price ratio ~$102k/BTC to match oracle
   const lpWBTCUSDC = await addLP(
     pairWBTCUSDC,
     wbtc,
     usdc,
-    1n * 10n ** 3n,        // 0.00001 WBTC
-    102n * 10n ** 4n,      // 1.02 USDC (exactly $102k/BTC to match oracle)
+    1000n,                 // 1000 satoshi (0.00001 WBTC) - meets MIN_BTC_AMOUNT
+    1020000n,              // 1.02 USDC - meets MIN_STABLECOIN_6_AMOUNT, matches $102k/BTC
     "WBTC/USDC"
   );
+  // BTD/USDC: Need extra buffer due to different decimals (18 vs 6)
+  // The LP liquidity = sqrt(btd * usdc) is small, so underlying validation needs more tokens
+  // Use 0.01 BTD and 0.01 USDC + buffer for MINIMUM_LIQUIDITY burn
   const lpBTDUSDC = await addLP(
     pairBTDUSDC,
     btd,
     usdc,
-    1n * 10n ** 18n,       // 1 BTD
-    1n * 10n ** 6n,        // 1 USDC
+    1n * 10n ** 16n + 1001n,  // 0.01 BTD + buffer for MINIMUM_LIQUIDITY
+    10001n,                   // 0.01 USDC + buffer for MINIMUM_LIQUIDITY
     "BTD/USDC"
   );
+  // BTB/BTD: slightly over 1e15 each to account for MINIMUM_LIQUIDITY burn
   const lpBTBBTD = await addLP(
     pairBTBBTD,
     btb,
     btd,
-    1n * 10n ** 18n,       // 1 BTB
-    1n * 10n ** 18n,       // 1 BTD
+    1n * 10n ** 15n + 1001n,  // 0.001 BTB + buffer
+    1n * 10n ** 15n + 1001n,  // 0.001 BTD + buffer
     "BTB/BTD"
   );
-  // BRS/BTD LP: deployer has 1 BRS reserved in Ignition (0.1 for LP, 0.9 for pool 9)
-  // BRS:BTD ratio 100:1 (1 BRS = 0.01 BTD initial price)
+  // BRS/BTD: slightly over 1e15 each to account for MINIMUM_LIQUIDITY burn
   const lpBRSBTD = await addLP(
     pairBRSBTD,
     brs,
     btd,
-    1n * 10n ** 17n,       // 0.1 BRS (minimal for LP, rest for pool 9 staking)
-    1n * 10n ** 15n,       // 0.001 BTD (ratio 100:1, so 1 BRS = 0.01 BTD)
+    1n * 10n ** 15n + 1001n,  // 0.001 BRS + buffer
+    1n * 10n ** 15n + 1001n,  // 0.001 BTD + buffer
     "BRS/BTD"
   );
 
-  // 2.5) init stBTD/stBTB vaults (1 unit each)
-  console.log("=> init stBTD/stBTB vaults...");
-  const oneBTD = parseEther("1");
-  const oneBTB = parseEther("1");
-  await write("contracts/BTD.sol/BTD.json", addresses.BTD, "mint", [owner.account.address, oneBTD]);
-  await write("contracts/BTD.sol/BTD.json", addresses.BTD, "approve", [stBTD.address, oneBTD]);
-  await write("contracts/stBTD.sol/stBTD.json", addresses.stBTD, "deposit", [oneBTD, owner.account.address]);
-  await write("contracts/BTB.sol/BTB.json", addresses.BTB, "mint", [owner.account.address, oneBTB]);
-  await write("contracts/BTB.sol/BTB.json", addresses.BTB, "approve", [stBTB.address, oneBTB]);
-  await write("contracts/stBTB.sol/stBTB.json", addresses.stBTB, "deposit", [oneBTB, owner.account.address]);
+  // 2.3) Initialize TWAP Oracle (take observations and advance time)
+  console.log("=> initialize TWAP Oracle...");
+  const twapOracle = await get("TWAPOracle", "contracts/UniswapV2TWAPOracle.sol:UniswapV2TWAPOracle");
+  const pairs = [pairWBTCUSDC, pairBTDUSDC, pairBTBBTD, pairBRSBTD];
+
+  // Take first TWAP observation for all pairs
+  console.log("   -> Taking first TWAP observation...");
+  for (const pair of pairs) {
+    await twapOracle.write.update([pair.address], { account: owner.account });
+  }
+
+  // Advance time by 31 minutes (TWAP requires 30 min between observations)
+  console.log("   -> Advancing time by 31 minutes...");
+  if (provider?.request) {
+    await provider.request({ method: "evm_increaseTime", params: [31 * 60] });
+    await provider.request({ method: "evm_mine", params: [] });
+  } else if (provider?.send) {
+    await provider.send("evm_increaseTime", [31 * 60]);
+    await provider.send("evm_mine", []);
+  }
+
+  // Take second TWAP observation for all pairs
+  console.log("   -> Taking second TWAP observation...");
+  for (const pair of pairs) {
+    await twapOracle.write.update([pair.address], { account: owner.account });
+  }
+
+  // Enable TWAP now that observations are ready
+  console.log("   -> Enabling TWAP...");
+  await priceOracle.write.setUseTWAP([true], { account: owner.account });
+  console.log("   ✓ TWAP Oracle initialized and enabled");
+
+  // 2.5) init stBTD/stBTB vaults (using system minimum amounts)
+  console.log("=> init stBTD/stBTB vaults (using MIN_STABLECOIN_18_AMOUNT)...");
+  const minStake = 1n * 10n ** 15n; // MIN_STABLECOIN_18_AMOUNT = 0.001 tokens
+  await write("contracts/BTD.sol/BTD.json", addresses.BTD, "mint", [owner.account.address, minStake]);
+  await write("contracts/BTD.sol/BTD.json", addresses.BTD, "approve", [stBTD.address, minStake]);
+  await write("contracts/stBTD.sol/stBTD.json", addresses.stBTD, "deposit", [minStake, owner.account.address]);
+  await write("contracts/BTB.sol/BTB.json", addresses.BTB, "mint", [owner.account.address, minStake]);
+  await write("contracts/BTB.sol/BTB.json", addresses.BTB, "approve", [stBTB.address, minStake]);
+  await write("contracts/stBTB.sol/stBTB.json", addresses.stBTB, "deposit", [minStake, owner.account.address]);
 
   // 3) configure farming pools (same weights)
   console.log("=> configure FarmingPool pools...");
@@ -270,48 +309,28 @@ async function main() {
     account: owner.account,
   });
 
-  // 3.5) stake small amounts to activate (LP uses real UNI-V2)
-  console.log("=> seed staking for pools...");
+  // 3.5) stake using system minimum amounts
+  // MIN_BTC_AMOUNT = 1, MIN_STABLECOIN_6_AMOUNT = 1000, MIN_STABLECOIN_18_AMOUNT = 1e15, MIN_ETH_AMOUNT = 1e10
+  console.log("=> seed staking for pools (using system minimum amounts)...");
 
-  // Get owner's stBTD/stBTB balances from vault init (should be ~1 unit each minus dust)
-  const stBTDAbi = loadAbi("contracts/stBTD.sol/stBTD.json");
-  const stBTBAbi = loadAbi("contracts/stBTB.sol/stBTB.json");
-  const ownerStBTD = await publicClient.readContract({
-    address: stBTD.address,
-    abi: stBTDAbi,
-    functionName: "balanceOf",
-    args: [owner.account.address],
-  });
-  const ownerStBTB = await publicClient.readContract({
-    address: stBTB.address,
-    abi: stBTBAbi,
-    functionName: "balanceOf",
-    args: [owner.account.address],
-  });
+  // System minimum amounts for each token type
+  const MIN_BTC = 1n;                    // 1 satoshi
+  const MIN_STABLE_6 = 1000n;            // 0.001 USDC/USDT
+  const MIN_STABLE_18 = 1n * 10n ** 15n; // 0.001 BTD/BTB/BRS/stBTD/stBTB
+  const MIN_ETH = 1n * 10n ** 10n;       // 0.00000001 ETH
 
-  // Get owner's remaining BRS balance (0.5 BRS left after LP creation)
-  const brsAbi = loadAbi("contracts/BRS.sol/BRS.json");
-  const ownerBRS = await publicClient.readContract({
-    address: brs.address,
-    abi: brsAbi,
-    functionName: "balanceOf",
-    args: [owner.account.address],
-  });
-
-  // Use minimal stake amounts - TVL < $1 per pool (pools 3-4, 7-9 = $1)
-  // Prices: WBTC=$102k, WETH=$3k, BTD/BTB/stBTD/stBTB=$1, BRS=$0.01, USDC/USDT=$1
-  // LP pools need slightly larger amounts due to contract minimums
+  // For LP pools, stake all LP tokens (they're already minimal)
   const stakePlans = [
-    { id: 0, token: pairBRSBTD, amount: lpBRSBTD / 100n, name: "BRS/BTD LP" },     // ~$0.01 TVL
-    { id: 1, token: pairBTDUSDC, amount: lpBTDUSDC / 100n, name: "BTD/USDC LP" },  // ~$0.01 TVL
-    { id: 2, token: pairBTBBTD, amount: lpBTBBTD / 100n, name: "BTB/BTD LP" },     // ~$0.01 TVL
-    { id: 3, token: usdc, amount: parseUnits("1", 6), name: "USDC" },              // $1.00 TVL
-    { id: 4, token: usdt, amount: parseUnits("1", 6), name: "USDT" },              // $1.00 TVL
-    { id: 5, token: wbtc, amount: parseUnits("0.000005", 8), name: "WBTC" },       // ~$0.51 TVL
-    { id: 6, token: weth, amount: parseEther("0.0002"), name: "WETH" },            // ~$0.60 TVL
-    { id: 7, token: stBTD, amount: parseEther("1"), name: "stBTD" },               // $1.00 TVL
-    { id: 8, token: stBTB, amount: parseEther("1"), name: "stBTB" },               // $1.00 TVL
-    { id: 9, token: brs, amount: parseEther("0.9"), name: "BRS" },                 // $0.90 TVL (limited by 1 BRS total)
+    { id: 0, token: pairBRSBTD, amount: lpBRSBTD, name: "BRS/BTD LP" },
+    { id: 1, token: pairBTDUSDC, amount: lpBTDUSDC, name: "BTD/USDC LP" },
+    { id: 2, token: pairBTBBTD, amount: lpBTBBTD, name: "BTB/BTD LP" },
+    { id: 3, token: usdc, amount: MIN_STABLE_6, name: "USDC" },
+    { id: 4, token: usdt, amount: MIN_STABLE_6, name: "USDT" },
+    { id: 5, token: wbtc, amount: MIN_BTC, name: "WBTC" },
+    { id: 6, token: weth, amount: MIN_ETH, name: "WETH" },
+    { id: 7, token: stBTD, amount: MIN_STABLE_18, name: "stBTD" },
+    { id: 8, token: stBTB, amount: MIN_STABLE_18, name: "stBTB" },
+    { id: 9, token: brs, amount: MIN_STABLE_18, name: "BRS" },
   ];
 
   for (const plan of stakePlans) {

@@ -98,6 +98,33 @@ interface IPriceOracle {
      */
     function getTWAPOracle() external view returns (address oracle);
 
+    // ============ TWAP Update Functions ============
+
+    /**
+     * @notice Update TWAP for WBTC price (WBTC/USDC pair)
+     */
+    function updateTWAPForWBTC() external;
+
+    /**
+     * @notice Update TWAP for BTD price (BTD/USDC pair)
+     */
+    function updateTWAPForBTD() external;
+
+    /**
+     * @notice Update TWAP for BTB price (BTB/BTD + BTD/USDC pairs)
+     */
+    function updateTWAPForBTB() external;
+
+    /**
+     * @notice Update TWAP for BRS price (BRS/BTD + BTD/USDC pairs)
+     */
+    function updateTWAPForBRS() external;
+
+    /**
+     * @notice Update TWAP for all pairs
+     */
+    function updateTWAPAll() external;
+
     // ============ Chainlink Related ============
 
     /**

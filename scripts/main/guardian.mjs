@@ -58,7 +58,7 @@ function loadAddresses() {
   const raw = JSON.parse(fs.readFileSync(ADDR_FILE, "utf8"));
   const map = {};
   for (const [k, v] of Object.entries(raw)) {
-    map[k.replace("FullSystemV2#", "")] = v;
+    map[k.replace("FullSystemLocal#", "")] = v;
   }
   return map;
 }

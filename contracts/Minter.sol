@@ -162,6 +162,22 @@ contract Minter is ReentrancyGuard, Ownable, Pausable, IMinter {
     }
 
     /**
+     * @notice Update TWAP for WBTC price if needed
+     * @dev Ensures TWAP is fresh before querying price
+     */
+    function _updateTWAPForWBTC() internal {
+        _getPriceOracle().updateTWAPForWBTC();
+    }
+
+    /**
+     * @notice Update TWAP for all prices if needed
+     * @dev Ensures all TWAPs are fresh before querying prices
+     */
+    function _updateTWAPAll() internal {
+        _getPriceOracle().updateTWAPAll();
+    }
+
+    /**
      * @notice Get WBTC/USD price (internal use)
      * @dev Queries from PriceOracle contract, price in 18-decimal USD
      * @dev For external calls use priceOracle.getWBTCPrice() directly
@@ -343,6 +359,9 @@ contract Minter is ReentrancyGuard, Ownable, Pausable, IMinter {
      * @param wbtcAmount WBTC amount to deposit (8 decimals)
      */
     function mintBTD(uint256 wbtcAmount) external nonReentrant whenNotPaused {
+        // Update TWAP for WBTC price (only if needed, saves gas if recently updated)
+        _updateTWAPForWBTC();
+
         // Deposit limit check: BTC min/max amount
         _checkWBTCAmount(wbtcAmount);
 
@@ -428,6 +447,9 @@ contract Minter is ReentrancyGuard, Ownable, Pausable, IMinter {
      * @param btdAmount BTD amount to burn (18 decimals)
      */
     function _redeemBTD(address account, uint256 btdAmount) internal {
+        // Update TWAP for all prices (WBTC always needed, BTD/BTB/BRS needed when CR<100%)
+        _updateTWAPAll();
+
         require(btdAmount > 0, "Invalid amount");
         require(
             IMintableERC20(core.BTD()).balanceOf(account) >= btdAmount,
@@ -557,16 +579,14 @@ contract Minter is ReentrancyGuard, Ownable, Pausable, IMinter {
      * @param btbAmount BTB amount (18 decimals)
      */
     function _redeemBTB(address account, uint256 btbAmount) internal {
+        // Update TWAP for WBTC price (needed for CR calculation)
+        _updateTWAPForWBTC();
+
         // Get all prices at once (gas saving)
         uint256 wbtcPrice = getWBTCPrice();
         uint256 iusdPrice = getIUSDPrice();
         uint256 cr = _getCRWithPrice(wbtcPrice, iusdPrice);
         require(cr >= 1e18, "CR<100%, BTB not redeemable");
-
-        // Check redemption value meets min/max
-        uint256 redeemUsdValue = Math.mulDiv(btbAmount, iusdPrice, Constants.PRECISION_18);
-        require(redeemUsdValue >= Constants.MIN_USD_VALUE, "Redeem value too small");
-        require(redeemUsdValue <= Constants.MAX_USD_VALUE, "Redeem value too large");
 
         uint256 collateralValue = CollateralMath.collateralValue(totalWBTC(), wbtcPrice);
         uint256 liabilityValue = CollateralMath.liabilityValue(totalBTD(), totalStBTDEquivalent(), iusdPrice);

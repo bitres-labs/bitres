@@ -83,8 +83,8 @@ function loadAddresses() {
 
 // Get WBTC price from Uniswap pair
 async function getUniswapPrice(addresses) {
-  const pairAddr = addresses['FullSystemV2#PairWBTCUSDC'];
-  const wbtcAddr = addresses['FullSystemV2#WBTC'];
+  const pairAddr = addresses['FullSystemLocal#PairWBTCUSDC'];
+  const wbtcAddr = addresses['FullSystemLocal#WBTC'];
 
   const [reserve0, reserve1] = await publicClient.readContract({
     address: pairAddr,
@@ -115,10 +115,10 @@ async function getUniswapPrice(addresses) {
 
 // Update all mock oracles
 async function updateOracles(addresses, priceUSD) {
-  const chainlinkBtcUsd = addresses['FullSystemV2#ChainlinkBTCUSD'];
-  const chainlinkWbtcBtc = addresses['FullSystemV2#ChainlinkWBTCBTC'];
-  const mockPyth = addresses['FullSystemV2#MockPyth'];
-  const mockRedstone = addresses['FullSystemV2#MockRedstone'];
+  const chainlinkBtcUsd = addresses['FullSystemLocal#ChainlinkBTCUSD'];
+  const chainlinkWbtcBtc = addresses['FullSystemLocal#ChainlinkWBTCBTC'];
+  const mockPyth = addresses['FullSystemLocal#MockPyth'];
+  const mockRedstone = addresses['FullSystemLocal#MockRedstone'];
 
   // Chainlink BTC/USD: 8 decimals
   const chainlinkPrice = priceUSD / 10n ** 10n;  // 18 -> 8 decimals
@@ -174,7 +174,7 @@ async function updateOracles(addresses, priceUSD) {
 
 // Verify oracle price works
 async function verifyOraclePrice(addresses) {
-  const oracleAddr = addresses['FullSystemV2#PriceOracle'];
+  const oracleAddr = addresses['FullSystemLocal#PriceOracle'];
   try {
     const price = await publicClient.readContract({
       address: oracleAddr,
