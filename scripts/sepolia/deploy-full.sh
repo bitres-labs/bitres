@@ -10,7 +10,7 @@
 #   - Minter redeem: Ready after 30 minutes (needs TWAP prices)
 #
 # Prerequisites:
-#   - SEPOLIA_RPC_URL and PRIVATE_KEY in .env
+#   - SEPOLIA_RPC_URL and SEPOLIA_PRIVATE_KEY in .env
 #   - Sufficient Sepolia ETH in deployer account (~0.5 ETH recommended)
 #
 # Usage:
@@ -27,7 +27,7 @@ echo ""
 # Check environment
 if [ ! -f .env ]; then
     echo "Error: .env file not found"
-    echo "Please create .env with SEPOLIA_RPC_URL and PRIVATE_KEY"
+    echo "Please create .env with SEPOLIA_RPC_URL and SEPOLIA_PRIVATE_KEY"
     exit 1
 fi
 
@@ -38,8 +38,8 @@ if [ -z "$SEPOLIA_RPC_URL" ]; then
     exit 1
 fi
 
-if [ -z "$PRIVATE_KEY" ]; then
-    echo "Error: PRIVATE_KEY not set in .env"
+if [ -z "$SEPOLIA_PRIVATE_KEY" ]; then
+    echo "Error: SEPOLIA_PRIVATE_KEY not set in .env"
     exit 1
 fi
 
