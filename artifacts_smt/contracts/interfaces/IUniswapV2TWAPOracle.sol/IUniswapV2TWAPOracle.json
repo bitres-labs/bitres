@@ -1,0 +1,75 @@
+{
+  "_format": "hh3-artifact-1",
+  "contractName": "IUniswapV2TWAPOracle",
+  "sourceName": "contracts/interfaces/IUniswapV2TWAPOracle.sol",
+  "abi": [
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "pair",
+          "type": "address"
+        },
+        {
+          "internalType": "uint8",
+          "name": "token0Decimals",
+          "type": "uint8"
+        },
+        {
+          "internalType": "uint8",
+          "name": "token1Decimals",
+          "type": "uint8"
+        }
+      ],
+      "name": "getTWAPPrice",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "pair",
+          "type": "address"
+        }
+      ],
+      "name": "isTWAPReady",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "pair",
+          "type": "address"
+        }
+      ],
+      "name": "update",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    }
+  ],
+  "bytecode": "0x",
+  "deployedBytecode": "0x",
+  "linkReferences": {},
+  "deployedLinkReferences": {},
+  "immutableReferences": {},
+  "inputSourceName": "project/contracts/interfaces/IUniswapV2TWAPOracle.sol",
+  "buildInfoId": "solc-0_8_30-53912771f68c89d1d8ffad4452b66ac349641e0c"
+}

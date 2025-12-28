@@ -1,0 +1,39 @@
+{
+  "_format": "hh3-sol-build-info-1",
+  "id": "solc-0_8_30-46b5820f3a820058dffd6c2f450ecc0e4509b7ce",
+  "solcVersion": "0.8.30",
+  "solcLongVersion": "0.8.30+commit.73712a01",
+  "userSourceNameMap": {
+    "contracts/interfaces/IAggregatorV3.sol": "project/contracts/interfaces/IAggregatorV3.sol"
+  },
+  "input": {
+    "language": "Solidity",
+    "settings": {
+      "evmVersion": "prague",
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "outputSelection": {
+        "*": {
+          "": [
+            "ast"
+          ],
+          "*": [
+            "abi",
+            "evm.bytecode",
+            "evm.deployedBytecode",
+            "evm.methodIdentifiers",
+            "metadata"
+          ]
+        }
+      },
+      "remappings": []
+    },
+    "sources": {
+      "project/contracts/interfaces/IAggregatorV3.sol": {
+        "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.30;\n\n/**\n * @title IAggregatorV3 - Chainlink price aggregator V3 interface\n * @notice Standard interface for Chainlink price oracle, used for querying on-chain price data\n */\ninterface IAggregatorV3 {\n    /**\n     * @notice Get decimals for price data\n     * @return Decimal places for price precision (e.g., 8 means price needs to be divided by 1e8)\n     */\n    function decimals() external view returns (uint8);\n\n    /**\n     * @notice Get latest round price data\n     * @return roundId Price round ID\n     * @return answer Price answer (needs precision adjustment based on decimals())\n     * @return startedAt This round start timestamp\n     * @return updatedAt This round update timestamp\n     * @return answeredInRound This round answer round ID\n     */\n    function latestRoundData() external view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound);\n}\n"
+      }
+    }
+  }
+}

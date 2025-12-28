@@ -1,0 +1,13 @@
+{
+  "_format": "hh3-artifact-1",
+  "contractName": "FeedValidation",
+  "sourceName": "contracts/libraries/FeedValidation.sol",
+  "abi": [],
+  "bytecode": "0x6080806040523460175760399081601c823930815050f35b5f80fdfe5f80fdfea2646970667358221220bab7d299848832f8010ef9011ed70e8558cd4fc6a96df79b2cf3959d37eacdf364736f6c634300081e0033",
+  "deployedBytecode": "0x5f80fdfea2646970667358221220bab7d299848832f8010ef9011ed70e8558cd4fc6a96df79b2cf3959d37eacdf364736f6c634300081e0033",
+  "linkReferences": {},
+  "deployedLinkReferences": {},
+  "immutableReferences": {},
+  "inputSourceName": "project/contracts/libraries/FeedValidation.sol",
+  "buildInfoId": "solc-0_8_30-53912771f68c89d1d8ffad4452b66ac349641e0c"
+}

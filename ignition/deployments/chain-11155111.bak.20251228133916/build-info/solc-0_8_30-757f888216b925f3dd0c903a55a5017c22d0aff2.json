@@ -1,0 +1,39 @@
+{
+  "_format": "hh3-sol-build-info-1",
+  "id": "solc-0_8_30-757f888216b925f3dd0c903a55a5017c22d0aff2",
+  "solcVersion": "0.8.30",
+  "solcLongVersion": "0.8.30+commit.73712a01",
+  "userSourceNameMap": {
+    "contracts/local/MockAggregatorV3.sol": "project/contracts/local/MockAggregatorV3.sol"
+  },
+  "input": {
+    "language": "Solidity",
+    "settings": {
+      "evmVersion": "prague",
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "outputSelection": {
+        "*": {
+          "": [
+            "ast"
+          ],
+          "*": [
+            "abi",
+            "evm.bytecode",
+            "evm.deployedBytecode",
+            "evm.methodIdentifiers",
+            "metadata"
+          ]
+        }
+      },
+      "remappings": []
+    },
+    "sources": {
+      "project/contracts/local/MockAggregatorV3.sol": {
+        "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.20;\n\n/// @notice Mock Chainlink AggregatorV3Interface\ncontract MockAggregatorV3 {\n    int256 private _answer;\n    uint8 private _decimals = 8; // Default Chainlink commonly uses 8 decimals\n\n    constructor(int256 initialAnswer) {\n        _answer = initialAnswer;\n    }\n\n    function setDecimals(uint8 newDecimals) external {\n        _decimals = newDecimals;\n    }\n\n    function setAnswer(int256 newAnswer) external {\n        _answer = newAnswer;\n    }\n\n    function decimals() external view returns (uint8) {\n        return _decimals;\n    }\n\n    function latestRoundData()\n        external\n        view\n        returns (\n            uint80 roundId,\n            int256 answer,\n            uint256 startedAt,\n            uint256 updatedAt,\n            uint80 answeredInRound\n        )\n    {\n        return (0, _answer, 0, block.timestamp, 0);\n    }\n}\n"
+      }
+    }
+  }
+}

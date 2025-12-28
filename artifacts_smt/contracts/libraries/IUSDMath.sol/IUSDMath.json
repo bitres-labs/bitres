@@ -1,0 +1,13 @@
+{
+  "_format": "hh3-artifact-1",
+  "contractName": "IUSDMath",
+  "sourceName": "contracts/libraries/IUSDMath.sol",
+  "abi": [],
+  "bytecode": "0x6080806040523460175760399081601c823930815050f35b5f80fdfe5f80fdfea2646970667358221220a4fa0352c876cc0c63503148937f3168893c6bd847e503e5525492a3686c03fb64736f6c634300081e0033",
+  "deployedBytecode": "0x5f80fdfea2646970667358221220a4fa0352c876cc0c63503148937f3168893c6bd847e503e5525492a3686c03fb64736f6c634300081e0033",
+  "linkReferences": {},
+  "deployedLinkReferences": {},
+  "immutableReferences": {},
+  "inputSourceName": "project/contracts/libraries/IUSDMath.sol",
+  "buildInfoId": "solc-0_8_30-53912771f68c89d1d8ffad4452b66ac349641e0c"
+}

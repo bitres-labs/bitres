@@ -1,0 +1,13 @@
+{
+  "_format": "hh3-artifact-1",
+  "contractName": "InterestMath",
+  "sourceName": "contracts/libraries/InterestMath.sol",
+  "abi": [],
+  "bytecode": "0x6080806040523460175760399081601c823930815050f35b5f80fdfe5f80fdfea2646970667358221220fa622202a4124d89f91b9d302d46ee070751e0fac97431961d2640f4f3dcdd4f64736f6c634300081e0033",
+  "deployedBytecode": "0x5f80fdfea2646970667358221220fa622202a4124d89f91b9d302d46ee070751e0fac97431961d2640f4f3dcdd4f64736f6c634300081e0033",
+  "linkReferences": {},
+  "deployedLinkReferences": {},
+  "immutableReferences": {},
+  "inputSourceName": "project/contracts/libraries/InterestMath.sol",
+  "buildInfoId": "solc-0_8_30-53912771f68c89d1d8ffad4452b66ac349641e0c"
+}

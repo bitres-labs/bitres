@@ -1,0 +1,13 @@
+{
+  "_format": "hh3-artifact-1",
+  "contractName": "MintLogic",
+  "sourceName": "contracts/libraries/MintLogic.sol",
+  "abi": [],
+  "bytecode": "0x6080806040523460175760399081601c823930815050f35b5f80fdfe5f80fdfea2646970667358221220c1d49e1d7876b74aa9a0a32f05638fe20a9cb1bd5f9b8920cfa06a082eec36a964736f6c634300081e0033",
+  "deployedBytecode": "0x5f80fdfea2646970667358221220c1d49e1d7876b74aa9a0a32f05638fe20a9cb1bd5f9b8920cfa06a082eec36a964736f6c634300081e0033",
+  "linkReferences": {},
+  "deployedLinkReferences": {},
+  "immutableReferences": {},
+  "inputSourceName": "project/contracts/libraries/MintLogic.sol",
+  "buildInfoId": "solc-0_8_30-53912771f68c89d1d8ffad4452b66ac349641e0c"
+}

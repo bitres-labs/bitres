@@ -1,0 +1,70 @@
+{
+  "_format": "hh3-artifact-1",
+  "contractName": "MockRedstone",
+  "sourceName": "contracts/local/MockRedstone.sol",
+  "abi": [
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "dataFeedId",
+          "type": "bytes32"
+        }
+      ],
+      "name": "getValueForDataFeedId",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "dataFeedId",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "uint256",
+          "name": "price",
+          "type": "uint256"
+        }
+      ],
+      "name": "setValue",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "",
+          "type": "bytes32"
+        }
+      ],
+      "name": "values",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    }
+  ],
+  "bytecode": "0x6080604052348015600e575f5ffd5b5061016c8061001c5f395ff3fe608060405234801561000f575f5ffd5b506004361061003f575f3560e01c80636cfd19ea146100435780637a1202c814610064578063ccc2195f14610089575b5f5ffd5b6100626100513660046100ff565b5f9182526020829052604090912055565b005b61007761007236600461011f565b6100a8565b60405190815260200160405180910390f35b61007761009736600461011f565b5f6020819052908152604090205481565b5f818152602081905260408120548082036100f95760405162461bcd60e51b815260206004820152600d60248201526c15985b1d59481b9bdd081cd95d609a1b604482015260640160405180910390fd5b92915050565b5f5f60408385031215610110575f5ffd5b50508035926020909101359150565b5f6020828403121561012f575f5ffd5b503591905056fea2646970667358221220fbf15d936fcf408b0e0704d80ff12c8a831132df10a5d6f18df3250535a024c064736f6c634300081e0033",
+  "deployedBytecode": "0x608060405234801561000f575f5ffd5b506004361061003f575f3560e01c80636cfd19ea146100435780637a1202c814610064578063ccc2195f14610089575b5f5ffd5b6100626100513660046100ff565b5f9182526020829052604090912055565b005b61007761007236600461011f565b6100a8565b60405190815260200160405180910390f35b61007761009736600461011f565b5f6020819052908152604090205481565b5f818152602081905260408120548082036100f95760405162461bcd60e51b815260206004820152600d60248201526c15985b1d59481b9bdd081cd95d609a1b604482015260640160405180910390fd5b92915050565b5f5f60408385031215610110575f5ffd5b50508035926020909101359150565b5f6020828403121561012f575f5ffd5b503591905056fea2646970667358221220fbf15d936fcf408b0e0704d80ff12c8a831132df10a5d6f18df3250535a024c064736f6c634300081e0033",
+  "linkReferences": {},
+  "deployedLinkReferences": {},
+  "immutableReferences": {},
+  "inputSourceName": "project/contracts/local/MockRedstone.sol",
+  "buildInfoId": "solc-0_8_30-56961bc8cfb206a483432b05317efa9ebe866b3c"
+}

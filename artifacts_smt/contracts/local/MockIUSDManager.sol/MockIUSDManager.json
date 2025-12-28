@@ -1,0 +1,64 @@
+{
+  "_format": "hh3-artifact-1",
+  "contractName": "MockIUSDManager",
+  "sourceName": "contracts/local/MockIUSDManager.sol",
+  "abi": [
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "initialPrice",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "constructor"
+    },
+    {
+      "inputs": [],
+      "name": "getCurrentIUSD",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "lastUpdateTime",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "newPrice",
+          "type": "uint256"
+        }
+      ],
+      "name": "setPrice",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    }
+  ],
+  "bytecode": "0x608034605057601f61012838819003918201601f19168301916001600160401b03831184841017605457808492602094604052833981010312605057515f554260015560405160bf90816100698239f35b5f80fd5b634e487b7160e01b5f52604160045260245ffdfe60808060405260043610156011575f80fd5b5f3560e01c90816391b7f5ed14606f578163c8f33c91146057575063ce0e5b12146039575f80fd5b346053575f36600319011260535760205f54604051908152f35b5f80fd5b346053575f3660031901126053576020906001548152f35b3460535760203660031901126053576004355f554260015500fea2646970667358221220f8046a6a99b233bc074ca5099d6f16c4b01cc8d344fa7b79cf4522f251aeeeaf64736f6c634300081e0033",
+  "deployedBytecode": "0x60808060405260043610156011575f80fd5b5f3560e01c90816391b7f5ed14606f578163c8f33c91146057575063ce0e5b12146039575f80fd5b346053575f36600319011260535760205f54604051908152f35b5f80fd5b346053575f3660031901126053576020906001548152f35b3460535760203660031901126053576004355f554260015500fea2646970667358221220f8046a6a99b233bc074ca5099d6f16c4b01cc8d344fa7b79cf4522f251aeeeaf64736f6c634300081e0033",
+  "linkReferences": {},
+  "deployedLinkReferences": {},
+  "immutableReferences": {},
+  "inputSourceName": "project/contracts/local/MockIUSDManager.sol",
+  "buildInfoId": "solc-0_8_30-53912771f68c89d1d8ffad4452b66ac349641e0c"
+}

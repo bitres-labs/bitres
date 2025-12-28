@@ -1,0 +1,39 @@
+{
+  "_format": "hh3-sol-build-info-1",
+  "id": "solc-0_8_30-56961bc8cfb206a483432b05317efa9ebe866b3c",
+  "solcVersion": "0.8.30",
+  "solcLongVersion": "0.8.30+commit.73712a01",
+  "userSourceNameMap": {
+    "contracts/local/MockRedstone.sol": "project/contracts/local/MockRedstone.sol"
+  },
+  "input": {
+    "language": "Solidity",
+    "settings": {
+      "evmVersion": "prague",
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "outputSelection": {
+        "*": {
+          "": [
+            "ast"
+          ],
+          "*": [
+            "abi",
+            "evm.bytecode",
+            "evm.deployedBytecode",
+            "evm.methodIdentifiers",
+            "metadata"
+          ]
+        }
+      },
+      "remappings": []
+    },
+    "sources": {
+      "project/contracts/local/MockRedstone.sol": {
+        "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.20;\n\n/// @notice Simplified Redstone DataService mock\ncontract MockRedstone {\n    mapping(bytes32 => uint256) public values;\n\n    function setValue(bytes32 dataFeedId, uint256 price) external {\n        values[dataFeedId] = price;\n    }\n\n    function getValueForDataFeedId(bytes32 dataFeedId) external view returns (uint256) {\n        uint256 val = values[dataFeedId];\n        require(val != 0, \"Value not set\");\n        return val;\n    }\n}\n"
+      }
+    }
+  }
+}

@@ -1,0 +1,443 @@
+{
+  "_format": "hh3-artifact-1",
+  "contractName": "MockPriceOracle",
+  "sourceName": "contracts/local/MockPriceOracle.sol",
+  "abi": [
+    {
+      "inputs": [],
+      "stateMutability": "nonpayable",
+      "type": "constructor"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "token",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "price",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "timestamp",
+          "type": "uint256"
+        }
+      ],
+      "name": "PriceQueried",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "bool",
+          "name": "enabled",
+          "type": "bool"
+        }
+      ],
+      "name": "TWAPModeChanged",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "oldOracle",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "newOracle",
+          "type": "address"
+        }
+      ],
+      "name": "TWAPOracleUpdated",
+      "type": "event"
+    },
+    {
+      "inputs": [],
+      "name": "brsPrice",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "btbPrice",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "btdPrice",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "getBRSPrice",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "getBTBPrice",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "getBTDPrice",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "getChainlinkBTCUSD",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "getIUSDPrice",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "token",
+          "type": "address"
+        }
+      ],
+      "name": "getPrice",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "name": "getPrice",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "pure",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "getTWAPOracle",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "getWBTCPrice",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "isTWAPEnabled",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "iusdPrice",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "_wbtc",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "_btd",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "_btb",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "_brs",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "_iusd",
+          "type": "uint256"
+        }
+      ],
+      "name": "setAllPrices",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "_price",
+          "type": "uint256"
+        }
+      ],
+      "name": "setBRSPrice",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "_price",
+          "type": "uint256"
+        }
+      ],
+      "name": "setBTBPrice",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "_price",
+          "type": "uint256"
+        }
+      ],
+      "name": "setBTDPrice",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "_price",
+          "type": "uint256"
+        }
+      ],
+      "name": "setIUSDPrice",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "_twapOracle",
+          "type": "address"
+        }
+      ],
+      "name": "setTWAPOracle",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bool",
+          "name": "_useTWAP",
+          "type": "bool"
+        }
+      ],
+      "name": "setUseTWAP",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "_price",
+          "type": "uint256"
+        }
+      ],
+      "name": "setWBTCPrice",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "twapOracle",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "useTWAP",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "wbtcPrice",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    }
+  ],
+  "bytecode": "0x60808060405234605f57690a968163f0a57b4000005f55670de0b6b3a7640000600155670de0b6b3a7640000600255670de0b6b3a7640000600355670de0b6b3a764000060045560ff60a01b196005541660055561047990816100648239f35b5f80fdfe6080806040526004361015610012575f80fd5b5f3560e01c9081630835027d146103e85781630f2cacf1146103cf57816316df7ea1146103ad57508063172a69741461039457806322f9f2271461018e5780632536dbfb146103325780633e3147a01461030d57806341976e09146102f457806357fa934a146102c45780635954a86f146101c85780637100d05c1461028657806385c90c951461026d57806387df82c7146101ab57806387f86d92146102555780638c4039c5146101f05780639043292a146101c8578063a0e8d356146101ab578063ae8ba67914610155578063b14ea75914610150578063d534cb131461012f578063db3127c21461018e578063e6048a0b14610172578063ed411ea714610155578063fa7d826a146101505763ff8336ff1461012f575f80fd5b3461014c575f36600319011261014c576020600154604051908152f35b5f80fd5b610172565b3461014c575f36600319011261014c576020600454604051908152f35b3461014c575f36600319011261014c5760205f54604051908152f35b3461014c575f36600319011261014c576020600354604051908152f35b3461014c575f36600319011261014c576020600254604051908152f35b3461014c575f36600319011261014c576005546040516001600160a01b039091168152602090f35b3461014c57602036600319011261014c5760043580151580910361014c576005805460ff60a01b191660a083901b60ff60a01b161790556040519081527f0163568d3185bb7679fb2660bf0c56cc98855d55082f9f0b2df4811f02f1d35190602090a1005b3461014c57602036600319011261014c576004355f55005b3461014c57602036600319011261014c57600435600255005b3461014c57606036600319011261014c5761029f610401565b506102a8610417565b506102b161042d565b506020604051670de0b6b3a76400008152f35b3461014c5760a036600319011261014c57600480355f556024356001556044356002556064356003556084359055005b3461014c57602036600319011261014c576102b1610401565b3461014c575f36600319011261014c57602060ff60055460a01c166040519015158152f35b3461014c57602036600319011261014c576001600160a01b03610353610401565b16806bffffffffffffffffffffffff60a01b60055416176005555f7fbd88378c1310b1e36e9a14008ea9fb3ec76db83d1ebdbf4ea1f57e11090cd8be8180a3005b3461014c57602036600319011261014c57600435600355005b3461014c575f36600319011261014c5760209060ff60055460a01c1615158152f35b3461014c57602036600319011261014c57600435600155005b3461014c57602036600319011261014c57600480359055005b600435906001600160a01b038216820361014c57565b602435906001600160a01b038216820361014c57565b604435906001600160a01b038216820361014c5756fea2646970667358221220de60d60955ac39227d73c39e89805dfa9c2ff12fe119c7d65bed744b7964399b64736f6c634300081e0033",
+  "deployedBytecode": "0x6080806040526004361015610012575f80fd5b5f3560e01c9081630835027d146103e85781630f2cacf1146103cf57816316df7ea1146103ad57508063172a69741461039457806322f9f2271461018e5780632536dbfb146103325780633e3147a01461030d57806341976e09146102f457806357fa934a146102c45780635954a86f146101c85780637100d05c1461028657806385c90c951461026d57806387df82c7146101ab57806387f86d92146102555780638c4039c5146101f05780639043292a146101c8578063a0e8d356146101ab578063ae8ba67914610155578063b14ea75914610150578063d534cb131461012f578063db3127c21461018e578063e6048a0b14610172578063ed411ea714610155578063fa7d826a146101505763ff8336ff1461012f575f80fd5b3461014c575f36600319011261014c576020600154604051908152f35b5f80fd5b610172565b3461014c575f36600319011261014c576020600454604051908152f35b3461014c575f36600319011261014c5760205f54604051908152f35b3461014c575f36600319011261014c576020600354604051908152f35b3461014c575f36600319011261014c576020600254604051908152f35b3461014c575f36600319011261014c576005546040516001600160a01b039091168152602090f35b3461014c57602036600319011261014c5760043580151580910361014c576005805460ff60a01b191660a083901b60ff60a01b161790556040519081527f0163568d3185bb7679fb2660bf0c56cc98855d55082f9f0b2df4811f02f1d35190602090a1005b3461014c57602036600319011261014c576004355f55005b3461014c57602036600319011261014c57600435600255005b3461014c57606036600319011261014c5761029f610401565b506102a8610417565b506102b161042d565b506020604051670de0b6b3a76400008152f35b3461014c5760a036600319011261014c57600480355f556024356001556044356002556064356003556084359055005b3461014c57602036600319011261014c576102b1610401565b3461014c575f36600319011261014c57602060ff60055460a01c166040519015158152f35b3461014c57602036600319011261014c576001600160a01b03610353610401565b16806bffffffffffffffffffffffff60a01b60055416176005555f7fbd88378c1310b1e36e9a14008ea9fb3ec76db83d1ebdbf4ea1f57e11090cd8be8180a3005b3461014c57602036600319011261014c57600435600355005b3461014c575f36600319011261014c5760209060ff60055460a01c1615158152f35b3461014c57602036600319011261014c57600435600155005b3461014c57602036600319011261014c57600480359055005b600435906001600160a01b038216820361014c57565b602435906001600160a01b038216820361014c57565b604435906001600160a01b038216820361014c5756fea2646970667358221220de60d60955ac39227d73c39e89805dfa9c2ff12fe119c7d65bed744b7964399b64736f6c634300081e0033",
+  "linkReferences": {},
+  "deployedLinkReferences": {},
+  "immutableReferences": {},
+  "inputSourceName": "project/contracts/local/MockPriceOracle.sol",
+  "buildInfoId": "solc-0_8_30-53912771f68c89d1d8ffad4452b66ac349641e0c"
+}
