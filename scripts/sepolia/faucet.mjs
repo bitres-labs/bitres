@@ -68,10 +68,10 @@ async function main() {
     : [];
 
   if (recipients.length === 0) {
-    console.log("\n⚠ No recipients specified.");
-    console.log("Set FAUCET_RECIPIENTS environment variable:");
+    console.log("\n⚠ No recipients specified. Skipping faucet distribution.");
+    console.log("To distribute tokens, set FAUCET_RECIPIENTS environment variable:");
     console.log("  FAUCET_RECIPIENTS=0x123...,0x456... npx hardhat run scripts/sepolia/faucet.mjs --network sepolia");
-    process.exit(1);
+    process.exit(0); // Exit successfully - no recipients is not an error
   }
 
   console.log(`\n=> Recipients (${recipients.length}):`);
