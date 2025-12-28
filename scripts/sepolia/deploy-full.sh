@@ -43,24 +43,24 @@ if [ -z "$SEPOLIA_PRIVATE_KEY" ]; then
     exit 1
 fi
 
-echo "=> Step 1/5: Compile contracts..."
+echo "=> Step 1/6: Compile contracts..."
 npx hardhat compile
 
 echo ""
-echo "=> Step 2/5: Deploy contracts via Ignition..."
+echo "=> Step 2/6: Deploy contracts via Ignition..."
 npx hardhat ignition deploy ignition/modules/FullSystemSepolia.ts --network sepolia
 
 echo ""
-echo "=> Step 3/5: Initialize system (LP + vaults + farming pools)..."
+echo "=> Step 3/6: Initialize system (LP + vaults + farming pools)..."
 echo "   This is a one-step initialization - no secondary init needed."
 npx hardhat run scripts/sepolia/init-sepolia.mjs --network sepolia
 
 echo ""
-echo "=> Step 4/5: Distribute test tokens (faucet)..."
+echo "=> Step 4/6: Distribute test tokens (faucet)..."
 npx hardhat run scripts/sepolia/faucet.mjs --network sepolia
 
 echo ""
-echo "=> Step 5/5: Sync addresses to interface..."
+echo "=> Step 5/6: Sync addresses to interface..."
 if [ -d "../interface" ]; then
     node scripts/main/update-interface-config.mjs --network sepolia
     echo ""
@@ -70,6 +70,29 @@ else
 fi
 
 echo ""
+echo "=> Step 6/6: Starting price sync daemon..."
+LOG_FILE="/tmp/price-sync-daemon.log"
+PID_FILE="/tmp/price-sync-daemon.pid"
+
+# Kill existing daemon if running
+if [ -f "$PID_FILE" ]; then
+    OLD_PID=$(cat "$PID_FILE")
+    if kill -0 "$OLD_PID" 2>/dev/null; then
+        echo "   Stopping existing daemon (PID: $OLD_PID)..."
+        kill "$OLD_PID" 2>/dev/null || true
+        sleep 2
+    fi
+    rm -f "$PID_FILE"
+fi
+
+# Start daemon in background
+nohup npx hardhat run scripts/sepolia/price-sync.mjs --network sepolia > "$LOG_FILE" 2>&1 &
+DAEMON_PID=$!
+echo "$DAEMON_PID" > "$PID_FILE"
+echo "   ✓ Price sync daemon started (PID: $DAEMON_PID)"
+echo "   Log file: $LOG_FILE"
+
+echo ""
 echo "========================================"
 echo "  Deployment Complete!"
 echo "========================================"
@@ -77,10 +100,14 @@ echo ""
 echo "System Status:"
 echo "  ✓ FarmingPool: Ready to use immediately"
 echo "  ✓ Minter mint: Ready to use immediately"
+echo "  ✓ Price sync daemon: Running (PID: $DAEMON_PID)"
 echo "  ⏳ Minter redeem: Will work after 30 minutes (TWAP warmup)"
 echo ""
-echo "Optional commands:"
-echo "  npm run sepolia:price-sync      # Sync WBTC price with Chainlink"
+echo "Daemon commands:"
+echo "  tail -f $LOG_FILE              # View daemon logs"
+echo "  kill \$(cat $PID_FILE)          # Stop daemon"
+echo ""
+echo "Other commands:"
 echo "  npm run sepolia:health-check    # Verify system health"
 echo "  npm run update:interface --push # Sync addresses to GitHub/Vercel"
 echo ""

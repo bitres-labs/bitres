@@ -1,10 +1,11 @@
 /**
  * Initialize Sepolia testnet system after deployment:
+ * - Create pairs via official Uniswap V2 Factory
+ * - Set ConfigCore peripheral contracts with pair addresses
  * - Read real BTC price from Chainlink
  * - Set mock Pyth/Redstone prices to match Chainlink
- * - Add UniswapV2Pair liquidity and mint LP
+ * - Add liquidity via official Uniswap V2 Router
  * - Configure farming pools
- * - Fund test accounts (optional)
  *
  * Run:
  *   npx hardhat run scripts/sepolia/init-sepolia.mjs --network sepolia
@@ -24,10 +25,109 @@ const ADDR_FILE = path.join(
   `ignition/deployments/chain-${CHAIN_ID}/deployed_addresses.json`
 );
 
+// Official Uniswap V2 on Sepolia
+const UNISWAP_V2 = {
+  FACTORY: "0xF62c03E08ada871A0bEb309762E260a7a6a880E6",
+  ROUTER: "0xeE567Fe1712Faf6149d80dA1E6934E354124CfE3",
+};
+
 const DEFAULTS = {
   pythPriceId: "0x505954485f575442430000000000000000000000000000000000000000000000",
   redstoneFeedId: "0x52454453544f4e455f5754424300000000000000000000000000000000000000",
 };
+
+// Uniswap V2 ABIs
+const FACTORY_ABI = [
+  {
+    inputs: [{ name: "tokenA", type: "address" }, { name: "tokenB", type: "address" }],
+    name: "createPair",
+    outputs: [{ name: "pair", type: "address" }],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "tokenA", type: "address" }, { name: "tokenB", type: "address" }],
+    name: "getPair",
+    outputs: [{ name: "pair", type: "address" }],
+    stateMutability: "view",
+    type: "function",
+  },
+];
+
+const ROUTER_ABI = [
+  {
+    inputs: [
+      { name: "tokenA", type: "address" },
+      { name: "tokenB", type: "address" },
+      { name: "amountADesired", type: "uint256" },
+      { name: "amountBDesired", type: "uint256" },
+      { name: "amountAMin", type: "uint256" },
+      { name: "amountBMin", type: "uint256" },
+      { name: "to", type: "address" },
+      { name: "deadline", type: "uint256" },
+    ],
+    name: "addLiquidity",
+    outputs: [
+      { name: "amountA", type: "uint256" },
+      { name: "amountB", type: "uint256" },
+      { name: "liquidity", type: "uint256" },
+    ],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+];
+
+const PAIR_ABI = [
+  {
+    inputs: [],
+    name: "getReserves",
+    outputs: [
+      { name: "reserve0", type: "uint112" },
+      { name: "reserve1", type: "uint112" },
+      { name: "blockTimestampLast", type: "uint32" },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "account", type: "address" }],
+    name: "balanceOf",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "token0",
+    outputs: [{ name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function",
+  },
+];
+
+const ERC20_ABI = [
+  {
+    inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }],
+    name: "approve",
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "to", type: "address" }, { name: "amount", type: "uint256" }],
+    name: "transfer",
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ name: "account", type: "address" }],
+    name: "balanceOf",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+];
 
 function loadAddresses() {
   if (!fs.existsSync(ADDR_FILE)) {
@@ -45,6 +145,7 @@ function loadAddresses() {
 async function main() {
   console.log("=".repeat(60));
   console.log("  Bitres Sepolia Testnet Initialization");
+  console.log("  Using Official Uniswap V2 Factory & Router");
   console.log("=".repeat(60));
 
   const addresses = loadAddresses();
@@ -54,7 +155,6 @@ async function main() {
   const { viem } = connection;
   const wallets = await viem.getWalletClients();
   const [owner] = wallets;
-  // Use the RPC URL from hardhat config (which comes from .env)
   const rpcUrl = hre.network.config?.url || process.env.SEPOLIA_RPC_URL || "https://rpc.sepolia.org";
 
   const publicClient = createPublicClient({
@@ -63,19 +163,13 @@ async function main() {
   });
 
   console.log(`=> Deployer: ${owner.account.address}`);
+  console.log(`=> Uniswap V2 Factory: ${UNISWAP_V2.FACTORY}`);
+  console.log(`=> Uniswap V2 Router: ${UNISWAP_V2.ROUTER}`);
 
   // Contract helpers
   const loadAbi = (relPath) =>
     JSON.parse(fs.readFileSync(path.join(process.cwd(), "artifacts", relPath), "utf8")).abi;
   const get = (key, abiName = key) => viem.getContractAt(abiName, addresses[key]);
-  const write = (relPath, address, functionName, args = []) =>
-    owner.writeContract({
-      address,
-      abi: loadAbi(relPath),
-      functionName,
-      args,
-      account: owner.account,
-    });
 
   // Load contracts
   const brs = await get("BRS", "contracts/BRS.sol:BRS");
@@ -84,25 +178,17 @@ async function main() {
   const wbtc = await get("WBTC", "contracts/local/MockWBTC.sol:MockWBTC");
   const usdc = await get("USDC", "contracts/local/MockUSDC.sol:MockUSDC");
   const usdt = await get("USDT", "contracts/local/MockUSDT.sol:MockUSDT");
-  const weth = await get("WETH", "contracts/local/MockWETH.sol:MockWETH");
+  // WETH is the official WETH9, not our MockWETH
+  const weth = await get("WETH", "contracts/interfaces/IWETH9.sol:IWETH9");
   const stBTD = await get("stBTD", "contracts/stBTD.sol:stBTD");
   const stBTB = await get("stBTB", "contracts/stBTB.sol:stBTB");
   const farming = await get("FarmingPool", "contracts/FarmingPool.sol:FarmingPool");
   const priceOracle = await get("PriceOracle", "contracts/PriceOracle.sol:PriceOracle");
+  const configCore = await get("ConfigCore", "contracts/ConfigCore.sol:ConfigCore");
+  const twapOracle = await get("TWAPOracle", "contracts/UniswapV2TWAPOracle.sol:UniswapV2TWAPOracle");
 
-  // Chainlink WBTC/BTC mock (we deployed this)
-  const chainlinkWbtcBtc = await get(
-    "ChainlinkWBTCBTC",
-    "contracts/local/MockAggregatorV3.sol:MockAggregatorV3"
-  );
   const mockPyth = await get("MockPyth", "contracts/local/MockPyth.sol:MockPyth");
   const mockRedstone = await get("MockRedstone", "contracts/local/MockRedstone.sol:MockRedstone");
-
-  const pairWBTCUSDC = await get("PairWBTCUSDC", "contracts/local/UniswapV2Pair.sol:UniswapV2Pair");
-  const pairBTDUSDC = await get("PairBTDUSDC", "contracts/local/UniswapV2Pair.sol:UniswapV2Pair");
-  const pairBTBBTD = await get("PairBTBBTD", "contracts/local/UniswapV2Pair.sol:UniswapV2Pair");
-  const pairBRSBTD = await get("PairBRSBTD", "contracts/local/UniswapV2Pair.sol:UniswapV2Pair");
-  const pairAbi = loadAbi("contracts/local/UniswapV2Pair.sol/UniswapV2Pair.json");
 
   // =========================================================================
   // 1) Read real BTC price from Chainlink
@@ -132,7 +218,7 @@ async function main() {
   console.log(`   Real BTC/USD price: $${Number(btcPrice) / 1e8}`);
 
   // =========================================================================
-  // 2) Configure roles and disable TWAP
+  // 2) Configure roles and disable TWAP initially
   // =========================================================================
   console.log("\n=> Configuring roles...");
   const MINTER_ROLE = keccak256(stringToHex("MINTER_ROLE"));
@@ -159,19 +245,16 @@ async function main() {
   });
   await publicClient.waitForTransactionReceipt({ hash: tx2 });
 
-  // Temporarily disable TWAP (will be enabled after 30+ minutes via enable-twap.mjs)
-  console.log("   -> Disable TWAP oracle (will enable after observations mature)");
+  console.log("   -> Disable TWAP oracle initially");
   const tx3 = await priceOracle.write.setUseTWAP([false], { account: owner.account });
   await publicClient.waitForTransactionReceipt({ hash: tx3 });
 
   // =========================================================================
-  // 3) Set mock oracle prices (Pyth/Redstone use same price as Chainlink)
+  // 3) Set mock oracle prices
   // =========================================================================
   console.log("\n=> Setting mock oracle prices...");
-  // WBTC/BTC already set to 1:1 in deployment
   console.log("   -> WBTC/BTC: 1:1 (already set)");
 
-  // Pyth: price in 8 decimals with expo -8
   const pythPrice = btcPrice;
   const pythExpo = -8n;
   await mockPyth.write.setPrice([DEFAULTS.pythPriceId, pythPrice, pythExpo], {
@@ -179,22 +262,18 @@ async function main() {
   });
   console.log(`   -> Pyth BTC price: ${Number(pythPrice) / 1e8}`);
 
-  // Redstone: price in 18 decimals
-  const redstonePrice = BigInt(btcPrice) * 10n ** 10n; // 8 -> 18 decimals
+  const redstonePrice = BigInt(btcPrice) * 10n ** 10n;
   await mockRedstone.write.setValue([DEFAULTS.redstoneFeedId, redstonePrice], {
     account: owner.account,
   });
   console.log(`   -> Redstone BTC price: ${Number(redstonePrice) / 1e18}`);
 
   // =========================================================================
-  // 4) Mint BTD/BTB for LP initialization (using system minimum amounts + buffer)
+  // 4) Mint BTD/BTB for LP initialization
   // =========================================================================
-  console.log("\n=> Minting BTD/BTB for LP (using system minimum amounts)...");
-  // BTD: 0.01 (BTD/USDC) + 0.001 (BTB/BTD) + 0.001 (BRS/BTD) + 0.001 vault = ~0.013
-  // BTB: 0.001 (BTB/BTD) + 0.001 vault = ~0.002
-  // Use 0.02 each for safety buffer
-  const mintBtdAmount = parseEther("0.02");
-  const mintBtbAmount = parseEther("0.02");
+  console.log("\n=> Minting BTD/BTB for LP initialization...");
+  const mintBtdAmount = parseEther("1"); // Need more for 100:1 BRS/BTD ratio
+  const mintBtbAmount = parseEther("0.1");
 
   await owner.writeContract({
     address: addresses.BTD,
@@ -215,160 +294,223 @@ async function main() {
   console.log(`   -> Minted ${Number(mintBtbAmount) / 1e18} BTB`);
 
   // =========================================================================
-  // 5) Add LP liquidity
+  // 5) Create pairs via official Uniswap V2 Factory
   // =========================================================================
-  console.log("\n=> Adding LP liquidity...");
+  console.log("\n=> Creating pairs via official Uniswap V2 Factory...");
 
-  const addLP = async (pair, token0, token1, amt0, amt1, label) => {
+  const createOrGetPair = async (tokenA, tokenB, label) => {
+    // Check if pair already exists
+    const existingPair = await publicClient.readContract({
+      address: UNISWAP_V2.FACTORY,
+      abi: FACTORY_ABI,
+      functionName: "getPair",
+      args: [tokenA, tokenB],
+    });
+
+    if (existingPair !== "0x0000000000000000000000000000000000000000") {
+      console.log(`   ⏭ ${label} pair already exists: ${existingPair}`);
+      return existingPair;
+    }
+
+    // Create pair
+    const createTx = await owner.writeContract({
+      address: UNISWAP_V2.FACTORY,
+      abi: FACTORY_ABI,
+      functionName: "createPair",
+      args: [tokenA, tokenB],
+      account: owner.account,
+    });
+    await publicClient.waitForTransactionReceipt({ hash: createTx });
+
+    const newPair = await publicClient.readContract({
+      address: UNISWAP_V2.FACTORY,
+      abi: FACTORY_ABI,
+      functionName: "getPair",
+      args: [tokenA, tokenB],
+    });
+    console.log(`   ✓ ${label} pair created: ${newPair}`);
+    return newPair;
+  };
+
+  const pairWBTCUSDC = await createOrGetPair(wbtc.address, usdc.address, "WBTC/USDC");
+  const pairBTDUSDC = await createOrGetPair(btd.address, usdc.address, "BTD/USDC");
+  const pairBTBBTD = await createOrGetPair(btb.address, btd.address, "BTB/BTD");
+  const pairBRSBTD = await createOrGetPair(brs.address, btd.address, "BRS/BTD");
+
+  // Store pair addresses for later use
+  const pairAddresses = {
+    WBTC_USDC: pairWBTCUSDC,
+    BTD_USDC: pairBTDUSDC,
+    BTB_BTD: pairBTBBTD,
+    BRS_BTD: pairBRSBTD,
+  };
+
+  // =========================================================================
+  // 6) Set ConfigCore peripheral contracts with pair addresses
+  // =========================================================================
+  console.log("\n=> Setting ConfigCore peripheral contracts...");
+
+  // Check if already set
+  const peripheralSet = await publicClient.readContract({
+    address: configCore.address,
+    abi: loadAbi("contracts/ConfigCore.sol/ConfigCore.json"),
+    functionName: "peripheralContractsSet",
+  });
+
+  if (peripheralSet) {
+    console.log("   ⏭ Peripheral contracts already set");
+  } else {
+    const configCoreAbi = loadAbi("contracts/ConfigCore.sol/ConfigCore.json");
+    const setPeripheralTx = await owner.writeContract({
+      address: configCore.address,
+      abi: configCoreAbi,
+      functionName: "setPeripheralContracts",
+      args: [
+        addresses.StakingRouter,
+        addresses.FarmingPool,
+        addresses.stBTD,
+        addresses.stBTB,
+        owner.account.address, // governor
+        addresses.TWAPOracle,
+        pairWBTCUSDC,
+        pairBTDUSDC,
+        pairBTBBTD,
+        pairBRSBTD,
+      ],
+      account: owner.account,
+    });
+    await publicClient.waitForTransactionReceipt({ hash: setPeripheralTx });
+    console.log("   ✓ Peripheral contracts set with official Uniswap V2 pairs");
+  }
+
+  // =========================================================================
+  // 7) Add LP liquidity via official Uniswap V2 Router
+  // =========================================================================
+  console.log("\n=> Adding LP liquidity via official Uniswap V2 Router...");
+
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1 hour
+
+  const addLP = async (tokenA, tokenB, amountA, amountB, label, pairAddress) => {
     // Check if pair already has liquidity
     const [reserve0, reserve1] = await publicClient.readContract({
-      address: pair.address,
-      abi: pairAbi,
+      address: pairAddress,
+      abi: PAIR_ABI,
       functionName: "getReserves",
     });
     if (reserve0 > 0n || reserve1 > 0n) {
       console.log(`   ⏭ ${label} LP already exists (reserves: ${reserve0}, ${reserve1})`);
-      // Return existing LP balance
       const lpBalance = await publicClient.readContract({
-        address: pair.address,
-        abi: pairAbi,
+        address: pairAddress,
+        abi: PAIR_ABI,
         functionName: "balanceOf",
         args: [owner.account.address],
       });
       return lpBalance;
     }
 
-    // Real LP minting: transfer tokens to pair, then call mint
-    // First get actual token0/token1 order from pair
-    const actualToken0 = await publicClient.readContract({
-      address: pair.address,
-      abi: pairAbi,
-      functionName: "token0",
-    });
-
-    // Determine correct amounts based on token order
-    let transferAmt0, transferAmt1, transferToken0, transferToken1;
-    if (actualToken0.toLowerCase() === token0.address.toLowerCase()) {
-      transferToken0 = token0;
-      transferToken1 = token1;
-      transferAmt0 = amt0;
-      transferAmt1 = amt1;
-    } else {
-      transferToken0 = token1;
-      transferToken1 = token0;
-      transferAmt0 = amt1;
-      transferAmt1 = amt0;
-    }
-
-    // Transfer tokens to pair
-    const erc20Abi = [
-      {
-        inputs: [{ name: "to", type: "address" }, { name: "amount", type: "uint256" }],
-        name: "transfer",
-        outputs: [{ name: "", type: "bool" }],
-        stateMutability: "nonpayable",
-        type: "function",
-      },
-    ];
-
-    const tx0 = await owner.writeContract({
-      address: transferToken0.address,
-      abi: erc20Abi,
-      functionName: "transfer",
-      args: [pair.address, transferAmt0],
+    // Approve tokens for Router
+    const approveTxA = await owner.writeContract({
+      address: tokenA.address,
+      abi: ERC20_ABI,
+      functionName: "approve",
+      args: [UNISWAP_V2.ROUTER, amountA],
       account: owner.account,
     });
-    await publicClient.waitForTransactionReceipt({ hash: tx0 });
+    await publicClient.waitForTransactionReceipt({ hash: approveTxA });
 
-    const tx1 = await owner.writeContract({
-      address: transferToken1.address,
-      abi: erc20Abi,
-      functionName: "transfer",
-      args: [pair.address, transferAmt1],
+    const approveTxB = await owner.writeContract({
+      address: tokenB.address,
+      abi: ERC20_ABI,
+      functionName: "approve",
+      args: [UNISWAP_V2.ROUTER, amountB],
       account: owner.account,
     });
-    await publicClient.waitForTransactionReceipt({ hash: tx1 });
+    await publicClient.waitForTransactionReceipt({ hash: approveTxB });
 
-    // Mint LP tokens
-    const mintTx = await pair.write.mint([owner.account.address], { account: owner.account });
-    await publicClient.waitForTransactionReceipt({ hash: mintTx });
+    // Add liquidity via Router
+    const addLiqTx = await owner.writeContract({
+      address: UNISWAP_V2.ROUTER,
+      abi: ROUTER_ABI,
+      functionName: "addLiquidity",
+      args: [
+        tokenA.address,
+        tokenB.address,
+        amountA,
+        amountB,
+        0n, // amountAMin
+        0n, // amountBMin
+        owner.account.address,
+        deadline,
+      ],
+      account: owner.account,
+    });
+    await publicClient.waitForTransactionReceipt({ hash: addLiqTx });
 
-    // Get minted LP balance
     const lpBalance = await publicClient.readContract({
-      address: pair.address,
-      abi: pairAbi,
+      address: pairAddress,
+      abi: PAIR_ABI,
       functionName: "balanceOf",
       args: [owner.account.address],
     });
-
-    console.log(`   ✓ ${label} LP minted: ${lpBalance} (reserves: ${transferAmt0}, ${transferAmt1})`);
+    console.log(`   ✓ ${label} LP minted: ${lpBalance}`);
     return lpBalance;
   };
 
-  // Use system minimum amounts for LP initialization
-  // MIN_BTC_AMOUNT = 1, MIN_STABLECOIN_6_AMOUNT = 1000, MIN_STABLECOIN_18_AMOUNT = 1e15
-  // sqrt(amt0 * amt1) > 1000 for Uniswap MINIMUM_LIQUIDITY
+  // LP amounts (matching current BTC price for WBTC/USDC)
   const btcPriceUsd = Number(btcPrice) / 1e8;
-  // WBTC/USDC: Use amounts that satisfy both minimums and match current BTC price
-  const wbtcAmount = 1000n;  // 1000 satoshi (0.00001 WBTC) - meets MIN_BTC_AMOUNT
-  // Calculate matching USDC amount based on current BTC price
-  const usdcForWbtc = BigInt(Math.floor(Number(wbtcAmount) * btcPriceUsd / 100)); // USDC amount in 6 decimals
-  const usdcAmount = usdcForWbtc < 1000n ? 1000n : usdcForWbtc;  // At least MIN_STABLECOIN_6_AMOUNT
-  console.log(`   WBTC: ${wbtcAmount} satoshi, USDC: ${usdcAmount} (ratio ~$${btcPriceUsd}/BTC)`);
+  console.log(`   Current BTC price from Chainlink: $${btcPriceUsd.toLocaleString()}`);
 
-  const lpWBTCUSDC = await addLP(pairWBTCUSDC, wbtc, usdc, wbtcAmount, usdcAmount, "WBTC/USDC");
-  // BTD/USDC: Add buffer to compensate for MINIMUM_LIQUIDITY burn (1000 wei)
-  // For mixed-decimal pairs, add proportional buffer to both tokens
-  const lpBTDUSDC = await addLP(pairBTDUSDC, btd, usdc,
-    1n * 10n ** 16n + 1001n,  // 0.01 BTD + buffer
-    10001n,                   // 0.01 USDC + 1 buffer
-    "BTD/USDC"
-  );
-  // BTB/BTD, BRS/BTD: slightly over 1e15 each to account for MINIMUM_LIQUIDITY burn
-  const lpBTBBTD = await addLP(pairBTBBTD, btb, btd, 1n * 10n ** 15n + 1001n, 1n * 10n ** 15n + 1001n, "BTB/BTD");
-  const lpBRSBTD = await addLP(pairBRSBTD, brs, btd, 1n * 10n ** 15n + 1001n, 1n * 10n ** 15n + 1001n, "BRS/BTD");
+  const wbtcAmount = 10000n; // 0.0001 WBTC (10000 satoshi)
+  const usdcForWbtc = BigInt(Math.floor(Number(wbtcAmount) * btcPriceUsd / 100));
+  const usdcAmount = usdcForWbtc < 10000n ? 10000n : usdcForWbtc;
+
+  const lpWBTCUSDC = await addLP(wbtc, usdc, wbtcAmount, usdcAmount, "WBTC/USDC", pairWBTCUSDC);
+
+  // BTD/USDC: ~$1 BTD (use small amounts)
+  const lpBTDUSDC = await addLP(btd, usdc, parseEther("0.01"), 10000n, "BTD/USDC", pairBTDUSDC);
+
+  // BTB/BTD: 1:1 ratio
+  const lpBTBBTD = await addLP(btb, btd, parseEther("0.01"), parseEther("0.01"), "BTB/BTD", pairBTBBTD);
+
+  // BRS/BTD: 100:1 ratio (1 BRS = 0.01 BTD)
+  const lpBRSBTD = await addLP(brs, btd, parseEther("1"), parseEther("0.01"), "BRS/BTD", pairBRSBTD);
 
   // =========================================================================
-  // 5.5) Initialize TWAP Oracle and enable immediately
-  // Note: TWAP prices won't be available for first 30 minutes, but that's OK
-  // FarmingPool doesn't need prices, only Minter redemption does
+  // 8) Initialize TWAP Oracle
   // =========================================================================
   console.log("\n=> Initializing TWAP Oracle...");
-  const twapOracle = await get("TWAPOracle", "contracts/UniswapV2TWAPOracle.sol:UniswapV2TWAPOracle");
   const pairsList = [pairWBTCUSDC, pairBTDUSDC, pairBTBBTD, pairBRSBTD];
 
-  for (const pair of pairsList) {
+  for (const pairAddr of pairsList) {
     try {
-      await twapOracle.write.update([pair.address], { account: owner.account });
-      console.log(`   ✓ TWAP observation recorded for ${pair.address.slice(0, 10)}...`);
+      await twapOracle.write.update([pairAddr], { account: owner.account });
+      console.log(`   ✓ TWAP observation recorded for ${pairAddr.slice(0, 10)}...`);
     } catch (err) {
-      console.log(`   ⚠ TWAP update failed for ${pair.address.slice(0, 10)}...: ${err.message?.slice(0, 50) || err}`);
+      console.log(`   ⚠ TWAP update failed for ${pairAddr.slice(0, 10)}...: ${err.message?.slice(0, 50) || err}`);
     }
   }
 
-  // Enable TWAP immediately - prices won't work for 30 min but that's acceptable
-  console.log("   -> Enabling TWAP (prices available after 30 min)...");
+  // Enable TWAP
+  console.log("   -> Enabling TWAP...");
   const enableTx = await priceOracle.write.setUseTWAP([true], { account: owner.account });
   await publicClient.waitForTransactionReceipt({ hash: enableTx });
-  console.log("   ✓ TWAP enabled (Minter operations will work after 30 min)");
+  console.log("   ✓ TWAP enabled (prices available after 30 min)");
 
   // =========================================================================
-  // 6) Initialize stBTD/stBTB vaults (using system minimum amounts)
+  // 9) Initialize stBTD/stBTB vaults
   // =========================================================================
-  console.log("\n=> Initializing stBTD/stBTB vaults (MIN_STABLECOIN_18_AMOUNT)...");
-  const minStake = 1n * 10n ** 15n; // MIN_STABLECOIN_18_AMOUNT = 0.001 tokens
+  console.log("\n=> Initializing stBTD/stBTB vaults...");
+  const minStake = parseEther("0.001");
 
   const stBTDAbi = loadAbi("contracts/stBTD.sol/stBTD.json");
   const stBTBAbi = loadAbi("contracts/stBTB.sol/stBTB.json");
 
-  // Helper to write and wait for confirmation
-  const writeAndWait = async (relPath, address, functionName, args = []) => {
-    const hash = await write(relPath, address, functionName, args);
+  const writeAndWait = async (address, abi, functionName, args) => {
+    const hash = await owner.writeContract({ address, abi, functionName, args, account: owner.account });
     await publicClient.waitForTransactionReceipt({ hash });
     return hash;
   };
 
-  // Check if stBTD already has deposits
   const stBTDSupply = await publicClient.readContract({
     address: stBTD.address,
     abi: stBTDAbi,
@@ -377,13 +519,12 @@ async function main() {
   if (stBTDSupply > 0n) {
     console.log(`   ⏭ stBTD vault already initialized (supply: ${stBTDSupply})`);
   } else {
-    await writeAndWait("contracts/BTD.sol/BTD.json", addresses.BTD, "mint", [owner.account.address, minStake]);
-    await writeAndWait("contracts/BTD.sol/BTD.json", addresses.BTD, "approve", [stBTD.address, minStake]);
-    await writeAndWait("contracts/stBTD.sol/stBTD.json", addresses.stBTD, "deposit", [minStake, owner.account.address]);
-    console.log("   ✓ stBTD vault initialized (0.001 BTD)");
+    await writeAndWait(addresses.BTD, btdAbi, "mint", [owner.account.address, minStake]);
+    await writeAndWait(addresses.BTD, btdAbi, "approve", [stBTD.address, minStake]);
+    await writeAndWait(stBTD.address, stBTDAbi, "deposit", [minStake, owner.account.address]);
+    console.log("   ✓ stBTD vault initialized");
   }
 
-  // Check if stBTB already has deposits
   const stBTBSupply = await publicClient.readContract({
     address: stBTB.address,
     abi: stBTBAbi,
@@ -392,14 +533,14 @@ async function main() {
   if (stBTBSupply > 0n) {
     console.log(`   ⏭ stBTB vault already initialized (supply: ${stBTBSupply})`);
   } else {
-    await writeAndWait("contracts/BTB.sol/BTB.json", addresses.BTB, "mint", [owner.account.address, minStake]);
-    await writeAndWait("contracts/BTB.sol/BTB.json", addresses.BTB, "approve", [stBTB.address, minStake]);
-    await writeAndWait("contracts/stBTB.sol/stBTB.json", addresses.stBTB, "deposit", [minStake, owner.account.address]);
-    console.log("   ✓ stBTB vault initialized (0.001 BTB)");
+    await writeAndWait(addresses.BTB, btbAbi, "mint", [owner.account.address, minStake]);
+    await writeAndWait(addresses.BTB, btbAbi, "approve", [stBTB.address, minStake]);
+    await writeAndWait(stBTB.address, stBTBAbi, "deposit", [minStake, owner.account.address]);
+    console.log("   ✓ stBTB vault initialized");
   }
 
   // =========================================================================
-  // 7) Configure farming pools
+  // 10) Configure farming pools
   // =========================================================================
   console.log("\n=> Configuring FarmingPool pools...");
 
@@ -414,45 +555,62 @@ async function main() {
     console.log(`   ⏭ Farming pools already configured (${poolLength} pools)`);
   } else {
     const tokens = [
-      pairBRSBTD,  // 0: LP
-      pairBTDUSDC, // 1: LP
-      pairBTBBTD,  // 2: LP
-      usdc,        // 3: Single
-      usdt,        // 4: Single
-      wbtc,        // 5: Single
-      weth,        // 6: Single
-      stBTD,       // 7: Single
-      stBTB,       // 8: Single
-      brs,         // 9: Single
+      pairBRSBTD,  // 0: LP - BRS/BTD
+      pairBTDUSDC, // 1: LP - BTD/USDC
+      pairBTBBTD,  // 2: LP - BTB/BTD
+      usdc.address,// 3: Single
+      usdt.address,// 4: Single
+      wbtc.address,// 5: Single
+      weth.address,// 6: Single
+      stBTD.address,// 7: Single
+      stBTB.address,// 8: Single
+      brs.address,  // 9: Single
     ];
     const allocPoints = [15, 15, 15, 1, 1, 1, 1, 3, 3, 5];
-    const kinds = [1, 1, 1, 0, 0, 0, 0, 0, 0, 0]; // 0=Single, 1=LP
+    const kinds = [1, 1, 1, 0, 0, 0, 0, 0, 0, 0];
 
-    await farming.write.addPools([tokens.map((t) => t.address), allocPoints, kinds], {
+    await farming.write.addPools([tokens, allocPoints, kinds], {
       account: owner.account,
     });
     console.log("   ✓ 10 farming pools configured");
   }
 
   // =========================================================================
-  // 8) Seed staking for farming pools (using system minimum amounts)
-  // Note: FarmingPool now uses token amount validation, no TWAP needed
+  // 11) Seed staking for farming pools
   // =========================================================================
-  console.log("\n=> Seeding staking for farming pools (using system minimum amounts)...");
+  console.log("\n=> Seeding staking for farming pools...");
 
-  // farmingAbi already loaded above
+  const MIN_BTC = 1n;
+  const MIN_STABLE_6 = 1000n;
+  const MIN_STABLE_18 = parseEther("0.001");
+  const MIN_ETH = 10n ** 10n;
 
-  // System minimum amounts for each token type
-  const MIN_BTC = 1n;                    // 1 satoshi
-  const MIN_STABLE_6 = 1000n;            // 0.001 USDC/USDT
-  const MIN_STABLE_18 = 1n * 10n ** 15n; // 0.001 BTD/BTB/BRS/stBTD/stBTB
-  const MIN_ETH = 1n * 10n ** 10n;       // 0.00000001 ETH
+  // Deposit ETH to get WETH (official WETH9)
+  const wethBalance = await publicClient.readContract({
+    address: weth.address,
+    abi: ERC20_ABI,
+    functionName: "balanceOf",
+    args: [owner.account.address],
+  });
+  if (wethBalance < MIN_ETH) {
+    console.log("   -> Depositing ETH to get WETH...");
+    const WETH9_ABI = [{ inputs: [], name: "deposit", outputs: [], stateMutability: "payable", type: "function" }];
+    const depositTx = await owner.writeContract({
+      address: weth.address,
+      abi: WETH9_ABI,
+      functionName: "deposit",
+      args: [],
+      value: MIN_ETH,
+      account: owner.account,
+    });
+    await publicClient.waitForTransactionReceipt({ hash: depositTx });
+    console.log(`   ✓ Deposited ${MIN_ETH} wei ETH -> WETH`);
+  }
 
-  // For LP pools, stake all LP tokens (they're already minimal)
   const stakePlans = [
-    { id: 0, token: pairBRSBTD, amount: lpBRSBTD, name: "BRS/BTD LP" },
-    { id: 1, token: pairBTDUSDC, amount: lpBTDUSDC, name: "BTD/USDC LP" },
-    { id: 2, token: pairBTBBTD, amount: lpBTBBTD, name: "BTB/BTD LP" },
+    { id: 0, token: { address: pairBRSBTD }, amount: lpBRSBTD, name: "BRS/BTD LP" },
+    { id: 1, token: { address: pairBTDUSDC }, amount: lpBTDUSDC, name: "BTD/USDC LP" },
+    { id: 2, token: { address: pairBTBBTD }, amount: lpBTBBTD, name: "BTB/BTD LP" },
     { id: 3, token: usdc, amount: MIN_STABLE_6, name: "USDC" },
     { id: 4, token: usdt, amount: MIN_STABLE_6, name: "USDT" },
     { id: 5, token: wbtc, amount: MIN_BTC, name: "WBTC" },
@@ -472,7 +630,6 @@ async function main() {
       continue;
     }
 
-    // Check if already staked
     const [stakedAmount] = await publicClient.readContract({
       address: farming.address,
       abi: farmingAbi,
@@ -487,13 +644,16 @@ async function main() {
     }
 
     try {
-      // Approve
-      const approveTx = await plan.token.write.approve([farming.address, plan.amount], {
+      const tokenAddress = plan.token.address || plan.token;
+      const approveTx = await owner.writeContract({
+        address: tokenAddress,
+        abi: ERC20_ABI,
+        functionName: "approve",
+        args: [farming.address, plan.amount],
         account: owner.account,
       });
       await publicClient.waitForTransactionReceipt({ hash: approveTx });
 
-      // Deposit
       const depositTx = await farming.write.deposit([plan.id, plan.amount], {
         account: owner.account,
       });
@@ -509,14 +669,32 @@ async function main() {
   console.log(`\n   Staking complete: ${successCount} succeeded, ${skipCount} skipped`);
 
   // =========================================================================
+  // 12) Save pair addresses to deployed_addresses.json
+  // =========================================================================
+  console.log("\n=> Saving pair addresses...");
+  const fullAddresses = JSON.parse(fs.readFileSync(ADDR_FILE, "utf8"));
+  fullAddresses["FullSystemSepolia#PairWBTCUSDC"] = pairWBTCUSDC;
+  fullAddresses["FullSystemSepolia#PairBTDUSDC"] = pairBTDUSDC;
+  fullAddresses["FullSystemSepolia#PairBTBBTD"] = pairBTBBTD;
+  fullAddresses["FullSystemSepolia#PairBRSBTD"] = pairBRSBTD;
+  fullAddresses["FullSystemSepolia#UniswapV2Factory"] = UNISWAP_V2.FACTORY;
+  fullAddresses["FullSystemSepolia#UniswapV2Router"] = UNISWAP_V2.ROUTER;
+  fs.writeFileSync(ADDR_FILE, JSON.stringify(fullAddresses, null, 2));
+  console.log("   ✓ Pair addresses saved to deployed_addresses.json");
+
+  // =========================================================================
   console.log("\n" + "=".repeat(60));
   console.log("  ✅ Sepolia initialization complete!");
   console.log("=".repeat(60));
-  console.log("\nNOTE: TWAP is enabled but prices won't be accurate for 30 minutes.");
-  console.log("      - FarmingPool: Ready to use immediately");
-  console.log("      - Minter mint: Ready to use immediately");
-  console.log("      - Minter redeem: Will work after 30 minutes (needs TWAP prices)\n");
-  console.log("Key addresses:");
+  console.log("\nUsing Official Uniswap V2:");
+  console.log(`  Factory:     ${UNISWAP_V2.FACTORY}`);
+  console.log(`  Router:      ${UNISWAP_V2.ROUTER}`);
+  console.log("\nPair Addresses:");
+  console.log(`  WBTC/USDC:   ${pairWBTCUSDC}`);
+  console.log(`  BTD/USDC:    ${pairBTDUSDC}`);
+  console.log(`  BTB/BTD:     ${pairBTBBTD}`);
+  console.log(`  BRS/BTD:     ${pairBRSBTD} (ratio 100:1, 1 BRS = 0.01 BTD)`);
+  console.log("\nKey addresses:");
   console.log(`  BTD:         ${addresses.BTD}`);
   console.log(`  BTB:         ${addresses.BTB}`);
   console.log(`  BRS:         ${addresses.BRS}`);

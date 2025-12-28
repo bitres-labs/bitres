@@ -70,18 +70,6 @@ contract PriceOracle is Ownable, IPriceOracle {
     uint256 public constant PYTH_MAX_STALENESS = 60;      // Maximum staleness: 60 seconds
     uint64 public constant PYTH_MAX_CONF_RATIO = 100;     // Maximum confidence ratio: 1% (conf/price < 1%)
 
-    /// @notice Pyth price ID update event
-    /// @param oldId Old price ID
-    /// @param newId New price ID
-    event PythPriceIdUpdated(bytes32 oldId, bytes32 newId);
-
-    /// @notice Redstone configuration update event
-    /// @param oldId Old data feed ID
-    /// @param oldDecimals Old decimals
-    /// @param newId New data feed ID
-    /// @param newDecimals New decimals
-    event RedstoneConfigUpdated(bytes32 oldId, uint8 oldDecimals, bytes32 newId, uint8 newDecimals);
-
     /// @notice Maximum deviation update event
     /// @param oldBps Old deviation value (basis points)
     /// @param newBps New deviation value (basis points)
@@ -458,22 +446,6 @@ contract PriceOracle is Ownable, IPriceOracle {
     }
 
     /**
-     * @notice Gets WETH price (ETH/USD)
-     * @dev Testnet uses fixed price $3000, production uses Chainlink oracle
-     * @return WETH price (18 decimal USD)
-     */
-    function getWETHPrice() public pure returns (uint256) {
-        // Testnet: fixed price $3000
-        return 3000e18;
-
-        // Production: use Chainlink ETH/USD feed
-        // IAggregatorV3 feed = IAggregatorV3(config.chainlinkETHUSD());
-        // (, int256 price, , , ) = feed.latestRoundData();
-        // require(price > 0, "Invalid Chainlink ETH price");
-        // return uint256(price) * 1e10; // Chainlink uses 8 decimals, convert to 18
-    }
-
-    /**
      * @notice Gets stBTD price (BTD share price including accumulated interest)
      * @dev Uses ERC4626 formula: (totalAssets / totalSupply) x BTD price
      * @return stBTD price (18 decimal USD)
@@ -556,7 +528,6 @@ contract PriceOracle is Ownable, IPriceOracle {
         if (token == core.BTD()) return getBTDPrice();
         if (token == core.BTB()) return getBTBPrice();
         if (token == core.BRS()) return getBRSPrice();
-        if (token == core.WETH()) return getWETHPrice();
         if (token == core.ST_BTD()) return getStBTDPrice();
         if (token == core.ST_BTB()) return getStBTBPrice();
         if (token == core.USDC()) return 1e18;  // $1

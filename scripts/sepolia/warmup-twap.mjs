@@ -75,9 +75,10 @@ async function main() {
     addr[name] = value;
   }
 
-  const { viem } = hre;
-  const publicClient = await viem.getPublicClient();
+  const connection = await hre.network.connect();
+  const { viem } = connection;
   const [walletClient] = await viem.getWalletClients();
+  const publicClient = await viem.getPublicClient();
 
   console.log(`=> Deployer: ${walletClient.account.address}`);
   console.log(`=> TWAPOracle: ${addr.TWAPOracle}`);

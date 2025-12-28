@@ -4,14 +4,17 @@ import { keccak256, toHex } from "viem";
 /**
  * Sepolia Testnet Deployment Module
  *
- * Differences from local (FullSystem.ts):
+ * Key differences from local (FullSystem.ts):
  * - Uses real Chainlink BTC/USD price feed on Sepolia
  * - Deploys mock WBTC/BTC oracle (1:1 ratio, no real feed on Sepolia)
+ * - Uses official Uniswap V2 Factory to create pairs (done in init-sepolia.mjs)
  * - Token strategy:
  *   - WETH: Uses official Uniswap WETH9 (users can wrap ETH directly)
  *   - WBTC/USDC/USDT: Deploys our own mock tokens (official faucets give too little)
- * - Still deploys our own UniswapV2 pairs (no official V2 on Sepolia)
- * - No guardian/price-sync needed (real network)
+ *
+ * Two-phase deployment:
+ * 1. This module deploys all contracts (without setting peripheral contracts)
+ * 2. init-sepolia.mjs creates pairs via official Uniswap V2 Factory and sets ConfigCore
  */
 
 // Sepolia Chainlink addresses (real feeds)
@@ -20,8 +23,12 @@ const SEPOLIA_CHAINLINK = {
   ETH_USD: "0x694AA1769357215DE4FAC081bf1f309aDC325306",
 };
 
-// Note: We deploy our own MockWETH for simplicity
-// Users can still get ETH from faucets and the system will work the same
+// Official Uniswap V2 on Sepolia
+export const UNISWAP_V2_SEPOLIA = {
+  FACTORY: "0xF62c03E08ada871A0bEb309762E260a7a6a880E6",
+  ROUTER: "0xeE567Fe1712Faf6149d80dA1E6934E354124CfE3",
+  WETH9: "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14",  // Official WETH9 used by Uniswap
+};
 
 // Fund distribution addresses (real addresses for testnet)
 const FUND_ADDRESSES = {
@@ -46,8 +53,9 @@ export default buildModule("FullSystemSepolia", (m) => {
   const wbtc = m.contract("contracts/local/MockWBTC.sol:MockWBTC", [deployer], { id: "WBTC" });
   const usdc = m.contract("contracts/local/MockUSDC.sol:MockUSDC", [deployer], { id: "USDC" });
   const usdt = m.contract("contracts/local/MockUSDT.sol:MockUSDT", [deployer], { id: "USDT" });
-  // Deploy our own MockWETH (simpler than using external WETH9)
-  const weth = m.contract("contracts/local/MockWETH.sol:MockWETH", [deployer], { id: "WETH" });
+  // Use official WETH9 (same as Uniswap V2 Router uses)
+  // Users can wrap ETH directly via deposit() function
+  const weth = m.contractAt("contracts/interfaces/IWETH9.sol:IWETH9", UNISWAP_V2_SEPOLIA.WETH9, { id: "WETH" });
 
   // ===== 2. Core tokens =====
   const brs = m.contract("BRS", [deployer], { id: "BRS" });
@@ -77,19 +85,7 @@ export default buildModule("FullSystemSepolia", (m) => {
   const mockPyth = m.contract("contracts/local/MockPyth.sol:MockPyth", [], { id: "MockPyth" });
   const mockRedstone = m.contract("contracts/local/MockRedstone.sol:MockRedstone", [], { id: "MockRedstone" });
 
-  // ===== 5. UniswapV2 Pairs (our own deployment) =====
-  const pairWbtcUsdc = m.contract("contracts/local/UniswapV2Pair.sol:UniswapV2Pair", [], { id: "PairWBTCUSDC" });
-  const pairBtdUsdc = m.contract("contracts/local/UniswapV2Pair.sol:UniswapV2Pair", [], { id: "PairBTDUSDC" });
-  const pairBtbBtd = m.contract("contracts/local/UniswapV2Pair.sol:UniswapV2Pair", [], { id: "PairBTBBTD" });
-  const pairBrsBtd = m.contract("contracts/local/UniswapV2Pair.sol:UniswapV2Pair", [], { id: "PairBRSBTD" });
-
-  // Initialize pairs token0/token1
-  m.call(pairWbtcUsdc, "initialize", [wbtc, usdc], { id: "InitPairWBTCUSDC" });
-  m.call(pairBtdUsdc, "initialize", [btd, usdc], { id: "InitPairBTDUSDC" });
-  m.call(pairBtbBtd, "initialize", [btb, btd], { id: "InitPairBTBBTD" });
-  m.call(pairBrsBtd, "initialize", [brs, btd], { id: "InitPairBRSBTD" });
-
-  // ===== 6. Config contracts =====
+  // ===== 5. Config contracts =====
   const configCore = m.contract(
     "ConfigCore",
     [wbtc, btd, btb, brs, weth, usdc, usdt, chainlinkBtcUsd, chainlinkWbtcBtc, mockPyth, mockRedstone],
@@ -98,13 +94,13 @@ export default buildModule("FullSystemSepolia", (m) => {
 
   const configGov = m.contract("ConfigGov", [deployer], { id: "ConfigGov" });
 
-  // ===== 7. IdealUSDManager (uses ConfigGov) =====
+  // ===== 6. IdealUSDManager (uses ConfigGov) =====
   const idealUSDManager = m.contract("IdealUSDManager", [deployer, configGov, DEFAULTS.iusdInitial], {
     id: "IdealUSDManager",
     after: [m.call(configGov, "setAddressParam", [0, DEFAULTS.initialPceFeed], { id: "SetPceFeed" })],
   });
 
-  // ===== 8. PriceOracle + TWAP =====
+  // ===== 7. PriceOracle + TWAP =====
   const twapOracle = m.contract("UniswapV2TWAPOracle", [], { id: "TWAPOracle" });
   const priceOracle = m.contract(
     "PriceOracle",
@@ -119,7 +115,7 @@ export default buildModule("FullSystemSepolia", (m) => {
     { after: [configCore] }
   );
 
-  // ===== 9. Treasury / Minter / InterestPool / FarmingPool / StakingRouter =====
+  // ===== 8. Treasury / Minter / InterestPool / FarmingPool / StakingRouter =====
   const treasury = m.contract("Treasury", [deployer, configCore, deployer], {
     after: [configCore],
     id: "Treasury",
@@ -153,7 +149,7 @@ export default buildModule("FullSystemSepolia", (m) => {
     { after: [farmingPool, stBTD, stBTB], id: "StakingRouter" }
   );
 
-  // ===== 10. BRS Distribution =====
+  // ===== 9. BRS Distribution =====
   const totalSupply = 2100000000n * 10n ** 18n;
   const reservedForLP = 1n * 10n ** 18n;
   const toFarmingPool = totalSupply - reservedForLP;
@@ -165,30 +161,15 @@ export default buildModule("FullSystemSepolia", (m) => {
 
   const governor = deployer;
 
-  // ===== 11. Fill ConfigCore addresses =====
+  // ===== 10. Fill ConfigCore core addresses (peripheral contracts set in init-sepolia.mjs) =====
   m.call(configCore, "setCoreContracts", [treasury, minter, priceOracle, idealUSDManager, interestPool], {
     from: deployer,
   });
 
-  m.call(
-    configCore,
-    "setPeripheralContracts",
-    [
-      stakingRouter,
-      farmingPool,
-      stBTD,
-      stBTB,
-      governor,
-      twapOracle,
-      pairWbtcUsdc,
-      pairBtdUsdc,
-      pairBtbBtd,
-      pairBrsBtd,
-    ],
-    { from: deployer }
-  );
+  // NOTE: setPeripheralContracts is called in init-sepolia.mjs after creating Uniswap pairs
+  // This allows us to use official Uniswap V2 Factory to create pairs
 
-  // ===== 12. ConfigGov params =====
+  // ===== 11. ConfigGov params =====
   // ParamType enum: 0=MINT_FEE_BP, 1=INTEREST_FEE_BP, 2=MIN_BTB_PRICE, 3=MAX_BTB_RATE,
   //                 4=PCE_MAX_DEVIATION, 5=REDEEM_FEE_BP, 6=MAX_BTD_RATE
   m.call(
@@ -209,7 +190,7 @@ export default buildModule("FullSystemSepolia", (m) => {
     { id: "ConfigGovSetParams" }
   );
 
-  // ===== 13. Grant MINTER_ROLE =====
+  // ===== 12. Grant MINTER_ROLE =====
   const MINTER_ROLE = keccak256(toHex("MINTER_ROLE"));
   m.call(btd, "grantRole", [MINTER_ROLE, minter], { id: "BTDGrantMinterRoleMinter" });
   m.call(btd, "grantRole", [MINTER_ROLE, interestPool], { id: "BTDGrantMinterRoleInterestPool" });
@@ -220,7 +201,6 @@ export default buildModule("FullSystemSepolia", (m) => {
   return {
     tokens: { wbtc, usdc, usdt, weth, brs, btd, btb, stBTD, stBTB },
     oracles: { chainlinkBtcUsd, chainlinkWbtcBtc, mockPyth, mockRedstone },
-    pairs: { pairWbtcUsdc, pairBtdUsdc, pairBtbBtd, pairBrsBtd },
     configCore,
     configGov,
     treasury,
@@ -232,5 +212,7 @@ export default buildModule("FullSystemSepolia", (m) => {
     twapOracle,
     idealUSDManager,
     governor,
+    // Uniswap V2 addresses (for reference, pairs created in init-sepolia.mjs)
+    uniswapV2: UNISWAP_V2_SEPOLIA,
   };
 });

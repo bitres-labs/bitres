@@ -77,6 +77,10 @@ const ADDRESS_MAP = {
     MockPyth: "MockPyth",
     MockRedstone: "MockRedstone",
   },
+  uniswap: {
+    UniswapV2Factory: "UniswapV2Factory",
+    UniswapV2Router: "UniswapV2Router",
+  },
 };
 
 function parseArgs() {
@@ -151,6 +155,7 @@ function buildConfig(addresses) {
     contracts: {},
     pairs: {},
     oracles: {},
+    uniswap: {},
   };
 
   for (const [category, mapping] of Object.entries(ADDRESS_MAP)) {
