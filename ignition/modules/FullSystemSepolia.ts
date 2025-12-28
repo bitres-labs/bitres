@@ -150,9 +150,13 @@ export default buildModule("FullSystemSepolia", (m) => {
   );
 
   // ===== 9. BRS Distribution =====
+  // Reserve some BRS for:
+  // - LP initialization: 1 BRS (for BRS/BTD pair)
+  // - Pool 9 seed: 0.001 BRS
+  // Using 2 BRS to have buffer
   const totalSupply = 2100000000n * 10n ** 18n;
-  const reservedForLP = 1n * 10n ** 18n;
-  const toFarmingPool = totalSupply - reservedForLP;
+  const reservedForInit = 2n * 10n ** 18n; // 2 BRS reserved for LP + pool seed
+  const toFarmingPool = totalSupply - reservedForInit;
 
   m.call(brs, "transfer", [farmingPool, toFarmingPool], {
     from: deployer,
