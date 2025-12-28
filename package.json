@@ -41,9 +41,8 @@
     "sepolia:deploy-full": "bash scripts/sepolia/deploy-full.sh",
     "sepolia:deploy": "hardhat ignition deploy ignition/modules/FullSystemSepolia.ts --network sepolia",
     "sepolia:init": "hardhat run scripts/sepolia/init-sepolia.mjs --network sepolia",
-    "sepolia:init-farm": "hardhat run scripts/sepolia/init-farm.mjs --network sepolia",
+    "sepolia:warmup-twap": "hardhat run scripts/sepolia/warmup-twap.mjs --network sepolia",
     "sepolia:faucet": "hardhat run scripts/sepolia/faucet.mjs --network sepolia",
-    "sepolia:enable-twap": "hardhat run scripts/sepolia/enable-twap.mjs --network sepolia",
     "sepolia:health-check": "hardhat run scripts/sepolia/health-check.mjs --network sepolia",
     "sepolia:price-sync": "hardhat run scripts/sepolia/price-sync.mjs --network sepolia",
     "update:interface": "node scripts/main/update-interface-config.mjs"
