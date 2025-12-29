@@ -12,37 +12,33 @@ import "./ConfigGov.sol";
 import {IMintableERC20} from "./interfaces/IMintableERC20.sol";
 import {IPriceOracle} from "./interfaces/IPriceOracle.sol";
 import {IInterestPool} from "./interfaces/IInterestPool.sol";
+import {IMinter} from "./interfaces/IMinter.sol";
 import "./libraries/Constants.sol";
 import "./libraries/InterestMath.sol";
+import "./libraries/SigmoidRate.sol";
 
 /// @title InterestPool
 /// @notice Manages interest accrual for BTD and BTB deposited via stBTD/stBTB vaults.
 ///         Users cannot interact with this contract directly - they must use stBTD/stBTB vault contracts.
 ///
-///         BTD Deposit Rate (per whitepaper Section 4.1):
-///         - Price < 0.99 IUSD & Falling: Raise rate
-///         - Price < 0.99 IUSD & Rising: Unchanged
-///         - Price in [0.99, 1.01] IUSD: Unchanged
-///         - Price > 1.01 IUSD & Falling: Unchanged
-///         - Price > 1.01 IUSD & Rising: Lower rate
+///         BTD Deposit Rate (per whitepaper Section 7.1.3):
+///         - Uses Sigmoid function: rBTD(P) = rmax * S(-α * (P - 1) + β)
+///         - α = 25 (price sensitivity), rmax = 10%
+///         - Base rate varies with CR: rbase = rdefault × (1 + ΔCR)
+///         - Range: 2%-10%, with ΔCR = (1-CR)/0.8 when CR < 100%
 ///
-///         BTB Bond Rate (per whitepaper Section 4.2):
-///         - Price < 0.99 BTD & Falling: Raise rate
-///         - Price < 0.99 BTD & Rising: Unchanged
-///         - Price in [0.99, 1.01] BTD: Unchanged
-///         - Price > 1.01 BTD & Falling: Unchanged
-///         - Price > 1.01 BTD & Rising: Lower rate
+///         BTB Bond Rate (per whitepaper Section 7.1.3):
+///         - Uses Sigmoid function: rBTB(P, CR) = rmax * S(-α * (P - 1) + β(CR))
+///         - α = 10 (price sensitivity), rmax = 20%
+///         - Base rate has 3x ΔCR multiplier for higher risk compensation
+///         - Range: 2%-20%, with ΔCR = 3×(1-CR)/0.8 when CR < 100%
 ///
 /// @dev Only stBTD and stBTB vault contracts are authorized to call deposit/withdraw functions.
 contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
     using SafeERC20 for IMintableERC20;
 
-    // Price thresholds for rate adjustment (per whitepaper Table 3 & 4)
-    uint256 private constant LOWER_PRICE_THRESHOLD = (Constants.PRECISION_18 * 99) / 100; // 0.99
-    uint256 private constant UPPER_PRICE_THRESHOLD = (Constants.PRECISION_18 * 101) / 100; // 1.01
-
-    // Rate limits
-    uint256 private constant BTD_BASE_RATE = 400;   // 4% in bps (initial rate)
+    // Fallback default rate when gov parameter is not set (5% = 500 bps)
+    uint256 private constant FALLBACK_DEFAULT_RATE_BPS = 500;
 
     ConfigCore public immutable core;
     ConfigGov public gov;
@@ -94,6 +90,7 @@ contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
         require(_gov != address(0), "InterestPool: gov zero");
         core = ConfigCore(_core);
         gov = ConfigGov(_gov);
+        rateOracle = _rateOracle; // Can be zero, set later via setRateOracle()
 
         address btdAddress = core.BTD();
         address btbAddress = core.BTB();
@@ -104,7 +101,7 @@ contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
             totalStaked: 0,
             accInterestPerShare: 0,
             lastAccrual: block.timestamp,
-            annualRateBps: BTD_BASE_RATE  // BTD and BTB use same initial rate
+            annualRateBps: FALLBACK_DEFAULT_RATE_BPS  // Initial rate = fallback default rate
         });
 
         btbPool = Pool({
@@ -112,7 +109,7 @@ contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
             totalStaked: 0,
             accInterestPerShare: 0,
             lastAccrual: block.timestamp,
-            annualRateBps: BTD_BASE_RATE  // BTB rate is later dynamically adjusted by market mechanism
+            annualRateBps: FALLBACK_DEFAULT_RATE_BPS  // Initial rate = fallback default rate
         });
 
     }
@@ -146,13 +143,11 @@ contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
         emit RateOracleUpdated(newOracle);
     }
 
-    /// @notice Dynamically updates BTD annual rate (APR) based on BTD/IUSD price
-    /// @dev Per whitepaper Section 4.1 (Table 3 - Deposit Rate Policy):
-    ///      - Price < 0.99 IUSD & Falling: Raise rate (increase attractiveness)
-    ///      - Price < 0.99 IUSD & Rising: Unchanged
-    ///      - Price in [0.99, 1.01] IUSD: Unchanged (target range)
-    ///      - Price > 1.01 IUSD & Falling: Unchanged
-    ///      - Price > 1.01 IUSD & Rising: Lower rate
+    /// @notice Dynamically updates BTD annual rate (APR) based on BTD/IUSD price and CR
+    /// @dev Per whitepaper Section 7.1.3:
+    ///      - Uses Sigmoid function: rBTD(P) = rmax * S(-α * (P - 1) + β)
+    ///      - α = 25, rmax = 10%, base rate varies with CR
+    ///      - Range: 2%-10%, with ΔCR = (1-CR)/0.8 when CR < 100%
     ///      Can only adjust once per day. Only rate oracle can call.
     function updateBTDAnnualRate() external onlyRateOracle {
         if (btdLastRateUpdate != 0) {
@@ -161,34 +156,23 @@ contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
 
         _accruePool(btdPool);
 
-        // Get BTD/IUSD price ratio
+        // Get BTD/IUSD price ratio (18 decimals, 1e18 = 1.0)
         uint256 price = _currentBTDPriceInIUSD();
-        int256 changeBps = _calculateChangeBps(btdLastPrice, price);
+
+        // Get collateral ratio from Minter (18 decimals, 1e18 = 100%)
+        uint256 cr = _getCollateralRatio();
+
+        // Get default base rate from governance (with fallback)
+        uint256 defaultRateBps = _getDefaultRate();
 
         uint256 oldRate = btdPool.annualRateBps;
-        uint256 newRate = oldRate;
 
-        if (btdLastPrice != 0) {
-            // Per whitepaper Table 3: Deposit Rate Policy
-            if (price < LOWER_PRICE_THRESHOLD && changeBps < 0) {
-                // Price < 0.99 IUSD and falling: raise rate
-                uint256 delta = uint256(-changeBps);
-                newRate += delta;
-            } else if (price > UPPER_PRICE_THRESHOLD && changeBps > 0) {
-                // Price > 1.01 IUSD and rising: lower rate
-                uint256 delta = uint256(changeBps);
-                if (delta >= newRate) {
-                    newRate = 0;
-                } else {
-                    newRate -= delta;
-                }
-            }
-            // Other cases: rate unchanged (per whitepaper)
-        }
+        // Calculate new rate using Sigmoid function with CR adjustment
+        uint256 newRate = SigmoidRate.calculateBTDRate(price, cr, defaultRateBps);
 
-        // Apply maximum rate cap from governance
+        // Apply governance cap if set
         uint256 maxRate = gov.maxBTDRate();
-        if (newRate > maxRate) {
+        if (maxRate > 0 && newRate > maxRate) {
             newRate = maxRate;
         }
 
@@ -217,11 +201,12 @@ contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
     }
 
     /// @notice Updates BTB annual rate (APR)
-    /// @dev Can only adjust once per day, based on BTB/BTD price dynamics:
-    ///      - If price < 0.99 BTD and daily change < 0, increase APR (by |change rate|)
-    ///      - If price > 1.01 BTD and daily change > 0, decrease APR (by change rate)
-    ///      - Final APR is constrained to [0, Config.maxBTBRate()] range
-    ///      Only rate oracle or contract owner can call
+    /// @dev Per whitepaper Section 7.1.3:
+    ///      - Uses Sigmoid function: rBTB(P, CR) = rmax * S(-α * (P - 1) + β(CR))
+    ///      - α = 10, rmax = 20%
+    ///      - Base rate has 3x ΔCR multiplier: rbase = rdefault × (1 + 3×ΔCR)
+    ///      - Range: 2%-20%, with ΔCR = (1-CR)/0.8 when CR < 100%
+    ///      Can only adjust once per day. Only rate oracle can call.
     function updateBTBAnnualRate() external onlyRateOracle {
         if (btbLastRateUpdate != 0) {
             require(block.timestamp >= btbLastRateUpdate + Constants.SECONDS_PER_DAY, "BTB rate already updated today");
@@ -229,28 +214,23 @@ contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
 
         _accruePool(btbPool);
 
+        // Get BTB/BTD price (18 decimals, 1e18 = 1.0)
         uint256 price = _currentBTBPrice();
-        int256 changeBps = _calculateChangeBps(btbLastPrice, price);
+
+        // Get collateral ratio from Minter (18 decimals, 1e18 = 100%)
+        uint256 cr = _getCollateralRatio();
+
+        // Get default base rate from governance (with fallback)
+        uint256 defaultRateBps = _getDefaultRate();
 
         uint256 oldRate = btbPool.annualRateBps;
-        uint256 newRate = oldRate;
 
-        if (btbLastPrice != 0) {
-            if (price < LOWER_PRICE_THRESHOLD && changeBps < 0) {
-                uint256 delta = uint256(-changeBps);
-                newRate += delta;
-            } else if (price > UPPER_PRICE_THRESHOLD && changeBps > 0) {
-                uint256 delta = uint256(changeBps);
-                if (delta >= newRate) {
-                    newRate = 0;
-                } else {
-                    newRate -= delta;
-                }
-            }
-        }
+        // Calculate new rate using Sigmoid function with CR adjustment
+        uint256 newRate = SigmoidRate.calculateBTBRate(price, cr, defaultRateBps);
 
+        // Apply governance cap if set
         uint256 maxRate = gov.maxBTBRate();
-        if (newRate > maxRate) {
+        if (maxRate > 0 && newRate > maxRate) {
             newRate = maxRate;
         }
 
@@ -258,7 +238,8 @@ contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
         btbLastPrice = price;
         btbLastRateUpdate = block.timestamp;
 
-        emit BTBAnnualRateUpdated(oldRate, newRate, price, changeBps);
+        // Note: changeBps is no longer used in Sigmoid calculation
+        emit BTBAnnualRateUpdated(oldRate, newRate, price, 0);
     }
 
     // --- Internal staking logic ---
@@ -328,8 +309,28 @@ contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
         return btbPriceUSD;
     }
 
-    function _calculateChangeBps(uint256 previousPrice, uint256 currentPrice) internal pure returns (int256) {
-        return InterestMath.priceChangeBps(previousPrice, currentPrice);
+    /// @notice Gets default base rate from governance with fallback
+    /// @dev Falls back to FALLBACK_DEFAULT_RATE_BPS if governance parameter is not set
+    /// @return Default base rate in basis points
+    function _getDefaultRate() internal view returns (uint256) {
+        uint256 rate = gov.baseRateDefault();
+        return rate > 0 ? rate : FALLBACK_DEFAULT_RATE_BPS;
+    }
+
+    /// @notice Gets collateral ratio from Minter
+    /// @dev Returns 100% (1e18) if Minter is not available
+    /// @return Collateral ratio (18 decimals, 1e18 = 100%)
+    function _getCollateralRatio() internal view returns (uint256) {
+        address minterAddr = core.MINTER();
+        if (minterAddr == address(0)) {
+            return Constants.PRECISION_18; // Default to 100%
+        }
+
+        try IMinter(minterAddr).getCollateralRatio() returns (uint256 cr) {
+            return cr;
+        } catch {
+            return Constants.PRECISION_18; // Default to 100% on error
+        }
     }
 
     // --- Virtual Staking Interface (for Coinbase integration) ---

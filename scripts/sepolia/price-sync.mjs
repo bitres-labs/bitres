@@ -318,9 +318,9 @@ async function checkAndSync(context) {
       log(`✓ Rebalanced: $${newPoolPrice.toLocaleString()} (deviation: ${newDeviation.toFixed(2)}%)`);
     }
 
-    // 4) Take TWAP observation
+    // 4) Take TWAP observation (only if >= 30 min since last update)
     try {
-      const updateTx = await twapOracle.write.update([pairAddress], { account: owner.account });
+      const updateTx = await twapOracle.write.updateIfNeeded([pairAddress], { account: owner.account });
       await publicClient.waitForTransactionReceipt({ hash: updateTx });
       log(`✓ TWAP observation recorded`);
     } catch (err) {

@@ -19,8 +19,6 @@ interface IFarmingPool {
         uint256 lastRewardTime;
         uint256 accRewardPerShare;
         uint256 totalStaked;
-        uint256 cachedLPValuePerToken;  // Cached LP value per token (18 decimal precision USD)
-        uint256 lastPriceUpdate;        // Last price update timestamp
         PoolKind kind;                  // Pool type
     }
 
@@ -158,8 +156,6 @@ interface IFarmingPool {
      * @return lastRewardTime Last reward calculation timestamp
      * @return accRewardPerShare Accumulated reward per share
      * @return totalStaked Total staked amount
-     * @return cachedLPValuePerToken Cached LP value per token (18 decimal precision USD)
-     * @return lastPriceUpdate Last price update timestamp
      * @return kind Pool type
      */
     function poolInfo(uint256 _pid) external view returns (
@@ -168,8 +164,6 @@ interface IFarmingPool {
         uint256 lastRewardTime,
         uint256 accRewardPerShare,
         uint256 totalStaked,
-        uint256 cachedLPValuePerToken,
-        uint256 lastPriceUpdate,
         PoolKind kind
     );
 
@@ -206,25 +200,9 @@ interface IFarmingPool {
      */
     function minted() external view returns (uint256);
 
-    // --- LP Value Management ---
-    /**
-     * @notice Update LP token value cache for specified pool
-     * @param _pid Pool ID
-     */
-    function updateLPValue(uint256 _pid) external;
-
-    /**
-     * @notice Check if specified pool needs LP value update
-     * @param _pid Pool ID
-     * @return needs Whether update is needed
-     * @return timeSinceUpdate Time since last update (seconds)
-     */
-    function needsUpdate(uint256 _pid) external view returns (bool needs, uint256 timeSinceUpdate);
-
     // --- Events ---
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event Claim(address indexed user, uint256 indexed pid, uint256 amount);
     event EmergencyWithdraw(address indexed user, uint256 indexed pid, uint256 amount);
-    event LPValueUpdated(uint256 indexed pid, uint256 newValuePerToken, uint256 timestamp);
 }

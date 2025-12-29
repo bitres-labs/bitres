@@ -60,9 +60,9 @@ contract UniswapV2TWAPOracle is IUniswapV2TWAPOracle {
     }
 
     /// @notice Updates TWAP observation for a trading pair
-    /// @dev Should be called periodically (at least every PERIOD) to maintain valid observations
+    /// @dev Internal function - external calls must use updateIfNeeded() which enforces PERIOD
     /// @param pair Uniswap V2 Pair contract address
-    function update(address pair) external {
+    function _update(address pair) internal {
         (uint256 price0Cumulative, uint256 price1Cumulative, uint32 blockTimestamp) =
             _currentCumulativePrices(pair);
 
@@ -78,25 +78,45 @@ contract UniswapV2TWAPOracle is IUniswapV2TWAPOracle {
     }
 
     /// @notice Gets TWAP price in Q112 format (token1/token0)
+    /// @dev Calculates TWAP from a historical observation to NOW (not between two old observations)
     /// @param pair Uniswap V2 Pair contract address
     /// @return price TWAP price in Q112 format
     function getTWAP(address pair) public view returns (uint256) {
+        // Get CURRENT cumulative price
+        (uint256 currentPrice0Cumulative, , uint32 currentTimestamp) = _currentCumulativePrices(pair);
+
         Observation memory older = pairObservations[pair][0];
         Observation memory newer = pairObservations[pair][1];
 
         require(newer.timestamp > 0, "No observations");
-        require(older.timestamp > 0, "Need two observations");
 
+        // Find a ref observation that is >= PERIOD ago
+        // Prefer newer if it's old enough, otherwise use older
+        Observation memory ref;
+        uint32 newerAge;
+        uint32 olderAge;
+        unchecked {
+            newerAge = currentTimestamp - newer.timestamp;
+            olderAge = currentTimestamp - older.timestamp;
+        }
+
+        if (newerAge >= PERIOD) {
+            ref = newer;
+        } else if (older.timestamp > 0 && olderAge >= PERIOD) {
+            ref = older;
+        } else {
+            revert("No observation >= PERIOD ago");
+        }
+
+        // Calculate TWAP: (current_cumulative - ref_cumulative) / time_elapsed
         uint32 timeElapsed;
         unchecked {
-            timeElapsed = newer.timestamp - older.timestamp;
+            timeElapsed = currentTimestamp - ref.timestamp;
         }
-        require(timeElapsed >= PERIOD, "Observation period too short");
 
-        // Calculate TWAP: (cumulative_new - cumulative_old) / time_elapsed
         uint256 priceCumulativeDelta;
         unchecked {
-            priceCumulativeDelta = newer.price0Cumulative - older.price0Cumulative;
+            priceCumulativeDelta = currentPrice0Cumulative - ref.price0Cumulative;
         }
         return priceCumulativeDelta / timeElapsed;
     }
@@ -146,19 +166,25 @@ contract UniswapV2TWAPOracle is IUniswapV2TWAPOracle {
     }
 
     /// @notice Checks if TWAP is ready for querying
+    /// @dev Ready when at least one observation is >= PERIOD ago from now
     /// @param pair Uniswap V2 Pair contract address
     /// @return ready True if TWAP can be safely queried
     function isTWAPReady(address pair) external view returns (bool) {
         Observation memory older = pairObservations[pair][0];
         Observation memory newer = pairObservations[pair][1];
 
-        if (newer.timestamp == 0 || older.timestamp == 0) return false;
+        if (newer.timestamp == 0) return false;
 
-        uint32 timeElapsed;
+        uint32 currentTimestamp = uint32(block.timestamp);
+        uint32 newerAge;
+        uint32 olderAge;
         unchecked {
-            timeElapsed = newer.timestamp - older.timestamp;
+            newerAge = currentTimestamp - newer.timestamp;
+            olderAge = currentTimestamp - older.timestamp;
         }
-        return timeElapsed >= PERIOD;
+
+        // Ready if newer is old enough, or if older exists and is old enough
+        return newerAge >= PERIOD || (older.timestamp > 0 && olderAge >= PERIOD);
     }
 
     /// @notice Gets observation info for diagnostics
@@ -188,22 +214,12 @@ contract UniswapV2TWAPOracle is IUniswapV2TWAPOracle {
     }
 
     /// @notice Updates TWAP only if needed (>= PERIOD since last update)
-    /// @dev Saves gas by skipping update if recently updated
+    /// @dev Saves gas by skipping update if recently updated. This is the only external entry point for updates.
     /// @param pair Uniswap V2 Pair contract address
     /// @return updated True if update was performed
     function updateIfNeeded(address pair) external returns (bool updated) {
         if (needsUpdate(pair)) {
-            (uint256 price0Cumulative, uint256 price1Cumulative, uint32 blockTimestamp) =
-                _currentCumulativePrices(pair);
-
-            pairObservations[pair][0] = pairObservations[pair][1];
-            pairObservations[pair][1] = Observation({
-                timestamp: blockTimestamp,
-                price0Cumulative: price0Cumulative,
-                price1Cumulative: price1Cumulative
-            });
-
-            emit ObservationUpdated(pair, price0Cumulative, price1Cumulative, blockTimestamp);
+            _update(pair);
             return true;
         }
         return false;

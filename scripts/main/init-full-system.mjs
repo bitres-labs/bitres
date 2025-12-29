@@ -253,7 +253,7 @@ async function main() {
   // Take first TWAP observation for all pairs
   console.log("   -> Taking first TWAP observation...");
   for (const pair of pairs) {
-    await twapOracle.write.update([pair.address], { account: owner.account });
+    await twapOracle.write.updateIfNeeded([pair.address], { account: owner.account });
   }
 
   // Advance time by 31 minutes (TWAP requires 30 min between observations)
@@ -269,7 +269,7 @@ async function main() {
   // Take second TWAP observation for all pairs
   console.log("   -> Taking second TWAP observation...");
   for (const pair of pairs) {
-    await twapOracle.write.update([pair.address], { account: owner.account });
+    await twapOracle.write.updateIfNeeded([pair.address], { account: owner.account });
   }
 
   // Enable TWAP now that observations are ready

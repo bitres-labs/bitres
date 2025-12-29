@@ -119,11 +119,12 @@ describe("Config Architecture (ConfigCore + ConfigGov - Viem)", function () {
 
   describe("ConfigGov - Governable Parameters", function () {
     it("should initialize with default values", async function () {
-      // Governable parameters are now in ConfigGov, not ConfigCore
-      expect(await configGov.read.mintFeeBP()).to.equal(0n);
-      expect(await configGov.read.interestFeeBP()).to.equal(0n);
-      expect(await configGov.read.minBTBPrice()).to.equal(0n);
-      expect(await configGov.read.maxBTBRate()).to.equal(0n);
+      // Governable parameters are now initialized in ConfigGov constructor
+      expect(await configGov.read.mintFeeBP()).to.equal(50n);       // 0.5% default
+      expect(await configGov.read.redeemFeeBP()).to.equal(50n);     // 0.5% default
+      expect(await configGov.read.interestFeeBP()).to.equal(500n);  // 5% default
+      expect(await configGov.read.minBTBPrice()).to.equal(0n);      // Not initialized
+      expect(await configGov.read.maxBTBRate()).to.equal(0n);       // Not initialized
     });
 
     it.skip("should reference ConfigCore correctly", async function () {
@@ -298,13 +299,17 @@ describe("Config Architecture (ConfigCore + ConfigGov - Viem)", function () {
     });
 
     it("should handle zero parameter values", async function () {
-      // Zero is not allowed by validation; ensure it reverts instead of silently accepting
-      try {
-        await configGov.write.setParam([0n, 0n], { account: owner.account });
-        expect.fail("Expected revert");
-      } catch (error: any) {
-        expect(error.message).to.include("mint fee too low");
-      }
+      // Zero IS allowed for mintFeeBP (range: 0-1000 bps)
+      await configGov.write.setParam([0n, 0n], { account: owner.account });
+      expect(await configGov.read.mintFeeBP()).to.equal(0n);
+
+      // Zero IS also allowed for redeemFeeBP (range: 0-1000 bps)
+      await configGov.write.setParam([5n, 0n], { account: owner.account }); // REDEEM_FEE_BP = 5
+      expect(await configGov.read.redeemFeeBP()).to.equal(0n);
+
+      // Zero IS also allowed for interestFeeBP (range: 0-2000 bps)
+      await configGov.write.setParam([1n, 0n], { account: owner.account }); // INTEREST_FEE_BP = 1
+      expect(await configGov.read.interestFeeBP()).to.equal(0n);
     });
 
     it("should maintain parameter state across multiple updates", async function () {

@@ -2,16 +2,12 @@
 pragma solidity ^0.8.30;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./interfaces/IFarmingPool.sol";
 import "./ConfigCore.sol";
-import "./interfaces/IPriceOracle.sol";
 import "./libraries/Constants.sol";
-import "@openzeppelin/contracts/utils/math/Math.sol";
 import "./libraries/RewardMath.sol";
 import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
 
@@ -106,8 +102,6 @@ contract FarmingPool is Ownable, ReentrancyGuard, IFarmingPool {
     /// @return lastRewardTime Timestamp of last reward calculation
     /// @return accRewardPerShare Accumulated reward per share, precision 1e18
     /// @return totalStaked Total staked amount
-    /// @return cachedLPValuePerToken Cached LP token unit price (LP pools only)
-    /// @return lastPriceUpdate Timestamp of last price update
     /// @return kind Pool type (LP or single token)
     function poolInfo(uint256 pid)
         external
@@ -119,8 +113,6 @@ contract FarmingPool is Ownable, ReentrancyGuard, IFarmingPool {
             uint256 lastRewardTime,
             uint256 accRewardPerShare,
             uint256 totalStaked,
-            uint256 cachedLPValuePerToken,
-            uint256 lastPriceUpdate,
             PoolKind kind
         )
     {
@@ -131,8 +123,6 @@ contract FarmingPool is Ownable, ReentrancyGuard, IFarmingPool {
             pool.lastRewardTime,
             pool.accRewardPerShare,
             pool.totalStaked,
-            pool.cachedLPValuePerToken,
-            pool.lastPriceUpdate,
             pool.kind
         );
     }
@@ -219,8 +209,6 @@ contract FarmingPool is Ownable, ReentrancyGuard, IFarmingPool {
                 lastRewardTime: block.timestamp,
                 accRewardPerShare: 0,
                 totalStaked: 0,
-                cachedLPValuePerToken: 0,
-                lastPriceUpdate: 0,
                 kind: kind
             })
         );
@@ -494,128 +482,6 @@ contract FarmingPool is Ownable, ReentrancyGuard, IFarmingPool {
         pool.lpToken.safeTransfer(msg.sender, amount);
 
         emit EmergencyWithdraw(msg.sender, pid, amount);
-    }
-
-    // ============ LP Value Cache ============
-
-    uint256 public constant PRICE_UPDATE_INTERVAL = 1 hours;
-
-    /// @notice Checks if LP pool needs price cache update
-    /// @dev Only applicable to LP pools, updates LP token value hourly
-    /// @param pid Pool ID
-    /// @return needs Whether update is needed
-    /// @return timeSince Time since last update (seconds)
-    function needsUpdate(uint256 pid) external view override returns (bool needs, uint256 timeSince) {
-        IFarmingPool.PoolInfo storage pool = _poolInfo[pid];
-        if (pool.kind != PoolKind.LP) {
-            return (false, 0);
-        }
-        timeSince = block.timestamp - pool.lastPriceUpdate;
-        needs = timeSince >= PRICE_UPDATE_INTERVAL;
-    }
-
-    /// @notice Manually updates LP pool price cache
-    /// @dev Only applicable to LP pools, calculates and caches LP token USD value
-    ///      Used for minimum stake value validation
-    /// @param pid Pool ID (must be LP type)
-    function updateLPValue(uint256 pid) external override {
-        IFarmingPool.PoolInfo storage pool = _poolInfo[pid];
-        require(pool.kind == PoolKind.LP, "FarmingPool: not LP");
-        uint256 newValue = _calculateLPStakeValue(pool.lpToken, 1e18);
-        pool.cachedLPValuePerToken = newValue;
-        pool.lastPriceUpdate = block.timestamp;
-        emit LPValueUpdated(pid, newValue, block.timestamp);
-    }
-
-    function _updateLPValueIfNeeded(uint256 pid, PoolKind kind) internal {
-        if (kind != PoolKind.LP) {
-            return;
-        }
-        IFarmingPool.PoolInfo storage pool = _poolInfo[pid];
-        if (block.timestamp >= pool.lastPriceUpdate + PRICE_UPDATE_INTERVAL) {
-            uint256 newValue = _calculateLPStakeValue(pool.lpToken, 1e18);
-            pool.cachedLPValuePerToken = newValue;
-            pool.lastPriceUpdate = block.timestamp;
-            emit LPValueUpdated(pid, newValue, block.timestamp);
-        }
-    }
-
-    function _calculateStakeValueUSD(
-        IFarmingPool.PoolInfo storage pool,
-        uint256 amount,
-        PoolKind kind
-    ) internal view returns (uint256) {
-        if (kind == PoolKind.LP) {
-            uint256 valuePerToken = pool.cachedLPValuePerToken;
-            if (valuePerToken == 0) {
-                valuePerToken = _calculateLPStakeValue(pool.lpToken, 1e18);
-            }
-            return Math.mulDiv(amount, valuePerToken, 1e18);
-        }
-        return _calculateSingleStakeValue(pool.lpToken, amount);
-    }
-
-    function _calculateSingleStakeValue(IERC20 token, uint256 amount) internal view returns (uint256) {
-        uint8 decimals = IERC20Metadata(address(token)).decimals();
-        uint256 price = _fetchTokenPrice(address(token));
-        return Math.mulDiv(amount, price, 10 ** decimals);
-    }
-
-    function _calculateLPStakeValue(IERC20 lpToken, uint256 amount) internal view returns (uint256) {
-        IUniswapV2Pair pair = IUniswapV2Pair(address(lpToken));
-        uint256 totalSupply = pair.totalSupply();
-        if (totalSupply == 0) return 0;
-
-        (uint112 reserve0, uint112 reserve1, ) = pair.getReserves();
-        address token0 = pair.token0();
-        address token1 = pair.token1();
-
-        uint256 price0 = _fetchTokenPrice(token0);
-        uint256 price1 = _fetchTokenPrice(token1);
-        uint8 decimals0 = IERC20Metadata(token0).decimals();
-        uint8 decimals1 = IERC20Metadata(token1).decimals();
-
-        uint256 value0 = Math.mulDiv(reserve0, price0, 10 ** decimals0);
-        uint256 value1 = Math.mulDiv(reserve1, price1, 10 ** decimals1);
-        uint256 totalValue = value0 + value1;
-
-        return Math.mulDiv(amount, totalValue, totalSupply);
-    }
-
-    function _fetchTokenPrice(address token) internal view returns (uint256) {
-        IPriceOracle oracle = IPriceOracle(core.PRICE_ORACLE());
-        if (token == core.BTD()) {
-            return oracle.getBTDPrice();
-        }
-        if (token == core.BTB()) {
-            return oracle.getBTBPrice();
-        }
-        if (token == core.BRS()) {
-            return oracle.getBRSPrice();
-        }
-        if (token == core.WBTC()) {
-            return oracle.getWBTCPrice();
-        }
-        // stBTD price = BTD price * share value (ERC4626)
-        if (token == core.ST_BTD()) {
-            uint256 btdPrice = oracle.getBTDPrice();
-            uint256 assetsPerShare = IERC4626(token).convertToAssets(1e18);
-            return Math.mulDiv(btdPrice, assetsPerShare, 1e18);
-        }
-        // stBTB price = BTB price * share value (ERC4626)
-        if (token == core.ST_BTB()) {
-            uint256 btbPrice = oracle.getBTBPrice();
-            uint256 assetsPerShare = IERC4626(token).convertToAssets(1e18);
-            return Math.mulDiv(btbPrice, assetsPerShare, 1e18);
-        }
-        // Local/test: stablecoins fixed at $1, WETH set to $3,000
-        if (token == core.USDC() || token == core.USDT()) {
-            return 1e18;
-        }
-        if (token == core.WETH()) {
-            return 3_000e18;
-        }
-        revert("FarmingPool: unsupported token");
     }
 
     // ============ Token Amount Validation ============

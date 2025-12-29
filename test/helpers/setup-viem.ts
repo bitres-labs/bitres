@@ -143,7 +143,19 @@ export async function deployOracles() {
     []
   );
 
-  return { mockBtcUsd, mockWbtcBtc, mockPce, mockPyth, mockRedstone };
+  // Chainlink USDC/USD: $1.0 (8 decimals)
+  const mockUsdcUsd = await viem.deployContract(
+    "contracts/local/MockAggregatorV3.sol:MockAggregatorV3",
+    [1n * 10n ** 8n]
+  );
+
+  // Chainlink USDT/USD: $1.0 (8 decimals)
+  const mockUsdtUsd = await viem.deployContract(
+    "contracts/local/MockAggregatorV3.sol:MockAggregatorV3",
+    [1n * 10n ** 8n]
+  );
+
+  return { mockBtcUsd, mockWbtcBtc, mockPce, mockPyth, mockRedstone, mockUsdcUsd, mockUsdtUsd };
 }
 
 /**
@@ -228,7 +240,7 @@ export async function deployConfig(
 ) {
   const [owner] = await getWallets();
 
-  // Deploy ConfigCore (11 constructor params: tokens + oracles)
+  // Deploy ConfigCore (13 constructor params: tokens + oracles)
   const configCore = await viem.deployContract(
     "contracts/ConfigCore.sol:ConfigCore",
     [
@@ -243,6 +255,8 @@ export async function deployConfig(
       oracles.mockWbtcBtc.address,                          // _chainlinkWbtcBtc
       oracles.mockPyth.address,                             // _pythWbtc
       oracles.mockRedstone.address,                         // _redstoneWbtc
+      oracles.mockUsdcUsd.address,                          // _chainlinkUsdcUsd
+      oracles.mockUsdtUsd.address,                          // _chainlinkUsdtUsd
     ]
   );
 

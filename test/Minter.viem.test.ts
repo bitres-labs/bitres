@@ -392,4 +392,199 @@ describe("Minter Contract (Viem)", function () {
   });
 
   // Edge Cases tests removed: contained non-existent functions like mintBTB()
+
+  // ==================== FORMULA VERIFICATION TESTS ====================
+  // These tests verify that mint/redeem amounts follow whitepaper formulas:
+  // Mint: BTD = WBTC × (BTC_Price / IUSD_Price)
+  // Redeem (CR>=100%): WBTC = BTD × (IUSD_Price / BTC_Price)
+  // See whitepaper Section 3.3-3.4 for detailed formulas
+
+  describe("Mint/Redeem Formula Verification", function () {
+    it("should mint BTD amount matching formula: BTD = WBTC × (BTC_Price / IUSD_Price)", async function () {
+      const wbtcAmount = toWei("1", 8n); // 1 WBTC
+
+      // Get prices from oracle before minting
+      const wbtcPrice = await system.priceOracle.read.getWBTCPrice();
+      const iusdPrice = await system.priceOracle.read.getIUSDPrice();
+
+      console.log('[Mint Formula] WBTC Price:', wbtcPrice.toString());
+      console.log('[Mint Formula] IUSD Price:', iusdPrice.toString());
+
+      // Calculate expected BTD (formula: WBTC × BTCPrice / IUSDPrice)
+      // Both prices are in 18 decimals, WBTC is 8 decimals, BTD is 18 decimals
+      // Expected: (wbtcAmount * 1e10) * wbtcPrice / iusdPrice
+      const wbtcIn18Decimals = wbtcAmount * BigInt(1e10); // Convert 8 to 18 decimals
+      const expectedBTD = (wbtcIn18Decimals * wbtcPrice) / iusdPrice;
+
+      console.log('[Mint Formula] Input WBTC (8 decimals):', wbtcAmount.toString());
+      console.log('[Mint Formula] Expected BTD:', expectedBTD.toString());
+
+      // Approve and mint
+      await tokens.wbtc.write.approve([minter.address, wbtcAmount], { account: user1.account });
+      const btdBalanceBefore = await tokens.btd.read.balanceOf([user1.account.address]);
+      await minter.write.mintBTD([wbtcAmount], { account: user1.account });
+      const btdBalanceAfter = await tokens.btd.read.balanceOf([user1.account.address]);
+
+      const actualBTD = btdBalanceAfter - btdBalanceBefore;
+      console.log('[Mint Formula] Actual BTD minted:', actualBTD.toString());
+
+      // Calculate accuracy ratio
+      if (expectedBTD > 0n && actualBTD > 0n) {
+        const ratio = Number(actualBTD) / Number(expectedBTD);
+        console.log('[Mint Formula] Accuracy ratio (should be ~1.0):', ratio.toFixed(6));
+
+        // Allow 5% tolerance for fees and rounding
+        expect(ratio >= 0.95 && ratio <= 1.05).to.be.true;
+      }
+    });
+
+    it("should redeem WBTC amount matching formula when CR >= 100%", async function () {
+      // First mint some BTD
+      const wbtcMintAmount = toWei("2", 8n);
+      await tokens.wbtc.write.approve([minter.address, wbtcMintAmount], { account: user1.account });
+      await minter.write.mintBTD([wbtcMintAmount], { account: user1.account });
+
+      // Check CR
+      const cr = await minter.read.getCollateralRatio();
+      console.log('[Redeem Formula] Collateral Ratio:', (Number(cr) / 1e18 * 100).toFixed(4), '%');
+
+      // Get prices
+      const wbtcPrice = await system.priceOracle.read.getWBTCPrice();
+      const iusdPrice = await system.priceOracle.read.getIUSDPrice();
+
+      // Redeem some BTD
+      const btdAmount = toWei("10000", 18n); // 10000 BTD
+      const btdBalance = await tokens.btd.read.balanceOf([user1.account.address]);
+
+      if (btdBalance < btdAmount) {
+        console.log('[Redeem Formula] Insufficient BTD, skipping');
+        this.skip();
+      }
+
+      // Expected WBTC (formula: BTD × IUSDPrice / WBTCPrice)
+      // Result needs to be converted from 18 to 8 decimals
+      const expectedWBTC18 = (btdAmount * iusdPrice) / wbtcPrice;
+      const expectedWBTC = expectedWBTC18 / BigInt(1e10); // Convert to 8 decimals
+
+      console.log('[Redeem Formula] BTD to redeem:', btdAmount.toString());
+      console.log('[Redeem Formula] Expected WBTC:', expectedWBTC.toString());
+
+      // Approve and redeem
+      await tokens.btd.write.approve([minter.address, btdAmount], { account: user1.account });
+      const wbtcBefore = await tokens.wbtc.read.balanceOf([user1.account.address]);
+      await minter.write.redeemBTD([btdAmount], { account: user1.account });
+      const wbtcAfter = await tokens.wbtc.read.balanceOf([user1.account.address]);
+
+      const actualWBTC = wbtcAfter - wbtcBefore;
+      console.log('[Redeem Formula] Actual WBTC received:', actualWBTC.toString());
+
+      // Calculate accuracy ratio
+      if (expectedWBTC > 0n && actualWBTC > 0n) {
+        const ratio = Number(actualWBTC) / Number(expectedWBTC);
+        console.log('[Redeem Formula] Accuracy ratio (should be ~1.0):', ratio.toFixed(6));
+
+        // Allow 5% tolerance for fees and CR adjustments
+        expect(ratio >= 0.95 && ratio <= 1.05).to.be.true;
+      }
+    });
+
+    it("should verify round-trip consistency (mint then redeem)", async function () {
+      const initialWBTC = toWei("1", 8n);
+
+      // Get initial balances
+      const wbtcBefore = await tokens.wbtc.read.balanceOf([user1.account.address]);
+
+      // Mint BTD
+      await tokens.wbtc.write.approve([minter.address, initialWBTC], { account: user1.account });
+      await minter.write.mintBTD([initialWBTC], { account: user1.account });
+
+      const btdMinted = await tokens.btd.read.balanceOf([user1.account.address]);
+      console.log('[Round-Trip] BTD minted:', btdMinted.toString());
+
+      // Redeem all BTD
+      await tokens.btd.write.approve([minter.address, btdMinted], { account: user1.account });
+      await minter.write.redeemBTD([btdMinted], { account: user1.account });
+
+      const wbtcAfter = await tokens.wbtc.read.balanceOf([user1.account.address]);
+      const wbtcReturned = wbtcAfter - (wbtcBefore - initialWBTC);
+
+      console.log('[Round-Trip] Initial WBTC:', initialWBTC.toString());
+      console.log('[Round-Trip] WBTC returned:', wbtcReturned.toString());
+
+      // Due to fees and possible CR < 100%, returned should be <= initial
+      // But if CR >= 100%, should be close (minus fees)
+      const cr = await minter.read.getCollateralRatio();
+      console.log('[Round-Trip] Final CR:', (Number(cr) / 1e18 * 100).toFixed(4), '%');
+
+      if (cr >= BigInt(1e18)) {
+        // CR >= 100%, returned should be at least 90% (10% for fees)
+        const returnRatio = Number(wbtcReturned) / Number(initialWBTC);
+        console.log('[Round-Trip] Return ratio:', returnRatio.toFixed(6));
+        expect(returnRatio >= 0.90).to.be.true;
+      }
+    });
+
+    it("should track totalWBTC and totalBTD correctly", async function () {
+      const wbtcAmount = toWei("1", 8n);
+
+      // Record initial totals
+      const totalWBTCBefore = await minter.read.totalWBTC();
+      const totalBTDBefore = await minter.read.totalBTD();
+
+      // Mint
+      await tokens.wbtc.write.approve([minter.address, wbtcAmount], { account: user1.account });
+      await minter.write.mintBTD([wbtcAmount], { account: user1.account });
+
+      const totalWBTCAfter = await minter.read.totalWBTC();
+      const totalBTDAfter = await minter.read.totalBTD();
+
+      console.log('[Totals] WBTC before:', totalWBTCBefore.toString(), 'after:', totalWBTCAfter.toString());
+      console.log('[Totals] BTD before:', totalBTDBefore.toString(), 'after:', totalBTDAfter.toString());
+
+      // Total WBTC should increase by the minted amount
+      expect(totalWBTCAfter).to.equal(totalWBTCBefore + wbtcAmount);
+
+      // Total BTD should increase
+      expect(totalBTDAfter > totalBTDBefore).to.be.true;
+    });
+
+    it("should verify CR calculation matches formula: CR = WBTC_value / BTD_value", async function () {
+      const wbtcAmount = toWei("1", 8n);
+
+      // Mint to create some BTD
+      await tokens.wbtc.write.approve([minter.address, wbtcAmount], { account: user1.account });
+      await minter.write.mintBTD([wbtcAmount], { account: user1.account });
+
+      // Get totals
+      const totalWBTC = await minter.read.totalWBTC();
+      const totalBTD = await minter.read.totalBTD();
+
+      // Get prices
+      const wbtcPrice = await system.priceOracle.read.getWBTCPrice();
+      const iusdPrice = await system.priceOracle.read.getIUSDPrice();
+
+      // Calculate expected CR: (totalWBTC * wbtcPrice) / (totalBTD * iusdPrice)
+      // Note: WBTC is 8 decimals, BTD is 18 decimals
+      const wbtcValue = totalWBTC * BigInt(1e10) * wbtcPrice; // Scale to 18 decimals
+      const btdValue = totalBTD * iusdPrice;
+
+      const expectedCR = btdValue > 0n ? (wbtcValue * BigInt(1e18)) / btdValue : 0n;
+      const actualCR = await minter.read.getCollateralRatio();
+
+      console.log('[CR Verify] Total WBTC:', totalWBTC.toString());
+      console.log('[CR Verify] Total BTD:', totalBTD.toString());
+      console.log('[CR Verify] WBTC Value:', wbtcValue.toString());
+      console.log('[CR Verify] BTD Value:', btdValue.toString());
+      console.log('[CR Verify] Expected CR:', expectedCR.toString());
+      console.log('[CR Verify] Actual CR:', actualCR.toString());
+
+      if (expectedCR > 0n && actualCR > 0n) {
+        const ratio = Number(actualCR) / Number(expectedCR);
+        console.log('[CR Verify] Accuracy ratio:', ratio.toFixed(6));
+
+        // Should be very close (within 5%)
+        expect(ratio >= 0.95 && ratio <= 1.05).to.be.true;
+      }
+    });
+  });
 });

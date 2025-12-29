@@ -8,6 +8,7 @@ import "../../contracts/libraries/RedeemLogic.sol";
 import "../../contracts/libraries/RewardMath.sol";
 import "../../contracts/libraries/InterestMath.sol";
 import "../../contracts/libraries/Constants.sol";
+import "../../contracts/libraries/TokenPrecision.sol";
 
 /**
  * @title Library Fuzz Tests
@@ -392,5 +393,138 @@ contract LibraryFuzzTest is Test {
 
         // Interest share should not exceed pending
         assert(interestShare <= pendingInterest);
+    }
+
+    // ============ TokenPrecision Tests ============
+
+    // Mock addresses for testing
+    address constant MOCK_WBTC = address(0x1);
+    address constant MOCK_USDC = address(0x2);
+    address constant MOCK_USDT = address(0x3);
+    address constant MOCK_BTD = address(0x4);
+
+    /// @notice Fuzz test: WBTC toNormalized and fromNormalized are inverse operations
+    function testFuzz_TokenPrecision_WBTCRoundTrip(uint64 wbtcAmount) public pure {
+        // Bound to realistic WBTC amounts (avoid overflow: max 10 billion WBTC in 8 decimals)
+        wbtcAmount = uint64(bound(wbtcAmount, 1, 10_000_000_000e8));
+
+        uint256 normalized = TokenPrecision.toNormalized(MOCK_WBTC, wbtcAmount, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        uint256 recovered = TokenPrecision.fromNormalized(MOCK_WBTC, normalized, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+
+        // Round trip should preserve value exactly
+        assertEq(recovered, wbtcAmount, "WBTC round trip should preserve value");
+    }
+
+    /// @notice Fuzz test: USDC toNormalized and fromNormalized are inverse operations
+    function testFuzz_TokenPrecision_USDCRoundTrip(uint64 usdcAmount) public pure {
+        // Bound to realistic USDC amounts
+        usdcAmount = uint64(bound(usdcAmount, 1, 1_000_000_000_000e6)); // Max 1 trillion USDC
+
+        uint256 normalized = TokenPrecision.toNormalized(MOCK_USDC, usdcAmount, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        uint256 recovered = TokenPrecision.fromNormalized(MOCK_USDC, normalized, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+
+        assertEq(recovered, usdcAmount, "USDC round trip should preserve value");
+    }
+
+    /// @notice Fuzz test: USDT toNormalized and fromNormalized are inverse operations
+    function testFuzz_TokenPrecision_USDTRoundTrip(uint64 usdtAmount) public pure {
+        usdtAmount = uint64(bound(usdtAmount, 1, 1_000_000_000_000e6));
+
+        uint256 normalized = TokenPrecision.toNormalized(MOCK_USDT, usdtAmount, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        uint256 recovered = TokenPrecision.fromNormalized(MOCK_USDT, normalized, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+
+        assertEq(recovered, usdtAmount, "USDT round trip should preserve value");
+    }
+
+    /// @notice Fuzz test: 18-decimal tokens pass through unchanged
+    function testFuzz_TokenPrecision_18DecimalsPassThrough(uint128 amount) public pure {
+        uint256 normalized = TokenPrecision.toNormalized(MOCK_BTD, amount, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        assertEq(normalized, amount, "18-decimal tokens should pass through unchanged");
+
+        uint256 denormalized = TokenPrecision.fromNormalized(MOCK_BTD, amount, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        assertEq(denormalized, amount, "18-decimal tokens should pass through unchanged");
+    }
+
+    /// @notice Fuzz test: Normalized amount preserves relative ordering
+    function testFuzz_TokenPrecision_PreservesOrdering(uint64 amount1, uint64 amount2) public pure {
+        // Test with WBTC
+        uint256 norm1 = TokenPrecision.toNormalized(MOCK_WBTC, amount1, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        uint256 norm2 = TokenPrecision.toNormalized(MOCK_WBTC, amount2, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+
+        if (amount1 < amount2) {
+            assertTrue(norm1 < norm2, "Ordering should be preserved");
+        } else if (amount1 > amount2) {
+            assertTrue(norm1 > norm2, "Ordering should be preserved");
+        } else {
+            assertEq(norm1, norm2, "Equal amounts should give equal normalized");
+        }
+    }
+
+    /// @notice Fuzz test: Scale factors are consistent
+    function testFuzz_TokenPrecision_ScaleFactorConsistency(uint64 amount) public pure {
+        // WBTC: scale factor is 1e10
+        uint256 wbtcNorm = TokenPrecision.toNormalized(MOCK_WBTC, amount, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        uint256 wbtcScale = TokenPrecision.getScaleToNorm(MOCK_WBTC, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        assertEq(wbtcNorm, uint256(amount) * wbtcScale, "WBTC normalization should use scale factor");
+
+        // USDC: scale factor is 1e12
+        uint256 usdcNorm = TokenPrecision.toNormalized(MOCK_USDC, amount, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        uint256 usdcScale = TokenPrecision.getScaleToNorm(MOCK_USDC, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        assertEq(usdcNorm, uint256(amount) * usdcScale, "USDC normalization should use scale factor");
+    }
+
+    /// @notice Fuzz test: Simplified functions match generic functions
+    function testFuzz_TokenPrecision_SimplifiedMatchGeneric(uint64 amount) public pure {
+        // WBTC
+        uint256 genericWbtc = TokenPrecision.toNormalized(MOCK_WBTC, amount, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        uint256 simplifiedWbtc = TokenPrecision.wbtcToNormalized(amount);
+        assertEq(genericWbtc, simplifiedWbtc, "Simplified WBTC should match generic");
+
+        // USDC
+        uint256 genericUsdc = TokenPrecision.toNormalized(MOCK_USDC, amount, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        uint256 simplifiedUsdc = TokenPrecision.usdcToNormalized(amount);
+        assertEq(genericUsdc, simplifiedUsdc, "Simplified USDC should match generic");
+
+        // USDT
+        uint256 genericUsdt = TokenPrecision.toNormalized(MOCK_USDT, amount, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        uint256 simplifiedUsdt = TokenPrecision.usdtToNormalized(amount);
+        assertEq(genericUsdt, simplifiedUsdt, "Simplified USDT should match generic");
+    }
+
+    /// @notice Fuzz test: FromNormalized simplified functions match generic
+    function testFuzz_TokenPrecision_FromNormalizedSimplifiedMatch(uint128 normalized) public pure {
+        // WBTC
+        uint256 genericWbtc = TokenPrecision.fromNormalized(MOCK_WBTC, normalized, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        uint256 simplifiedWbtc = TokenPrecision.normalizedToWbtc(normalized);
+        assertEq(genericWbtc, simplifiedWbtc, "Simplified fromNormalized WBTC should match");
+
+        // USDC
+        uint256 genericUsdc = TokenPrecision.fromNormalized(MOCK_USDC, normalized, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        uint256 simplifiedUsdc = TokenPrecision.normalizedToUsdc(normalized);
+        assertEq(genericUsdc, simplifiedUsdc, "Simplified fromNormalized USDC should match");
+
+        // USDT
+        uint256 genericUsdt = TokenPrecision.fromNormalized(MOCK_USDT, normalized, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        uint256 simplifiedUsdt = TokenPrecision.normalizedToUsdt(normalized);
+        assertEq(genericUsdt, simplifiedUsdt, "Simplified fromNormalized USDT should match");
+    }
+
+    /// @notice Fuzz test: Normalization is monotonic (larger input = larger output)
+    function testFuzz_TokenPrecision_Monotonic(uint64 a, uint64 b) public pure {
+        vm.assume(a <= b);
+
+        uint256 normA = TokenPrecision.wbtcToNormalized(a);
+        uint256 normB = TokenPrecision.wbtcToNormalized(b);
+
+        assertTrue(normA <= normB, "Normalization should be monotonic");
+    }
+
+    /// @notice Fuzz test: No precision loss for values within range
+    function testFuzz_TokenPrecision_NoPrecisionLoss(uint32 wbtcSatoshis) public pure {
+        // Even single satoshi should normalize correctly
+        uint256 normalized = TokenPrecision.wbtcToNormalized(wbtcSatoshis);
+        uint256 recovered = TokenPrecision.normalizedToWbtc(normalized);
+
+        assertEq(recovered, wbtcSatoshis, "No precision loss for any satoshi amount");
     }
 }

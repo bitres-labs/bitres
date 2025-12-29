@@ -23,7 +23,8 @@ contract ConfigGov is Ownable {
         MAX_BTB_RATE,       // 3 - BTB maximum interest rate (basis points)
         PCE_MAX_DEVIATION,  // 4 - PCE maximum deviation rate (18 decimals, e.g., 2e16 = 2%)
         REDEEM_FEE_BP,      // 5 - Redemption fee rate (basis points)
-        MAX_BTD_RATE        // 6 - BTD maximum interest rate (basis points)
+        MAX_BTD_RATE,       // 6 - BTD maximum interest rate (basis points)
+        BASE_RATE_DEFAULT   // 7 - Default base interest rate (basis points, e.g., 500 = 5%)
         // Future extensions: LIQUIDATION_FEE, STABILITY_FEE, etc.
     }
 
@@ -32,7 +33,8 @@ contract ConfigGov is Ownable {
      * @dev Used for managing governable oracle addresses, external contract addresses, etc.
      */
     enum AddressParamType {
-        PCE_FEED          // 0 - Chainlink PCE oracle address
+        PCE_FEED,         // 0 - Chainlink PCE oracle address
+        CDY_FEED          // 1 - Chainlink DeFi Yield (CDY) oracle address
         // Future extensions: BACKUP_PCE_FEED, CPI_FEED, etc.
     }
 
@@ -55,13 +57,23 @@ contract ConfigGov is Ownable {
     // ============ Initialization ============
 
     /**
-     * @notice Constructor - initializes governance parameters
+     * @notice Constructor - initializes governance parameters with defaults
      * @param initialOwner Contract owner address
+     * @dev Sets default values:
+     *      - MINT_FEE_BP: 50 bps (0.5%)
+     *      - REDEEM_FEE_BP: 50 bps (0.5%)
+     *      - INTEREST_FEE_BP: 500 bps (5%)
      */
     constructor(
         address initialOwner
     ) Ownable(initialOwner) {
         require(initialOwner != address(0), "ConfigGov: zero owner");
+
+        // Initialize default fee parameters
+        _params[ParamType.MINT_FEE_BP] = 50;       // 0.5% minting fee
+        _params[ParamType.REDEEM_FEE_BP] = 50;     // 0.5% redemption fee
+        _params[ParamType.INTEREST_FEE_BP] = 500;  // 5% interest fee
+        _params[ParamType.BASE_RATE_DEFAULT] = 500; // 5% default base interest rate
     }
 
     // ============ Parameter Management ============
@@ -88,14 +100,14 @@ contract ConfigGov is Ownable {
      */
     function _validateParam(ParamType paramType, uint256 value) private pure {
         if (paramType == ParamType.MINT_FEE_BP) {
-            require(value >= 1, "ConfigGov: mint fee too low");  // Minimum 0.01% (1 basis point)
+            // Range: 0-1000 bps (0%-10%), default 50 bps (0.5%)
             require(value <= 1000, "ConfigGov: mint fee too high"); // Maximum 10%
         } else if (paramType == ParamType.INTEREST_FEE_BP) {
-            require(value >= 1, "ConfigGov: interest fee too low");
-            require(value <= 1000, "ConfigGov: interest fee too high");
+            // Range: 0-2000 bps (0%-20%), default 500 bps (5%)
+            require(value <= 2000, "ConfigGov: interest fee too high"); // Maximum 20%
         } else if (paramType == ParamType.REDEEM_FEE_BP) {
-            require(value >= 1, "ConfigGov: redeem fee too low");
-            require(value <= 1000, "ConfigGov: redeem fee too high");
+            // Range: 0-1000 bps (0%-10%), default 50 bps (0.5%)
+            require(value <= 1000, "ConfigGov: redeem fee too high"); // Maximum 10%
         } else if (paramType == ParamType.MIN_BTB_PRICE) {
             require(value >= 1e17, "ConfigGov: min BTB price too low"); // Minimum 0.1 BTD
             require(value <= 1e18, "ConfigGov: min BTB price too high"); // Maximum 1 BTD
@@ -108,6 +120,9 @@ contract ConfigGov is Ownable {
         } else if (paramType == ParamType.PCE_MAX_DEVIATION) {
             require(value >= 1e15, "ConfigGov: PCE deviation too low"); // Minimum 0.1%
             require(value <= 1e17, "ConfigGov: PCE deviation too high"); // Maximum 10%
+        } else if (paramType == ParamType.BASE_RATE_DEFAULT) {
+            require(value >= 100, "ConfigGov: base rate too low"); // Minimum 1% APR (100 bps)
+            require(value <= 1000, "ConfigGov: base rate too high"); // Maximum 10% APR (1000 bps)
         }
     }
 
@@ -190,6 +205,15 @@ contract ConfigGov is Ownable {
         return _params[ParamType.REDEEM_FEE_BP];
     }
 
+    /**
+     * @notice Gets the default base interest rate
+     * @dev Used as anchor for BTD/BTB rate calculations when CR = 100%
+     * @return Default base rate (basis points, e.g., 500 = 5%)
+     */
+    function baseRateDefault() external view returns (uint256) {
+        return _params[ParamType.BASE_RATE_DEFAULT];
+    }
+
     // ============ Address Parameter Management ============
 
     /**
@@ -238,5 +262,14 @@ contract ConfigGov is Ownable {
      */
     function pceFeed() external view returns (address) {
         return _addressParams[AddressParamType.PCE_FEED];
+    }
+
+    /**
+     * @notice Gets CDY Feed oracle address
+     * @dev Chainlink DeFi Yield rate feed for interest rate anchoring
+     * @return CDY Feed address
+     */
+    function cdyFeed() external view returns (address) {
+        return _addressParams[AddressParamType.CDY_FEED];
     }
 }

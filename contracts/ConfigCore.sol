@@ -8,6 +8,18 @@ pragma solidity ^0.8.30;
  * @dev All core addresses are set once via constructor and permanently fixed
  */
 contract ConfigCore {
+    // ==================== Deployer Access Control ====================
+
+    /// @notice Deployer address - only this address can call setCoreContracts and setPeripheralContracts
+    /// @dev Set in constructor, cannot be changed after deployment
+    address public immutable deployer;
+
+    /// @notice Modifier to restrict access to deployer only
+    modifier onlyDeployer() {
+        require(msg.sender == deployer, "ConfigCore: caller is not deployer");
+        _;
+    }
+
     // ==================== Core Token Addresses (immutable) ====================
 
     /// @notice WBTC token address - used for collateral to mint BTD
@@ -87,6 +99,14 @@ contract ConfigCore {
     /// @dev Cannot be changed after deployment
     address public immutable REDSTONE_WBTC;
 
+    /// @notice Chainlink USDC/USD price feed address
+    /// @dev Cannot be changed after deployment, used for stablecoin depeg detection
+    address public immutable CHAINLINK_USDC_USD;
+
+    /// @notice Chainlink USDT/USD price feed address
+    /// @dev Cannot be changed after deployment, used for stablecoin depeg detection
+    address public immutable CHAINLINK_USDT_USD;
+
     // ==================== Core Pool Addresses (deferred binding) ====================
 
     /// @notice Staking router address - handles staking operation routing
@@ -134,6 +154,7 @@ contract ConfigCore {
     /**
      * @notice Constructor - sets all non-circular-dependency addresses
      * @dev The 5 core contracts with circular dependencies are set separately via setCoreContracts()
+     * @dev The deployer (msg.sender) is recorded and only they can call setCoreContracts/setPeripheralContracts
      */
     constructor(
         address _wbtc,                 // WBTC token address
@@ -146,7 +167,9 @@ contract ConfigCore {
         address _chainlinkBtcUsd,      // Chainlink BTC/USD price feed address
         address _chainlinkWbtcBtc,     // Chainlink WBTC/BTC price feed address
         address _pythWbtc,             // Pyth WBTC price feed address
-        address _redstoneWbtc          // Redstone WBTC price feed address
+        address _redstoneWbtc,         // Redstone WBTC price feed address
+        address _chainlinkUsdcUsd,     // Chainlink USDC/USD price feed address
+        address _chainlinkUsdtUsd      // Chainlink USDT/USD price feed address
     ) {
         require(_wbtc != address(0), "Invalid WBTC");
         require(_btd != address(0), "Invalid BTD");
@@ -159,7 +182,10 @@ contract ConfigCore {
         require(_chainlinkWbtcBtc != address(0), "Invalid Chainlink WBTC/BTC");
         require(_pythWbtc != address(0), "Invalid Pyth WBTC");
         require(_redstoneWbtc != address(0), "Invalid Redstone WBTC");
+        require(_chainlinkUsdcUsd != address(0), "Invalid Chainlink USDC/USD");
+        require(_chainlinkUsdtUsd != address(0), "Invalid Chainlink USDT/USD");
 
+        deployer = msg.sender;
         WBTC = _wbtc;
         BTD = _btd;
         BTB = _btb;
@@ -171,11 +197,13 @@ contract ConfigCore {
         CHAINLINK_WBTC_BTC = _chainlinkWbtcBtc;
         PYTH_WBTC = _pythWbtc;
         REDSTONE_WBTC = _redstoneWbtc;
+        CHAINLINK_USDC_USD = _chainlinkUsdcUsd;
+        CHAINLINK_USDT_USD = _chainlinkUsdtUsd;
     }
 
     /**
      * @notice Sets the 5 core contract addresses with circular dependencies
-     * @dev Can only be called once, permanently locked after deployment
+     * @dev Can only be called once by deployer, permanently locked after deployment
      * @param _treasury Treasury contract address
      * @param _minter Minter contract address
      * @param _priceOracle Price oracle address
@@ -188,7 +216,7 @@ contract ConfigCore {
         address _priceOracle,
         address _idealUSDManager,
         address _interestPool
-    ) external {
+    ) external onlyDeployer {
         require(!coreContractsSet, "Core contracts already set");
         require(_treasury != address(0), "Invalid Treasury");
         require(_minter != address(0), "Invalid Minter");
@@ -206,7 +234,7 @@ contract ConfigCore {
 
     /**
      * @notice Sets peripheral contracts and pools with circular dependencies
-     * @dev Can only be called once, permanently locked after deployment
+     * @dev Can only be called once by deployer, permanently locked after deployment
      */
     function setPeripheralContracts(
         address _stakingRouter,
@@ -219,7 +247,7 @@ contract ConfigCore {
         address _poolBtdUsdc,
         address _poolBtbBtd,
         address _poolBrsBtd
-    ) external {
+    ) external onlyDeployer {
         require(!peripheralContractsSet, "Peripheral contracts already set");
         require(_stakingRouter != address(0), "Invalid StakingRouter");
         require(_farmingPool != address(0), "Invalid FarmingPool");

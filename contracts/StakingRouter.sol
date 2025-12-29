@@ -17,6 +17,10 @@ import "./libraries/Constants.sol";
 contract StakingRouter is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
+    /// @notice Maximum number of pools a user can participate in
+    /// @dev Limits gas consumption in claimAll() and pendingRewards()
+    uint256 public constant MAX_POOLS_PER_USER = 20;
+
     IFarmingPool public immutable farmingPool;
 
     // stToken vault contracts
@@ -104,7 +108,7 @@ contract StakingRouter is Ownable, ReentrancyGuard {
         // specific min/max USD value validation is handled by FarmingPool._deposit
 
         // Get pool token
-        (IERC20 lpToken, , , , , , , ) = farmingPool.poolInfo(poolId);
+        (IERC20 lpToken, , , , , ) = farmingPool.poolInfo(poolId);
 
         // Transfer token from user to this router (using SafeERC20)
         IERC20(address(lpToken)).safeTransferFrom(msg.sender, address(this), amount);
@@ -131,7 +135,7 @@ contract StakingRouter is Ownable, ReentrancyGuard {
         // specific min USD value validation is handled by FarmingPool._withdraw
 
         // Get pool token
-        (IERC20 lpToken, , , , , , , ) = farmingPool.poolInfo(poolId);
+        (IERC20 lpToken, , , , , ) = farmingPool.poolInfo(poolId);
 
         // Withdraw from FarmingPool (on behalf of user, send to router)
         farmingPool.withdrawFor(poolId, amount, msg.sender, address(this));
@@ -313,6 +317,7 @@ contract StakingRouter is Ownable, ReentrancyGuard {
         for (uint256 i = 0; i < pools.length; i++) {
             if (pools[i] == poolId) return; // Already tracked
         }
+        require(pools.length < MAX_POOLS_PER_USER, "StakingRouter: max pools reached");
         pools.push(poolId);
     }
 }

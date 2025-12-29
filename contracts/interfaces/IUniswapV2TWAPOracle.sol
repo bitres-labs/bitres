@@ -28,13 +28,6 @@ interface IUniswapV2TWAPOracle {
     function isTWAPReady(address pair) external view returns (bool);
 
     /**
-     * @notice Update the cumulative price for a trading pair
-     * @param pair Uniswap V2 pair address
-     * @dev Should be called periodically to maintain accurate TWAP data
-     */
-    function update(address pair) external;
-
-    /**
      * @notice Check if a pair needs TWAP update
      * @param pair Uniswap V2 pair address
      * @return true if >= PERIOD has passed since last update

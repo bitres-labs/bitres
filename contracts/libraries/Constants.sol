@@ -38,17 +38,10 @@ library Constants {
     /// @dev 10^(18-6) = 1e12, used for explicit precision conversion (same as USDC)
     uint256 internal constant SCALE_USDT_TO_NORM = 1e12;
 
-    /// @notice Normalized (18 decimals) to WBTC (8 decimals) scale factor
-    /// @dev 1e8, used for output precision conversion
-    uint256 internal constant SCALE_NORM_TO_WBTC = 1e8;
-
-    /// @notice Normalized (18 decimals) to USDC (6 decimals) scale factor
-    /// @dev 1e6, used for output precision conversion
-    uint256 internal constant SCALE_NORM_TO_USDC = 1e6;
-
-    /// @notice Normalized (18 decimals) to USDT (6 decimals) scale factor
-    /// @dev 1e6, used for output precision conversion (same as USDC)
-    uint256 internal constant SCALE_NORM_TO_USDT = 1e6;
+    // Note: For normalized -> native conversion, use division by the same scale factor:
+    // - Normalized to WBTC: amount / SCALE_WBTC_TO_NORM
+    // - Normalized to USDC: amount / SCALE_USDC_TO_NORM
+    // - Normalized to USDT: amount / SCALE_USDT_TO_NORM
 
     // ============ Input Parameter Safety Limits ============
 

@@ -70,6 +70,9 @@ contract PriceOracle is Ownable, IPriceOracle {
     uint256 public constant PYTH_MAX_STALENESS = 60;      // Maximum staleness: 60 seconds
     uint64 public constant PYTH_MAX_CONF_RATIO = 100;     // Maximum confidence ratio: 1% (conf/price < 1%)
 
+    // Stablecoin depeg threshold (1% = 100 basis points)
+    uint256 public constant STABLECOIN_MAX_DEVIATION_BPS = 100;
+
     /// @notice Maximum deviation update event
     /// @param oldBps Old deviation value (basis points)
     /// @param newBps New deviation value (basis points)
@@ -518,6 +521,45 @@ contract PriceOracle is Ownable, IPriceOracle {
     }
 
     /**
+     * @notice Gets USDC price from Chainlink with depeg protection
+     * @dev Reads from Chainlink USDC/USD feed and validates within 1% of $1
+     *      Reverts if price deviates more than 1% from $1 (depeg protection)
+     * @return USDC price (18 decimals)
+     */
+    function getUSDCPrice() public view returns (uint256) {
+        return _getStablecoinPrice(core.CHAINLINK_USDC_USD());
+    }
+
+    /**
+     * @notice Gets USDT price from Chainlink with depeg protection
+     * @dev Reads from Chainlink USDT/USD feed and validates within 1% of $1
+     *      Reverts if price deviates more than 1% from $1 (depeg protection)
+     * @return USDT price (18 decimals)
+     */
+    function getUSDTPrice() public view returns (uint256) {
+        return _getStablecoinPrice(core.CHAINLINK_USDT_USD());
+    }
+
+    /**
+     * @notice Internal function to get stablecoin price with depeg validation
+     * @dev Reads from Chainlink and validates price is within 1% of $1
+     * @param feedAddress Chainlink price feed address
+     * @return Stablecoin price (18 decimals)
+     */
+    function _getStablecoinPrice(address feedAddress) internal view returns (uint256) {
+        uint256 price = FeedValidation.readAggregator(feedAddress);
+
+        // Validate price is within 1% of $1 (0.99 to 1.01)
+        uint256 oneDollar = 1e18;
+        require(
+            OracleMath.deviationWithin(price, oneDollar, STABLECOIN_MAX_DEVIATION_BPS),
+            "Stablecoin depeg detected"
+        );
+
+        return price;
+    }
+
+    /**
      * @notice Universal price query function (returns USD price based on token address)
      * @dev Supports price queries for all major tokens in the system, including stablecoins, equity tokens, interest-bearing tokens
      * @param token Token contract address
@@ -530,8 +572,8 @@ contract PriceOracle is Ownable, IPriceOracle {
         if (token == core.BRS()) return getBRSPrice();
         if (token == core.ST_BTD()) return getStBTDPrice();
         if (token == core.ST_BTB()) return getStBTBPrice();
-        if (token == core.USDC()) return 1e18;  // $1
-        if (token == core.USDT()) return 1e18;  // $1
+        if (token == core.USDC()) return getUSDCPrice();
+        if (token == core.USDT()) return getUSDTPrice();
 
         revert("Price not available for this token");
     }

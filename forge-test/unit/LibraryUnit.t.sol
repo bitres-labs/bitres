@@ -6,6 +6,7 @@ import "../../contracts/libraries/FeedValidation.sol";
 import "../../contracts/libraries/IUSDMath.sol";
 import "../../contracts/libraries/OracleMath.sol";
 import "../../contracts/libraries/Constants.sol";
+import "../../contracts/libraries/TokenPrecision.sol";
 import "../../contracts/local/MockAggregatorV3.sol";
 
 contract LibraryUnitTest {
@@ -236,5 +237,122 @@ contract LibraryUnitTest {
 
     function _callValidateAll(uint256[] memory prices, uint256 bps) external pure returns (bool) {
         return PriceBlend.validateAllWithinBounds(prices, bps);
+    }
+
+    // ---- TokenPrecision Tests ----
+
+    // Mock addresses for testing
+    address constant MOCK_WBTC = address(0x1);
+    address constant MOCK_USDC = address(0x2);
+    address constant MOCK_USDT = address(0x3);
+    address constant MOCK_BTD = address(0x4);
+
+    function testTokenPrecisionGetDecimals() public pure {
+        require(TokenPrecision.getDecimals(MOCK_WBTC, MOCK_WBTC, MOCK_USDC, MOCK_USDT) == 8, "WBTC should be 8");
+        require(TokenPrecision.getDecimals(MOCK_USDC, MOCK_WBTC, MOCK_USDC, MOCK_USDT) == 6, "USDC should be 6");
+        require(TokenPrecision.getDecimals(MOCK_USDT, MOCK_WBTC, MOCK_USDC, MOCK_USDT) == 6, "USDT should be 6");
+        require(TokenPrecision.getDecimals(MOCK_BTD, MOCK_WBTC, MOCK_USDC, MOCK_USDT) == 18, "BTD should be 18");
+    }
+
+    function testTokenPrecisionToNormalizedWBTC() public pure {
+        // 1 WBTC (1e8) should become 1e18 normalized
+        uint256 wbtcAmount = 1e8;
+        uint256 normalized = TokenPrecision.toNormalized(MOCK_WBTC, wbtcAmount, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        require(normalized == 1e18, "1 WBTC should normalize to 1e18");
+
+        // 100 WBTC
+        uint256 wbtc100 = 100e8;
+        uint256 norm100 = TokenPrecision.toNormalized(MOCK_WBTC, wbtc100, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        require(norm100 == 100e18, "100 WBTC should normalize to 100e18");
+    }
+
+    function testTokenPrecisionToNormalizedUSDC() public pure {
+        // 1 USDC (1e6) should become 1e18 normalized
+        uint256 usdcAmount = 1e6;
+        uint256 normalized = TokenPrecision.toNormalized(MOCK_USDC, usdcAmount, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        require(normalized == 1e18, "1 USDC should normalize to 1e18");
+
+        // 1000 USDC
+        uint256 usdc1000 = 1000e6;
+        uint256 norm1000 = TokenPrecision.toNormalized(MOCK_USDC, usdc1000, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        require(norm1000 == 1000e18, "1000 USDC should normalize to 1000e18");
+    }
+
+    function testTokenPrecisionToNormalizedUSDT() public pure {
+        // 1 USDT (1e6) should become 1e18 normalized
+        uint256 usdtAmount = 1e6;
+        uint256 normalized = TokenPrecision.toNormalized(MOCK_USDT, usdtAmount, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        require(normalized == 1e18, "1 USDT should normalize to 1e18");
+    }
+
+    function testTokenPrecisionToNormalized18Decimals() public pure {
+        // 18-decimal tokens should pass through unchanged
+        uint256 btdAmount = 100e18;
+        uint256 normalized = TokenPrecision.toNormalized(MOCK_BTD, btdAmount, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        require(normalized == btdAmount, "18-decimal tokens should not change");
+    }
+
+    function testTokenPrecisionFromNormalizedWBTC() public pure {
+        // 1e18 normalized should become 1e8 WBTC
+        uint256 normalized = 1e18;
+        uint256 wbtcAmount = TokenPrecision.fromNormalized(MOCK_WBTC, normalized, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        require(wbtcAmount == 1e8, "1e18 normalized should be 1e8 WBTC");
+
+        // 50e18 normalized = 50 WBTC
+        uint256 norm50 = 50e18;
+        uint256 wbtc50 = TokenPrecision.fromNormalized(MOCK_WBTC, norm50, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        require(wbtc50 == 50e8, "50e18 normalized should be 50e8 WBTC");
+    }
+
+    function testTokenPrecisionFromNormalizedUSDC() public pure {
+        // 1e18 normalized should become 1e6 USDC
+        uint256 normalized = 1e18;
+        uint256 usdcAmount = TokenPrecision.fromNormalized(MOCK_USDC, normalized, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        require(usdcAmount == 1e6, "1e18 normalized should be 1e6 USDC");
+    }
+
+    function testTokenPrecisionFromNormalized18Decimals() public pure {
+        // 18-decimal tokens should pass through unchanged
+        uint256 normalized = 100e18;
+        uint256 btdAmount = TokenPrecision.fromNormalized(MOCK_BTD, normalized, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        require(btdAmount == normalized, "18-decimal tokens should not change");
+    }
+
+    function testTokenPrecisionRoundTrip() public pure {
+        // WBTC round trip: native -> normalized -> native
+        uint256 originalWBTC = 123_45678901; // 123.45678901 WBTC in 8 decimals
+        uint256 normalized = TokenPrecision.toNormalized(MOCK_WBTC, originalWBTC, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        uint256 recovered = TokenPrecision.fromNormalized(MOCK_WBTC, normalized, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        require(recovered == originalWBTC, "WBTC round trip should preserve value");
+
+        // USDC round trip
+        uint256 originalUSDC = 1000_123456; // 1000.123456 USDC in 6 decimals
+        uint256 normUSDC = TokenPrecision.toNormalized(MOCK_USDC, originalUSDC, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        uint256 recoveredUSDC = TokenPrecision.fromNormalized(MOCK_USDC, normUSDC, MOCK_WBTC, MOCK_USDC, MOCK_USDT);
+        require(recoveredUSDC == originalUSDC, "USDC round trip should preserve value");
+    }
+
+    function testTokenPrecisionSimplifiedFunctions() public pure {
+        // Test simplified WBTC functions
+        uint256 wbtc = 10e8;
+        require(TokenPrecision.wbtcToNormalized(wbtc) == 10e18, "wbtcToNormalized");
+        require(TokenPrecision.normalizedToWbtc(10e18) == 10e8, "normalizedToWbtc");
+
+        // Test simplified USDC functions
+        uint256 usdc = 1000e6;
+        require(TokenPrecision.usdcToNormalized(usdc) == 1000e18, "usdcToNormalized");
+        require(TokenPrecision.normalizedToUsdc(1000e18) == 1000e6, "normalizedToUsdc");
+
+        // Test simplified USDT functions
+        uint256 usdt = 500e6;
+        require(TokenPrecision.usdtToNormalized(usdt) == 500e18, "usdtToNormalized");
+        require(TokenPrecision.normalizedToUsdt(500e18) == 500e6, "normalizedToUsdt");
+    }
+
+    function testTokenPrecisionGetScaleToNorm() public pure {
+        require(TokenPrecision.getScaleToNorm(MOCK_WBTC, MOCK_WBTC, MOCK_USDC, MOCK_USDT) == 1e10, "WBTC scale");
+        require(TokenPrecision.getScaleToNorm(MOCK_USDC, MOCK_WBTC, MOCK_USDC, MOCK_USDT) == 1e12, "USDC scale");
+        require(TokenPrecision.getScaleToNorm(MOCK_USDT, MOCK_WBTC, MOCK_USDC, MOCK_USDT) == 1e12, "USDT scale");
+        require(TokenPrecision.getScaleToNorm(MOCK_BTD, MOCK_WBTC, MOCK_USDC, MOCK_USDT) == 1, "18-decimal scale");
     }
 }

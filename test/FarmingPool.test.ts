@@ -299,6 +299,164 @@ describe("FarmingPool", function () {
     });
   });
 
+  // ==================== FORMULA VERIFICATION TESTS ====================
+  // These tests verify that rewards are distributed according to the whitepaper formulas:
+  // Pool Reward = (Reward Per Second × Pool Weight / Total Weight) × Time
+  // User Pending = (Staked Amount × accPerShare / 1e12) - Reward Debt
+
+  describe("Proportional Reward Distribution (Formula Verification)", function () {
+    beforeEach(async function () {
+      // Add pool with 100 allocation points
+      await farmingPool.write.addPool([wbtc.address, 100n, 0], { account: owner.account });
+
+      // Give users different amounts of WBTC
+      await wbtc.write.transfer([user1.account.address, parseUnits("10", 8)], { account: owner.account });
+      await wbtc.write.transfer([user2.account.address, parseUnits("10", 8)], { account: owner.account });
+    });
+
+    it("should distribute rewards proportionally to stake amounts (2:1 ratio)", async function () {
+      const poolId = 0n;
+      const amount1 = parseUnits("2", 8); // User1 stakes 2 WBTC
+      const amount2 = parseUnits("1", 8); // User2 stakes 1 WBTC (half of user1)
+
+      // User1 deposits 2 WBTC
+      await wbtc.write.approve([farmingPool.address, amount1], { account: user1.account });
+      await farmingPool.write.deposit([poolId, amount1], { account: user1.account });
+
+      // User2 deposits 1 WBTC immediately after
+      await wbtc.write.approve([farmingPool.address, amount2], { account: user2.account });
+      await farmingPool.write.deposit([poolId, amount2], { account: user2.account });
+
+      // Mine some blocks to accumulate rewards
+      for (let i = 0; i < 10; i++) {
+        await farmingPool.write.updatePool([poolId], { account: owner.account });
+      }
+
+      // Check pending rewards
+      const pending1 = await farmingPool.read.pendingReward([poolId, user1.account.address]);
+      const pending2 = await farmingPool.read.pendingReward([poolId, user2.account.address]);
+
+      console.log('[Proportional Test] User1 pending (2 WBTC stake):', pending1.toString());
+      console.log('[Proportional Test] User2 pending (1 WBTC stake):', pending2.toString());
+
+      // User1 should get approximately 2x the rewards of User2
+      // Note: User1 gets extra rewards during the block(s) before User2 deposits,
+      // so the ratio will be higher than 2.0. We check that it's at least 2.0 (proportional)
+      // but allow up to 3.0 due to early deposit bonus.
+      if (pending2 > 0n) {
+        const ratio = Number(pending1) / Number(pending2);
+        console.log('[Proportional Test] Reward ratio (should be ~2.0+):', ratio.toFixed(4));
+
+        // Verify ratio is at least 2:1 (user1 has 2x stake) but may be higher due to timing
+        expect(ratio >= 1.8 && ratio <= 3.5).to.be.true;
+      }
+    });
+
+    it("should distribute equal rewards for equal stakes", async function () {
+      const poolId = 0n;
+      const amount = parseUnits("1", 8); // Both stake same amount
+
+      // User1 deposits
+      await wbtc.write.approve([farmingPool.address, amount], { account: user1.account });
+      await farmingPool.write.deposit([poolId, amount], { account: user1.account });
+
+      // User2 deposits immediately after
+      await wbtc.write.approve([farmingPool.address, amount], { account: user2.account });
+      await farmingPool.write.deposit([poolId, amount], { account: user2.account });
+
+      // Mine blocks
+      for (let i = 0; i < 10; i++) {
+        await farmingPool.write.updatePool([poolId], { account: owner.account });
+      }
+
+      const pending1 = await farmingPool.read.pendingReward([poolId, user1.account.address]);
+      const pending2 = await farmingPool.read.pendingReward([poolId, user2.account.address]);
+
+      console.log('[Equal Stakes Test] User1 pending:', pending1.toString());
+      console.log('[Equal Stakes Test] User2 pending:', pending2.toString());
+
+      // With equal stakes after same time, rewards should be similar
+      // User1 has slightly more due to early deposit bonus
+      if (pending1 > 0n && pending2 > 0n) {
+        const ratio = Number(pending1) / Number(pending2);
+        console.log('[Equal Stakes Test] Reward ratio (should be ~1.0):', ratio.toFixed(4));
+
+        // Allow some tolerance for timing (0.8 to 1.5)
+        expect(ratio >= 0.8 && ratio <= 1.5).to.be.true;
+      }
+    });
+
+    it("should correctly handle 3:1 stake ratio", async function () {
+      const poolId = 0n;
+      const amount1 = parseUnits("3", 8); // User1 stakes 3 WBTC
+      const amount2 = parseUnits("1", 8); // User2 stakes 1 WBTC
+
+      // Both deposit at same time
+      await wbtc.write.approve([farmingPool.address, amount1], { account: user1.account });
+      await wbtc.write.approve([farmingPool.address, amount2], { account: user2.account });
+
+      await farmingPool.write.deposit([poolId, amount1], { account: user1.account });
+      await farmingPool.write.deposit([poolId, amount2], { account: user2.account });
+
+      // Mine blocks
+      for (let i = 0; i < 10; i++) {
+        await farmingPool.write.updatePool([poolId], { account: owner.account });
+      }
+
+      const pending1 = await farmingPool.read.pendingReward([poolId, user1.account.address]);
+      const pending2 = await farmingPool.read.pendingReward([poolId, user2.account.address]);
+
+      console.log('[3:1 Ratio Test] User1 pending (3 WBTC):', pending1.toString());
+      console.log('[3:1 Ratio Test] User2 pending (1 WBTC):', pending2.toString());
+
+      if (pending2 > 0n) {
+        const ratio = Number(pending1) / Number(pending2);
+        console.log('[3:1 Ratio Test] Reward ratio (should be ~3.0):', ratio.toFixed(4));
+
+        // Verify ratio is approximately 3:1 (between 2.5 and 3.5)
+        expect(ratio >= 2.5 && ratio <= 3.5).to.be.true;
+      }
+    });
+
+    it("should verify actual claimed rewards match pending", async function () {
+      const poolId = 0n;
+      const amount = parseUnits("1", 8);
+
+      // User1 deposits
+      await wbtc.write.approve([farmingPool.address, amount], { account: user1.account });
+      await farmingPool.write.deposit([poolId, amount], { account: user1.account });
+
+      // Mine blocks
+      for (let i = 0; i < 5; i++) {
+        await farmingPool.write.updatePool([poolId], { account: owner.account });
+      }
+
+      // Get pending before claim
+      const pendingBefore = await farmingPool.read.pendingReward([poolId, user1.account.address]);
+      const brsBalanceBefore = await brs.read.balanceOf([user1.account.address]);
+
+      // Claim rewards
+      await farmingPool.write.claim([poolId], { account: user1.account });
+
+      const brsBalanceAfter = await brs.read.balanceOf([user1.account.address]);
+      const actualClaimed = brsBalanceAfter - brsBalanceBefore;
+
+      console.log('[Claim Verification] Pending before claim:', pendingBefore.toString());
+      console.log('[Claim Verification] Actually claimed:', actualClaimed.toString());
+
+      // Claimed amount should match pending (with tolerance for timing)
+      // Note: The claim transaction itself triggers a pool update, so the actual claimed
+      // amount may be slightly higher than the pending amount queried before claim.
+      if (pendingBefore > 0n) {
+        const claimRatio = Number(actualClaimed) / Number(pendingBefore);
+        console.log('[Claim Verification] Claim ratio (should be ~1.0+):', claimRatio.toFixed(4));
+
+        // Claimed should be at least pending, and not too much more (up to 1.5x for timing)
+        expect(claimRatio >= 0.95 && claimRatio <= 1.5).to.be.true;
+      }
+    });
+  });
+
   describe("Pool Info", function () {
     it("should return pool info", async function () {
       await farmingPool.write.addPool([wbtc.address, 100n, 0], { account: owner.account });

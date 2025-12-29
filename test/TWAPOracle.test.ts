@@ -1,6 +1,9 @@
 /**
  * UniswapV2TWAPOracle Contract Tests
  * Tests TWAP calculation with time acceleration and price fluctuations
+ *
+ * Note: update() is now internal, all updates go through updateIfNeeded()
+ * which enforces >= 30 minute intervals between observations
  */
 
 import { describe, it, beforeEach } from "node:test";
@@ -127,8 +130,9 @@ describe("UniswapV2TWAPOracle", function () {
   });
 
   describe("Basic Functionality", function () {
-    it("should record first observation", async function () {
-      await twapOracle.write.update([pair.address]);
+    it("should record first observation via updateIfNeeded", async function () {
+      // First call should succeed (no observation yet)
+      const result = await twapOracle.write.updateIfNeeded([pair.address]);
 
       const [olderTs, newerTs] = await twapOracle.read.getObservationInfo([pair.address]);
 
@@ -136,15 +140,15 @@ describe("UniswapV2TWAPOracle", function () {
       expect(Number(newerTs)).to.be.gt(0); // Newer observation recorded
     });
 
-    it("should record two observations after time passes", async function () {
+    it("should record two observations after PERIOD passes", async function () {
       // First observation
-      await twapOracle.write.update([pair.address]);
+      await twapOracle.write.updateIfNeeded([pair.address]);
 
-      // Advance time
+      // Advance time >= PERIOD
       await advanceTime(PERIOD + 60);
 
       // Second observation
-      await twapOracle.write.update([pair.address]);
+      await twapOracle.write.updateIfNeeded([pair.address]);
 
       const [olderTs, newerTs, elapsed] = await twapOracle.read.getObservationInfo([pair.address]);
 
@@ -153,19 +157,41 @@ describe("UniswapV2TWAPOracle", function () {
       expect(Number(elapsed)).to.be.gte(PERIOD);
     });
 
-    it("should report TWAP not ready before PERIOD", async function () {
-      await twapOracle.write.update([pair.address]);
-      await advanceTime(PERIOD / 2); // Only half the period
-      await twapOracle.write.update([pair.address]);
+    it("should skip update if called before PERIOD", async function () {
+      // First observation
+      await twapOracle.write.updateIfNeeded([pair.address]);
+      const [, newerTs1] = await twapOracle.read.getObservationInfo([pair.address]);
 
-      const ready = await twapOracle.read.isTWAPReady([pair.address]);
-      expect(ready).to.be.false;
+      // Try to update before PERIOD - should be skipped
+      await advanceTime(PERIOD / 2);
+      await twapOracle.write.updateIfNeeded([pair.address]);
+
+      const [, newerTs2] = await twapOracle.read.getObservationInfo([pair.address]);
+
+      // Timestamp should NOT change (update was skipped)
+      expect(Number(newerTs2)).to.equal(Number(newerTs1));
+    });
+
+    it("should report needsUpdate correctly", async function () {
+      // Initially needs update (no observation)
+      let needs = await twapOracle.read.needsUpdate([pair.address]);
+      expect(needs).to.be.true;
+
+      // After first observation, doesn't need update
+      await twapOracle.write.updateIfNeeded([pair.address]);
+      needs = await twapOracle.read.needsUpdate([pair.address]);
+      expect(needs).to.be.false;
+
+      // After PERIOD, needs update again
+      await advanceTime(PERIOD + 1);
+      needs = await twapOracle.read.needsUpdate([pair.address]);
+      expect(needs).to.be.true;
     });
 
     it("should report TWAP ready after PERIOD", async function () {
-      await twapOracle.write.update([pair.address]);
+      await twapOracle.write.updateIfNeeded([pair.address]);
       await advanceTime(PERIOD + 60);
-      await twapOracle.write.update([pair.address]);
+      await twapOracle.write.updateIfNeeded([pair.address]);
 
       const ready = await twapOracle.read.isTWAPReady([pair.address]);
       expect(ready).to.be.true;
@@ -179,50 +205,23 @@ describe("UniswapV2TWAPOracle", function () {
 
       // Check token order
       const pairToken0 = await pair.read.token0();
-      const pairToken1 = await pair.read.token1();
-      console.log(`    Pair token0: ${pairToken0}`);
-      console.log(`    Pair token1: ${pairToken1}`);
-      console.log(`    Our token0 (WBTC): ${token0.address}`);
-      console.log(`    Our token1 (USDC): ${token1.address}`);
-
-      // Check pair's cumulative values before first observation
-      const p0Before = await pair.read.price0CumulativeLast();
-      const [r0, r1, tsLast] = await pair.read.getReserves();
-      const currentBlock = await publicClient.getBlock();
-      console.log(`    Pair price0CumulativeLast: ${p0Before}`);
-      console.log(`    Pair reserves: ${r0}, ${r1}, tsLast=${tsLast}`);
-      console.log(`    Current block.timestamp: ${currentBlock.timestamp}`);
 
       // First observation
-      await twapOracle.write.update([pair.address]);
+      await twapOracle.write.updateIfNeeded([pair.address]);
 
       // Advance time without trades
       await advanceTime(PERIOD + 60);
 
       // Second observation
-      await twapOracle.write.update([pair.address]);
-
-      // Debug: check observations
-      const obs0 = await twapOracle.read.pairObservations([pair.address, 0n]);
-      const obs1 = await twapOracle.read.pairObservations([pair.address, 1n]);
-      console.log(`    Obs0: ts=${obs0[0]}, p0Cum=${obs0[1]}, p1Cum=${obs0[2]}`);
-      console.log(`    Obs1: ts=${obs1[0]}, p0Cum=${obs1[1]}, p1Cum=${obs1[2]}`);
-      console.log(`    Delta p0Cum: ${obs1[1] - obs0[1]}`);
-      console.log(`    Time elapsed: ${obs1[0] - obs0[0]}`);
-
-      // Debug: check raw TWAP value
-      const twapRaw = await twapOracle.read.getTWAP([pair.address]);
-      console.log(`    getTWAP raw: ${twapRaw}`);
+      await twapOracle.write.updateIfNeeded([pair.address]);
 
       // Determine actual decimals based on token order
       const isWbtcToken0 = pairToken0.toLowerCase() === token0.address.toLowerCase();
       const t0Decimals = isWbtcToken0 ? 8 : 6;
       const t1Decimals = isWbtcToken0 ? 6 : 8;
-      console.log(`    Using decimals: token0=${t0Decimals}, token1=${t1Decimals}`);
 
       // Get TWAP price
       const twapPrice = await twapOracle.read.getTWAPPrice([pair.address, t0Decimals, t1Decimals]);
-      console.log(`    getTWAPPrice raw: ${twapPrice}`);
       const twapPriceNum = Number(twapPrice) / 1e18;
 
       console.log(`    TWAP price: $${twapPriceNum.toFixed(2)}`);
@@ -244,7 +243,7 @@ describe("UniswapV2TWAPOracle", function () {
       console.log(`    t=0min: Spot price $${initialPrice.toFixed(2)}`);
 
       // First observation
-      await twapOracle.write.update([pair.address]);
+      await twapOracle.write.updateIfNeeded([pair.address]);
 
       // Simulate trades over 35 minutes
       const tradeSchedule = [
@@ -279,8 +278,8 @@ describe("UniswapV2TWAPOracle", function () {
       await advanceTime((35 - lastMinute) * 60);
       totalTime = 35 * 60;
 
-      // Second observation
-      await twapOracle.write.update([pair.address]);
+      // Second observation (>= 30 min since first)
+      await twapOracle.write.updateIfNeeded([pair.address]);
 
       // Calculate expected TWAP (time-weighted average)
       let weightedSum = 0;
@@ -313,7 +312,7 @@ describe("UniswapV2TWAPOracle", function () {
       console.log("\n    === Flash Loan Resistance Test ===");
 
       // First observation at normal price
-      await twapOracle.write.update([pair.address]);
+      await twapOracle.write.updateIfNeeded([pair.address]);
       const normalPrice = await getSpotPrice();
       console.log(`    Normal price: $${normalPrice.toFixed(2)}`);
 
@@ -327,7 +326,7 @@ describe("UniswapV2TWAPOracle", function () {
       console.log(`    Manipulated spot price: $${manipulatedPrice.toFixed(2)}`);
 
       // Take second observation immediately after manipulation
-      await twapOracle.write.update([pair.address]);
+      await twapOracle.write.updateIfNeeded([pair.address]);
 
       // Get TWAP - should still be close to normal price
       const twapPrice = await twapOracle.read.getTWAPPrice([pair.address, 8, 6]);
@@ -344,66 +343,162 @@ describe("UniswapV2TWAPOracle", function () {
       // TWAP deviation should be much smaller than spot deviation
       expect(twapDeviation).to.be.lt(spotDeviation * 0.1); // TWAP affected < 10% of spot movement
     });
+
+    it("should calculate TWAP from observation to NOW (not between observations)", async function () {
+      console.log("\n    === TWAP 'to NOW' Logic Test ===");
+
+      const initialPrice = await getSpotPrice();
+      console.log(`    t=0: Initial spot price: $${initialPrice.toFixed(2)}`);
+
+      // First observation at t=0
+      await twapOracle.write.updateIfNeeded([pair.address]);
+
+      // Advance 35 minutes (past PERIOD)
+      await advanceTime(35 * 60);
+
+      // Second observation at t=35min
+      await twapOracle.write.updateIfNeeded([pair.address]);
+
+      // Get TWAP immediately after second observation
+      const pairToken0 = await pair.read.token0();
+      const isWbtcToken0 = pairToken0.toLowerCase() === token0.address.toLowerCase();
+      const t0Dec = isWbtcToken0 ? 8 : 6;
+      const t1Dec = isWbtcToken0 ? 6 : 8;
+
+      const twapAtT35 = await twapOracle.read.getTWAPPrice([pair.address, t0Dec, t1Dec]);
+      const twapAtT35Num = Number(twapAtT35) / 1e18;
+      console.log(`    t=35min: TWAP = $${twapAtT35Num.toFixed(2)} (reference: obs1 at t=0)`);
+
+      // Advance 15 more minutes to t=50min, then make a big trade
+      await advanceTime(15 * 60);
+
+      // Big sell to drop price
+      await swap(parseUnits("2", 8), true); // Sell 2 WBTC
+      const priceAfterSell = await getSpotPrice();
+      console.log(`    t=50min: Trade executed, spot = $${priceAfterSell.toFixed(2)}`);
+
+      // Advance another 15 minutes so the new price accumulates
+      await advanceTime(15 * 60);
+
+      // Now at t=65min, TWAP should include the lower price
+      // Reference is obs2 (t=35min, since 65-35=30min >= PERIOD)
+      // TWAP = weighted avg from t=35min to t=65min:
+      //   - t=35min to t=50min (15min): $90k
+      //   - t=50min to t=65min (15min): ~$62k
+      const twapAtT65 = await twapOracle.read.getTWAPPrice([pair.address, t0Dec, t1Dec]);
+      const twapAtT65Num = Number(twapAtT65) / 1e18;
+      console.log(`    t=65min: TWAP = $${twapAtT65Num.toFixed(2)} (reference: obs2 at t=35min)`);
+
+      // Calculate expected TWAP: (15min * $90k + 15min * $62.5k) / 30min ≈ $76k
+      const expectedTwap = (15 * initialPrice + 15 * priceAfterSell) / 30;
+      console.log(`    Expected TWAP: ~$${expectedTwap.toFixed(2)}`);
+
+      // TWAP should have decreased significantly from the initial price
+      const twapChange = ((twapAtT65Num - initialPrice) / initialPrice) * 100;
+      console.log(`    TWAP change from initial: ${twapChange.toFixed(2)}%`);
+
+      // Verify: TWAP should be between initial price and current spot
+      expect(twapAtT65Num).to.be.lt(initialPrice); // Lower than initial
+      expect(twapAtT65Num).to.be.gt(priceAfterSell); // Higher than current spot
+
+      // Verify: TWAP should be close to expected (within 5%)
+      const accuracy = Math.abs(twapAtT65Num - expectedTwap) / expectedTwap;
+      console.log(`    TWAP accuracy vs expected: ${(accuracy * 100).toFixed(2)}%`);
+      expect(accuracy).to.be.lt(0.05);
+
+      console.log(`    ✓ TWAP correctly reflects recent price changes (obs → NOW)`);
+    });
   });
 
   describe("Edge Cases", function () {
-    it("should handle multiple rapid updates correctly", async function () {
-      // Take many observations in quick succession
-      await twapOracle.write.update([pair.address]);
+    it("should enforce PERIOD between updates", async function () {
+      // Take first observation
+      await twapOracle.write.updateIfNeeded([pair.address]);
+      const [, newerTs1] = await twapOracle.read.getObservationInfo([pair.address]);
 
+      // Try rapid updates - they should all be skipped
       for (let i = 0; i < 5; i++) {
         await advanceTime(60); // 1 minute each
-        await twapOracle.write.update([pair.address]);
+        await twapOracle.write.updateIfNeeded([pair.address]);
       }
+
+      // Check timestamp hasn't changed (updates were skipped)
+      const [, newerTs2] = await twapOracle.read.getObservationInfo([pair.address]);
+      expect(Number(newerTs2)).to.equal(Number(newerTs1));
 
       // Should still need PERIOD to pass
       const ready = await twapOracle.read.isTWAPReady([pair.address]);
       expect(ready).to.be.false;
 
-      // Advance remaining time
+      // Advance remaining time to complete PERIOD
       await advanceTime(PERIOD);
-      await twapOracle.write.update([pair.address]);
+      await twapOracle.write.updateIfNeeded([pair.address]);
 
       const readyNow = await twapOracle.read.isTWAPReady([pair.address]);
       expect(readyNow).to.be.true;
     });
 
-    it("should revert getTWAP with only one observation", async function () {
-      await twapOracle.write.update([pair.address]);
+    it("should revert getTWAP when no observation is old enough", async function () {
+      // Take first observation - it's at current time, not old enough
+      await twapOracle.write.updateIfNeeded([pair.address]);
 
       let reverted = false;
       try {
         await twapOracle.read.getTWAP([pair.address]);
       } catch (e: any) {
         reverted = true;
-        expect(e.message).to.include("Need two observations");
+        expect(e.message).to.include("No observation >= PERIOD ago");
       }
       expect(reverted).to.be.true;
     });
 
-    it("should revert getTWAP before PERIOD elapsed", async function () {
-      await twapOracle.write.update([pair.address]);
-      await advanceTime(PERIOD / 2);
-      await twapOracle.write.update([pair.address]);
+    it("should revert getTWAP before PERIOD elapsed from observation", async function () {
+      // First observation
+      await twapOracle.write.updateIfNeeded([pair.address]);
 
+      // Advance less than PERIOD
+      await advanceTime(PERIOD - 60); // 29 minutes
+
+      // Still not old enough
       let reverted = false;
       try {
         await twapOracle.read.getTWAP([pair.address]);
       } catch (e: any) {
         reverted = true;
-        expect(e.message).to.include("Observation period too short");
+        expect(e.message).to.include("No observation >= PERIOD ago");
       }
       expect(reverted).to.be.true;
+
+      // Advance past PERIOD
+      await advanceTime(120); // 2 more minutes
+
+      // Now should work
+      const twap = await twapOracle.read.getTWAP([pair.address]);
+      expect(twap > 0n).to.be.true;
     });
   });
 
   describe("Gas Usage", function () {
-    it("should have reasonable gas cost for update", async function () {
-      const hash = await twapOracle.write.update([pair.address]);
+    it("should have reasonable gas cost for updateIfNeeded", async function () {
+      const hash = await twapOracle.write.updateIfNeeded([pair.address]);
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
 
-      console.log(`\n    Gas used for update(): ${receipt.gasUsed}`);
+      console.log(`\n    Gas used for updateIfNeeded(): ${receipt.gasUsed}`);
       expect(Number(receipt.gasUsed)).to.be.lt(120000); // Should be under 120k gas
+    });
+
+    it("should use minimal gas when update is skipped", async function () {
+      // First update
+      await twapOracle.write.updateIfNeeded([pair.address]);
+
+      // Second call before PERIOD - should be skipped
+      await advanceTime(60); // Only 1 minute
+      const hash = await twapOracle.write.updateIfNeeded([pair.address]);
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+
+      console.log(`\n    Gas used for skipped update: ${receipt.gasUsed}`);
+      // Skipped update should use less gas (just the check, no state change)
+      expect(Number(receipt.gasUsed)).to.be.lt(30000);
     });
   });
 });
