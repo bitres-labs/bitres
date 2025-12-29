@@ -23,8 +23,8 @@ const ADDR_FILE = path.join(process.cwd(), "ignition/deployments/chain-11155111/
 const TWAP_ABI = [
   {
     inputs: [{ name: "pair", type: "address" }],
-    name: "update",
-    outputs: [],
+    name: "updateIfNeeded",
+    outputs: [{ type: "bool" }],
     stateMutability: "nonpayable",
     type: "function"
   },
@@ -152,7 +152,7 @@ async function main() {
         const hash = await walletClient.writeContract({
           address: addr.TWAPOracle,
           abi: TWAP_ABI,
-          functionName: "update",
+          functionName: "updateIfNeeded",
           args: [pair.address],
         });
         await publicClient.waitForTransactionReceipt({ hash });
