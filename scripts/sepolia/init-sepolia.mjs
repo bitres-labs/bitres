@@ -482,8 +482,13 @@ async function main() {
 
   for (const pairAddr of pairsList) {
     try {
-      await twapOracle.write.updateIfNeeded([pairAddr], { account: owner.account });
-      console.log(`   ✓ TWAP observation recorded for ${pairAddr.slice(0, 10)}...`);
+      const txHash = await twapOracle.write.updateIfNeeded([pairAddr], { account: owner.account });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+      if (receipt.status === "success") {
+        console.log(`   ✓ TWAP observation recorded for ${pairAddr.slice(0, 10)}...`);
+      } else {
+        console.log(`   ⚠ TWAP update tx reverted for ${pairAddr.slice(0, 10)}...`);
+      }
     } catch (err) {
       console.log(`   ⚠ TWAP update failed for ${pairAddr.slice(0, 10)}...: ${err.message?.slice(0, 50) || err}`);
     }
