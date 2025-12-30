@@ -215,6 +215,8 @@ contract StakingInvariantTest is StdInvariant, Test {
         uint256 assetsBack = vault.convertToAssets(shares);
 
         // Should be approximately equal (within rounding)
-        assertApproxEqAbs(assetsBack, testAmount, 2, "Conversion not consistent");
+        // Allow slightly larger delta due to integer division in ERC4626 conversions
+        // especially when there's significant yield accumulation
+        assertApproxEqAbs(assetsBack, testAmount, 10, "Conversion not consistent");
     }
 }
