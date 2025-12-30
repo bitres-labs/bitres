@@ -43,13 +43,6 @@ library Constants {
     // - Normalized to USDC: amount / SCALE_USDC_TO_NORM
     // - Normalized to USDT: amount / SCALE_USDT_TO_NORM
 
-    // ============ Input Parameter Safety Limits ============
-
-    /// @notice Maximum input parameter value (overflow prevention)
-    /// @dev 1e33, two such values multiplied equals 1e66 < type(uint256).max (1.15e77)
-    /// With this design, most multiplication operations don't need safeMulDiv
-    uint256 internal constant MAX_INPUT_AMOUNT = 1e33;
-
     // ============ Minimum Operation Amount Constants ============
 
     /// @notice Minimum BTC operation amount per transaction (8 decimals)
@@ -108,14 +101,6 @@ library Constants {
     /// Applicable to: BTD, BTB, stBTD, stBTB and other 18-decimal stablecoins
     uint256 internal constant MAX_STABLECOIN_18_AMOUNT = 1_000_000_000 * 1e18;
 
-    /// @notice Maximum USD value per single operation
-    /// @dev Equivalent to 1 billion USD (18 decimals = 1000000000 * 1e18)
-    /// Prevents hacker attacks and integer overflow, applies to all USD value calculations
-    uint256 internal constant MAX_USD_VALUE = 1_000_000_000 * 1e18;
-
-    /// @notice Percentage base (100%)
-    uint256 internal constant PERCENT_BASE = 100;
-
     /// @notice Basis points base (10000 = 100.00%)
     uint256 internal constant BPS_BASE = 10000;
 
@@ -126,9 +111,6 @@ library Constants {
 
     /// @notice Seconds per day
     uint256 internal constant SECONDS_PER_DAY = 1 days;
-
-    /// @notice Seconds per week
-    uint256 internal constant SECONDS_PER_WEEK = 7 days;
 
     /// @notice BTC halving cycle (4 years)
     uint256 internal constant ERA_PERIOD = 4 * 365 days;

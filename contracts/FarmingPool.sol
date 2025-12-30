@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./interfaces/IFarmingPool.sol";
+import "./interfaces/ITreasury.sol";
 import "./ConfigCore.sol";
 import "./libraries/Constants.sol";
 import "./libraries/RewardMath.sol";
@@ -352,42 +353,39 @@ contract FarmingPool is Ownable, ReentrancyGuard, IFarmingPool {
     /// @param pid Pool ID
     /// @param amount Stake amount, precision depends on token
     function deposit(uint256 pid, uint256 amount) external override nonReentrant {
-        _deposit(pid, amount, msg.sender, msg.sender);
+        _deposit(pid, amount, msg.sender);
     }
 
-    /// @notice Stakes tokens on behalf of another user
-    /// @dev Caller pays tokens, but staking record and rewards belong to onBehalfOf address
-    ///      Used by StakingRouter and similar contracts for proxy staking
-    /// @param pid Pool ID
-    /// @param amount Stake amount
-    /// @param onBehalfOf Beneficiary address, rewards will belong to this address
-    function depositFor(uint256 pid, uint256 amount, address onBehalfOf) external override nonReentrant {
-        require(onBehalfOf != address(0), "FarmingPool: zero address");
-        _deposit(pid, amount, msg.sender, onBehalfOf);
-    }
-
-    function _deposit(uint256 pid, uint256 amount, address payer, address beneficiary) internal {
+    function _deposit(uint256 pid, uint256 amount, address account) internal {
         IFarmingPool.PoolInfo storage pool = _poolInfo[pid];
-        IFarmingPool.UserInfo storage user = _userInfo[pid][beneficiary];
+        IFarmingPool.UserInfo storage user = _userInfo[pid][account];
         updatePool(pid);
 
+        // CEI Pattern: Calculate pending rewards first
+        uint256 pending = 0;
         if (user.amount > 0) {
-            uint256 pending = RewardMath.pending(user.amount, pool.accRewardPerShare, user.rewardDebt);
-            if (pending > 0) {
-                rewardToken.safeTransfer(beneficiary, pending);
-                emit Claim(beneficiary, pid, pending);
-            }
+            pending = RewardMath.pending(user.amount, pool.accRewardPerShare, user.rewardDebt);
         }
 
+        // Effects: Update all state variables before external calls
         if (amount > 0) {
             _validateStakeAmount(pool, amount, pool.kind);
-            pool.lpToken.safeTransferFrom(payer, address(this), amount);
+            pool.lpToken.safeTransferFrom(account, address(this), amount);
             user.amount += amount;
             pool.totalStaked += amount;
         }
-
         user.rewardDebt = RewardMath.rewardDebtValue(user.amount, pool.accRewardPerShare);
-        emit Deposit(beneficiary, pid, amount);
+
+        // Interactions: External calls after state updates
+        if (pending > 0) {
+            rewardToken.safeTransfer(account, pending);
+            emit Claim(account, pid, pending);
+
+            // Try lazy BRS buyback when claiming rewards (gas compensated by Treasury)
+            _tryLazyBuyback();
+        }
+
+        emit Deposit(account, pid, amount);
     }
 
     /// @notice User withdraws staked tokens
@@ -395,24 +393,12 @@ contract FarmingPool is Ownable, ReentrancyGuard, IFarmingPool {
     /// @param pid Pool ID
     /// @param amount Withdraw amount, cannot exceed staked amount
     function withdraw(uint256 pid, uint256 amount) external override nonReentrant {
-        _withdraw(pid, amount, msg.sender, msg.sender);
+        _withdraw(pid, amount, msg.sender);
     }
 
-    /// @notice Withdraws staked tokens on behalf of another user
-    /// @dev Withdraws from onBehalfOf's stake, tokens sent to 'to' address
-    ///      Used by StakingRouter and similar contracts for proxy withdrawal
-    /// @param pid Pool ID
-    /// @param amount Withdraw amount
-    /// @param onBehalfOf Stake owner address
-    /// @param to Address to receive tokens
-    function withdrawFor(uint256 pid, uint256 amount, address onBehalfOf, address to) external override nonReentrant {
-        require(onBehalfOf != address(0) && to != address(0), "FarmingPool: zero address");
-        _withdraw(pid, amount, onBehalfOf, to);
-    }
-
-    function _withdraw(uint256 pid, uint256 amount, address ownerAddr, address recipient) internal {
+    function _withdraw(uint256 pid, uint256 amount, address account) internal {
         IFarmingPool.PoolInfo storage pool = _poolInfo[pid];
-        IFarmingPool.UserInfo storage user = _userInfo[pid][ownerAddr];
+        IFarmingPool.UserInfo storage user = _userInfo[pid][account];
         require(user.amount >= amount, "FarmingPool: withdraw exceeds staked");
 
         // Validate withdraw amount (prevent dust and overflow attacks)
@@ -421,20 +407,30 @@ contract FarmingPool is Ownable, ReentrancyGuard, IFarmingPool {
         }
 
         updatePool(pid);
-        uint256 pending = RewardMath.pending(user.amount, pool.accRewardPerShare, user.rewardDebt);
-        if (pending > 0) {
-            rewardToken.safeTransfer(ownerAddr, pending);
-            emit Claim(ownerAddr, pid, pending);
-        }
 
+        // CEI Pattern: Calculate pending rewards first
+        uint256 pending = RewardMath.pending(user.amount, pool.accRewardPerShare, user.rewardDebt);
+
+        // Effects: Update all state variables before external calls
         if (amount > 0) {
             user.amount -= amount;
             pool.totalStaked -= amount;
-            pool.lpToken.safeTransfer(recipient, amount);
+        }
+        user.rewardDebt = RewardMath.rewardDebtValue(user.amount, pool.accRewardPerShare);
+
+        // Interactions: External calls after state updates
+        if (pending > 0) {
+            rewardToken.safeTransfer(account, pending);
+            emit Claim(account, pid, pending);
+
+            // Try lazy BRS buyback when claiming rewards (gas compensated by Treasury)
+            _tryLazyBuyback();
+        }
+        if (amount > 0) {
+            pool.lpToken.safeTransfer(account, amount);
         }
 
-        user.rewardDebt = RewardMath.rewardDebtValue(user.amount, pool.accRewardPerShare);
-        emit Withdraw(ownerAddr, pid, amount);
+        emit Withdraw(account, pid, amount);
     }
 
     /// @notice Claims BRS rewards
@@ -444,26 +440,25 @@ contract FarmingPool is Ownable, ReentrancyGuard, IFarmingPool {
         _claim(pid, msg.sender);
     }
 
-    /// @notice Claims BRS rewards on behalf of another user
-    /// @dev Claims rewards for account from specified pool, rewards sent to account
-    ///      Used by StakingRouter and similar contracts for proxy claiming
-    /// @param pid Pool ID
-    /// @param account Reward owner address
-    function claimFor(uint256 pid, address account) external override nonReentrant {
-        require(account != address(0), "FarmingPool: zero address");
-        _claim(pid, account);
-    }
-
     function _claim(uint256 pid, address account) internal {
         IFarmingPool.PoolInfo storage pool = _poolInfo[pid];
         IFarmingPool.UserInfo storage user = _userInfo[pid][account];
         updatePool(pid);
+
+        // CEI Pattern: Calculate pending rewards first
         uint256 pending = RewardMath.pending(user.amount, pool.accRewardPerShare, user.rewardDebt);
+
+        // Effects: Update state before external calls
+        user.rewardDebt = RewardMath.rewardDebtValue(user.amount, pool.accRewardPerShare);
+
+        // Interactions: External calls after state updates
         if (pending > 0) {
             rewardToken.safeTransfer(account, pending);
             emit Claim(account, pid, pending);
+
+            // Try lazy BRS buyback when claiming rewards (gas compensated by Treasury)
+            _tryLazyBuyback();
         }
-        user.rewardDebt = RewardMath.rewardDebtValue(user.amount, pool.accRewardPerShare);
     }
 
     /// @notice Emergency withdrawal of all staked tokens
@@ -544,6 +539,19 @@ contract FarmingPool is Ownable, ReentrancyGuard, IFarmingPool {
             _validateLPTokenAmount(pool.lpToken, amount);
         } else {
             _validateTokenAmount(address(pool.lpToken), amount);
+        }
+    }
+
+    // ============ Lazy BRS Buyback ============
+
+    /// @notice Try to trigger lazy BRS buyback
+    /// @dev Called when users claim BRS rewards
+    /// @dev Treasury will execute buyback if conditions are met (balance, cooldown, random)
+    /// @dev Gas cost is compensated by Treasury in ETH
+    function _tryLazyBuyback() internal {
+        address treasury = core.TREASURY();
+        if (treasury != address(0)) {
+            try ITreasury(treasury).tryLazyBuyback() {} catch {}
         }
     }
 }

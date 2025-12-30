@@ -35,6 +35,15 @@ interface ITreasury {
      */
     function buybackBRS(uint256 btdAmount, uint256 minBRSOut) external;
 
+    /**
+     * @notice Attempts lazy buyback of BRS using BTD
+     * @dev Called by Minter during mint/redeem operations
+     *      Executes buyback if conditions are met (balance, cooldown, random trigger)
+     *      Compensates caller with actual gas cost in ETH
+     * @return executed True if buyback was executed
+     */
+    function tryLazyBuyback() external returns (bool executed);
+
     // --- Configuration Management ---
     /**
      * @notice Update Uniswap Router address

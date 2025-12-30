@@ -9,9 +9,9 @@ import "./interfaces/IIdealUSDManager.sol";
 import "./interfaces/IPriceOracle.sol";
 import "./interfaces/IUniswapV2TWAPOracle.sol";
 import "./interfaces/IAggregatorV3.sol";
+import "./interfaces/IMinter.sol";
 import "./libraries/OracleMath.sol";
 import "./libraries/FeedValidation.sol";
-import "./libraries/PriceBlend.sol";
 
 /// @notice Pyth Price Feed Interface
 interface IPyth {
@@ -23,11 +23,6 @@ interface IPyth {
     }
 
     function getPriceUnsafe(bytes32 id) external view returns (Price memory price);
-}
-
-/// @notice Redstone Data Service Interface
-interface IRedstoneData {
-    function getValueForDataFeedId(bytes32 dataFeedId) external view returns (uint256);
 }
 
 /// @notice Uniswap V2 Pair Interface
@@ -48,8 +43,6 @@ contract PriceOracle is Ownable, IPriceOracle {
     // Immutable core configuration (fixed at deployment)
     ConfigCore public immutable core;
     bytes32 public immutable pythWbtcPriceId;
-    bytes32 public immutable redstoneWbtcDataFeedId;
-    uint8 public immutable redstoneWbtcDecimals;
     bool public immutable useTWAPDefault;
 
     // Mutable configuration (whitelist restricted)
@@ -73,6 +66,15 @@ contract PriceOracle is Ownable, IPriceOracle {
     // Stablecoin depeg threshold (1% = 100 basis points)
     uint256 public constant STABLECOIN_MAX_DEVIATION_BPS = 100;
 
+    // ============ Token Price Guardrails ============
+    // TWAP vs Spot deviation thresholds (basis points)
+    uint256 public constant BTD_TWAP_SPOT_MAX_BPS = 500;   // 5% - BTD is stablecoin, tighter bound
+    uint256 public constant BTB_TWAP_SPOT_MAX_BPS = 1000;  // 10% - BTB is more volatile
+    uint256 public constant BRS_TWAP_SPOT_MAX_BPS = 2000;  // 20% - BRS is equity token, most volatile
+
+    // BTD price floor multiplier (90% = 9000 basis points)
+    uint256 public constant BTD_FLOOR_MULTIPLIER_BPS = 9000;
+
     /// @notice Maximum deviation update event
     /// @param oldBps Old deviation value (basis points)
     /// @param newBps New deviation value (basis points)
@@ -88,20 +90,14 @@ contract PriceOracle is Ownable, IPriceOracle {
         address initialOwner,                  // Contract owner address, cannot be zero address
         address _core,                         // ConfigCore contract address, cannot be zero address
         address _twapOracle,                   // TWAP Oracle address, can be zero address (set later)
-        bytes32 _pythWbtcPriceId,              // Pyth WBTC price ID, cannot be zero
-        bytes32 _redstoneWbtcDataFeedId,       // Redstone WBTC data feed ID, cannot be zero
-        uint8 _redstoneWbtcDecimals            // Redstone decimals, must be greater than 0
+        bytes32 _pythWbtcPriceId               // Pyth WBTC price ID, cannot be zero
     ) Ownable(initialOwner) {
         require(initialOwner != address(0), "Invalid owner");
         require(_core != address(0), "Invalid core address");
         require(_pythWbtcPriceId != bytes32(0), "Invalid Pyth price id");
-        require(_redstoneWbtcDataFeedId != bytes32(0), "Invalid Redstone feed id");
-        require(_redstoneWbtcDecimals > 0, "Invalid Redstone decimals");
 
         core = ConfigCore(_core);
         pythWbtcPriceId = _pythWbtcPriceId;
-        redstoneWbtcDataFeedId = _redstoneWbtcDataFeedId;
-        redstoneWbtcDecimals = _redstoneWbtcDecimals;
         useTWAPDefault = true;
         useTWAP = true;
 
@@ -134,13 +130,12 @@ contract PriceOracle is Ownable, IPriceOracle {
     }
 
     // Removed: setPythWbtcPriceId() - pythWbtcPriceId is now immutable
-    // Removed: setRedstoneWbtcConfig() - redstoneWbtcDataFeedId and redstoneWbtcDecimals are now immutable
     //
     // Refactoring notes:
-    // - Pyth and Redstone configuration parameters are now fixed as immutable in constructor
+    // - Pyth configuration parameters are now fixed as immutable in constructor
     // - These parameters cannot be modified after deployment, following weak governance principle
-    // - To switch price sources, use Config contract's whitelist mechanism to manage backup oracle addresses
-    // - Reference PARAMETER_CLASSIFICATION.md Section 1: PriceOracle parameter classification
+    // - WBTC price uses dual-source validation: Chainlink + Pyth must agree within 1%
+    // - Redstone removed: Two reliable sources (Chainlink + Pyth) are sufficient
 
     /**
      * @notice Sets maximum price deviation value (basis points)
@@ -312,22 +307,6 @@ contract PriceOracle is Ownable, IPriceOracle {
     }
 
     /**
-     * @notice Gets WBTC/USD price via Redstone
-     * @dev Reads price from Redstone data service and normalizes to 18 decimals
-     * @return WBTC price (18 decimal USD)
-     */
-    function _getRedstoneWBTCUSD() internal view returns (uint256) {
-        address redstoneFeed = core.REDSTONE_WBTC();
-        require(redstoneFeed != address(0), "Redstone feed not set");
-        require(redstoneWbtcDataFeedId != bytes32(0), "Redstone id not set");
-        require(redstoneWbtcDecimals > 0, "Redstone decimals not set");
-
-        uint256 price = IRedstoneData(redstoneFeed).getValueForDataFeedId(redstoneWbtcDataFeedId);
-        require(price > 0, "Invalid Redstone price");
-        return OracleMath.normalizeAmount(price, redstoneWbtcDecimals);
-    }
-
-    /**
      * @notice Converts Pyth price format to standard 18 decimals
      * @dev Handles Pyth-specific price and exponent format
      * @param price Pyth raw price value
@@ -368,82 +347,147 @@ contract PriceOracle is Ownable, IPriceOracle {
     }
 
     /**
-     * @notice Gets WBTC/USD price (multi-source validation)
-     * @dev Takes median of Chainlink, Pyth, Redstone three price sources, then validates against Uniswap price
-     * @dev Safety check: Uniswap price must be within 1% of reference price, otherwise reverts
+     * @notice Gets WBTC/USD price (dual-source validation)
+     * @dev Requires Chainlink and Pyth prices to be consistent (within 1%), then validates against Uniswap TWAP
+     * @dev Safety check: All three sources must agree within deviation threshold, otherwise reverts
      * @return WBTC price (18 decimal USD)
      */
     function getWBTCPrice() public view returns (uint256) {
-        uint256 chainlinkDerived = _getChainlinkWBTCUSD();
+        uint256 chainlinkPrice = _getChainlinkWBTCUSD();
         uint256 pythPrice = _getPythWBTCUSD();
-        uint256 redstonePrice = _getRedstoneWBTCUSD();
 
-        uint256 referencePrice = PriceBlend.median3(chainlinkDerived, pythPrice, redstonePrice);
+        // Step 1: Chainlink and Pyth must agree within 1%
+        require(
+            OracleMath.deviationWithin(chainlinkPrice, pythPrice, maxDeviationBps),
+            "Chainlink/Pyth price mismatch"
+        );
+
+        // Step 2: Use average as reference price
+        uint256 referencePrice = (chainlinkPrice + pythPrice) / 2;
+
+        // Step 3: Validate Uniswap TWAP against reference
         uint256 uniPrice = getPrice(
             core.POOL_WBTC_USDC(),
             core.WBTC(),
             core.USDC()
         );
 
-        // Strict 1% deviation check (prevents manipulation + market volatility circuit breaker)
         require(
             OracleMath.deviationWithin(uniPrice, referencePrice, maxDeviationBps),
-            "WBTC price mismatch >1%"
+            "Uniswap/Oracle price mismatch"
         );
 
         return uniPrice;
     }
 
     /**
-     * @notice Gets BTD/USD actual market price
-     * @dev Reads price from Uniswap BTD/USDC pool
+     * @notice Gets BTD/USD actual market price with guardrails
+     * @dev Reads price from Uniswap BTD/USDC pool with safety checks:
+     *      1. TWAP vs Spot deviation must be within 5%
+     *      2. Price floor: TWAP >= CR * IUSD * 0.9
      * @return BTD price (18 decimal USD)
      */
     function getBTDPrice() public view returns (uint256) {
-        // Get BTD actual market price from Uniswap (BTD/USDC)
-        return getPrice(
-            core.POOL_BTD_USDC(),
-            core.BTD(),
-            core.USDC()
+        address pool = core.POOL_BTD_USDC();
+        address base = core.BTD();
+        address quote = core.USDC();
+
+        // Get TWAP price (primary)
+        uint256 twapPrice = _getPriceTWAP(pool, base, quote);
+
+        // Guardrail 1: Check TWAP vs Spot deviation
+        uint256 spotPrice = _getPriceSpot(pool, base, quote);
+        require(
+            OracleMath.deviationWithin(twapPrice, spotPrice, BTD_TWAP_SPOT_MAX_BPS),
+            "BTD: TWAP/spot deviation"
         );
+
+        // Guardrail 2: Price floor = CR * IUSD * 0.9
+        uint256 iusdPrice = getIUSDPrice();
+        uint256 cr = _getCollateralRatio();
+        // Cap CR at 100% for floor calculation
+        if (cr > 1e18) {
+            cr = 1e18;
+        }
+        // floor = CR * IUSD * 0.9
+        uint256 floor = Math.mulDiv(
+            Math.mulDiv(cr, iusdPrice, 1e18),
+            BTD_FLOOR_MULTIPLIER_BPS,
+            10000
+        );
+        require(twapPrice >= floor, "BTD: price below floor");
+
+        return twapPrice;
     }
 
     /**
-     * @notice Gets BTB/USD price
+     * @notice Internal helper to get collateral ratio from Minter
+     * @dev Returns 1e18 (100%) if Minter not available
+     * @return Collateral ratio (18 decimals, 1e18 = 100%)
+     */
+    function _getCollateralRatio() internal view returns (uint256) {
+        address minter = core.MINTER();
+        if (minter == address(0)) {
+            return 1e18; // Default to 100% if Minter not set
+        }
+        return IMinter(minter).getCollateralRatio();
+    }
+
+    /**
+     * @notice Gets BTB/USD price with guardrails
      * @dev Calculates via BTB/BTD and BTD/USDC two pools: BTB price = (BTB/BTD price) x (BTD/USD price)
+     *      Guardrail: BTB/BTD TWAP vs Spot deviation must be within 10%
      * @return BTB price (18 decimal USD)
      */
     function getBTBPrice() public view returns (uint256) {
-        uint256 btbBtd = getPrice(
-            core.POOL_BTB_BTD(),
-            core.BTB(),
-            core.BTD()
+        address pool = core.POOL_BTB_BTD();
+        address base = core.BTB();
+        address quote = core.BTD();
+
+        // Get TWAP price for BTB/BTD
+        uint256 btbBtdTwap = _getPriceTWAP(pool, base, quote);
+
+        // Guardrail: Check TWAP vs Spot deviation
+        uint256 btbBtdSpot = _getPriceSpot(pool, base, quote);
+        require(
+            OracleMath.deviationWithin(btbBtdTwap, btbBtdSpot, BTB_TWAP_SPOT_MAX_BPS),
+            "BTB: TWAP/spot deviation"
         );
-        uint256 btdUsdc = getBTDPrice();  // Use BTD actual market price
-        // Use Math.mulDiv to prevent overflow and precision loss (double price multiplication)
-        uint256 price = Math.mulDiv(btbBtd, btdUsdc, 1e18);
+
+        // BTB/USD = BTB/BTD * BTD/USD
+        uint256 btdUsdc = getBTDPrice();  // Already has guardrails
+        uint256 price = Math.mulDiv(btbBtdTwap, btdUsdc, 1e18);
 
         // Return actual price (no limit)
         // Price capping is handled by Minter contract:
         // - If BTB price < minPrice, calculate BTB compensation at minPrice, difference compensated with BRS
-        // - This way we get actual market price while protecting users from receiving too many low-priced BTB
         return price;
     }
 
     /**
-     * @notice Gets BRS/USD price
+     * @notice Gets BRS/USD price with guardrails
      * @dev Calculates via BRS/BTD and BTD/USDC two pools: BRS price = (BRS/BTD price) x (BTD/USD price)
+     *      Guardrail: BRS/BTD TWAP vs Spot deviation must be within 20%
      * @return BRS price (18 decimal USD)
      */
     function getBRSPrice() public view returns (uint256) {
-        uint256 brsBtd = getPrice(
-            core.POOL_BRS_BTD(),
-            core.BRS(),
-            core.BTD()
+        address pool = core.POOL_BRS_BTD();
+        address base = core.BRS();
+        address quote = core.BTD();
+
+        // Get TWAP price for BRS/BTD
+        uint256 brsBtdTwap = _getPriceTWAP(pool, base, quote);
+
+        // Guardrail: Check TWAP vs Spot deviation
+        uint256 brsBtdSpot = _getPriceSpot(pool, base, quote);
+        require(
+            OracleMath.deviationWithin(brsBtdTwap, brsBtdSpot, BRS_TWAP_SPOT_MAX_BPS),
+            "BRS: TWAP/spot deviation"
         );
-        uint256 btdUsdc = getBTDPrice();  // Use BTD actual market price
-        // Use Math.mulDiv to prevent overflow and precision loss (double price multiplication)
-        uint256 price = Math.mulDiv(brsBtd, btdUsdc, 1e18);
+
+        // BRS/USD = BRS/BTD * BTD/USD
+        uint256 btdUsdc = getBTDPrice();  // Already has guardrails
+        uint256 price = Math.mulDiv(brsBtdTwap, btdUsdc, 1e18);
 
         return price;
     }

@@ -48,6 +48,14 @@ interface IInterestPool {
      */
     function updateBTBAnnualRate() external;
 
+    /**
+     * @notice Tries to update both BTD and BTB rates if enough time has passed (lazy update)
+     * @dev Can be called by anyone, designed for stake/unstake to call during user operations
+     * @return btdUpdated True if BTD rate was actually updated
+     * @return btbUpdated True if BTB rate was actually updated
+     */
+    function tryUpdateRates() external returns (bool btdUpdated, bool btbUpdated);
+
     // ============ Events ============
 
     event Staked(address indexed user, address indexed token, uint256 amount);

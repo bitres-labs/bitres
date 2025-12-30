@@ -16,6 +16,7 @@ import "./interfaces/ITreasury.sol";
 import "./interfaces/IMintableERC20.sol";
 import "./interfaces/IPriceOracle.sol";
 import "./interfaces/IMinter.sol";
+import "./interfaces/IIdealUSDManager.sol";
 import "./libraries/Constants.sol";
 import "./libraries/MintLogic.sol";
 import "./libraries/RedeemLogic.sol";
@@ -175,6 +176,18 @@ contract Minter is ReentrancyGuard, Ownable, Pausable, IMinter {
      */
     function _updateTWAPAll() internal {
         _getPriceOracle().updateTWAPAll();
+    }
+
+    /**
+     * @notice Try to update IUSD if enough time has passed (lazy update)
+     * @dev Called during mint/redeem operations to keep IUSD fresh
+     * @dev Silently fails if update conditions not met or PCE feed unavailable
+     */
+    function _tryUpdateIUSD() internal {
+        address manager = core.IDEAL_USD_MANAGER();
+        if (manager != address(0)) {
+            try IIdealUSDManager(manager).tryUpdateIUSD() {} catch {}
+        }
     }
 
     /**
@@ -361,6 +374,8 @@ contract Minter is ReentrancyGuard, Ownable, Pausable, IMinter {
     function mintBTD(uint256 wbtcAmount) external nonReentrant whenNotPaused {
         // Update TWAP for WBTC price (only if needed, saves gas if recently updated)
         _updateTWAPForWBTC();
+        // Try to update IUSD if enough time has passed (lazy update)
+        _tryUpdateIUSD();
 
         // Deposit limit check: BTC min/max amount
         _checkWBTCAmount(wbtcAmount);
@@ -449,6 +464,8 @@ contract Minter is ReentrancyGuard, Ownable, Pausable, IMinter {
     function _redeemBTD(address account, uint256 btdAmount) internal {
         // Update TWAP for all prices (WBTC always needed, BTD/BTB/BRS needed when CR<100%)
         _updateTWAPAll();
+        // Try to update IUSD if enough time has passed (lazy update)
+        _tryUpdateIUSD();
 
         require(btdAmount > 0, "Invalid amount");
         require(
@@ -581,6 +598,8 @@ contract Minter is ReentrancyGuard, Ownable, Pausable, IMinter {
     function _redeemBTB(address account, uint256 btbAmount) internal {
         // Update TWAP for WBTC price (needed for CR calculation)
         _updateTWAPForWBTC();
+        // Try to update IUSD if enough time has passed (lazy update)
+        _tryUpdateIUSD();
 
         // Get all prices at once (gas saving)
         uint256 wbtcPrice = getWBTCPrice();

@@ -17,4 +17,11 @@ interface IIdealUSDManager {
      * @return The update timestamp
      */
     function lastUpdateTime() external view returns (uint256);
+
+    /**
+     * @notice Tries to update IUSD if enough time has passed (lazy update)
+     * @dev Can be called by anyone, designed for Minter to call during user operations
+     * @return updated True if IUSD was actually updated
+     */
+    function tryUpdateIUSD() external returns (bool updated);
 }

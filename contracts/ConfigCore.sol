@@ -95,10 +95,6 @@ contract ConfigCore {
     /// @dev Cannot be changed after deployment
     address public immutable PYTH_WBTC;
 
-    /// @notice Redstone WBTC price feed address
-    /// @dev Cannot be changed after deployment
-    address public immutable REDSTONE_WBTC;
-
     /// @notice Chainlink USDC/USD price feed address
     /// @dev Cannot be changed after deployment, used for stablecoin depeg detection
     address public immutable CHAINLINK_USDC_USD;
@@ -167,7 +163,6 @@ contract ConfigCore {
         address _chainlinkBtcUsd,      // Chainlink BTC/USD price feed address
         address _chainlinkWbtcBtc,     // Chainlink WBTC/BTC price feed address
         address _pythWbtc,             // Pyth WBTC price feed address
-        address _redstoneWbtc,         // Redstone WBTC price feed address
         address _chainlinkUsdcUsd,     // Chainlink USDC/USD price feed address
         address _chainlinkUsdtUsd      // Chainlink USDT/USD price feed address
     ) {
@@ -181,7 +176,6 @@ contract ConfigCore {
         require(_chainlinkBtcUsd != address(0), "Invalid Chainlink BTC/USD");
         require(_chainlinkWbtcBtc != address(0), "Invalid Chainlink WBTC/BTC");
         require(_pythWbtc != address(0), "Invalid Pyth WBTC");
-        require(_redstoneWbtc != address(0), "Invalid Redstone WBTC");
         require(_chainlinkUsdcUsd != address(0), "Invalid Chainlink USDC/USD");
         require(_chainlinkUsdtUsd != address(0), "Invalid Chainlink USDT/USD");
 
@@ -196,7 +190,6 @@ contract ConfigCore {
         CHAINLINK_BTC_USD = _chainlinkBtcUsd;
         CHAINLINK_WBTC_BTC = _chainlinkWbtcBtc;
         PYTH_WBTC = _pythWbtc;
-        REDSTONE_WBTC = _redstoneWbtc;
         CHAINLINK_USDC_USD = _chainlinkUsdcUsd;
         CHAINLINK_USDT_USD = _chainlinkUsdtUsd;
     }

@@ -24,4 +24,9 @@ contract MockIUSDManager is IIdealUSDManager {
     function lastUpdateTime() external view override returns (uint256) {
         return _lastUpdate;
     }
+
+    function tryUpdateIUSD() external pure override returns (bool updated) {
+        // Mock implementation: always returns false (no automatic update in mock)
+        return false;
+    }
 }

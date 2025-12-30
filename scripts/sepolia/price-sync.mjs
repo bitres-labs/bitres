@@ -147,6 +147,12 @@ const CHAINLINK_ABI = [
   },
 ];
 
+const CONFIG_CORE_ABI = [
+  { inputs: [], name: "POOL_WBTC_USDC", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "WBTC", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "USDC", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
+];
+
 function loadAddresses() {
   if (!fs.existsSync(ADDR_FILE)) {
     throw new Error(`deployed_addresses.json not found at ${ADDR_FILE}`);
@@ -364,9 +370,24 @@ async function main() {
   const get = (key, abiName = key) => viem.getContractAt(abiName, addresses[key]);
   const twapOracle = await get("TWAPOracle", "contracts/UniswapV2TWAPOracle.sol:UniswapV2TWAPOracle");
 
-  const pairAddress = addresses.PairWBTCUSDC;
-  const wbtcAddress = addresses.WBTC;
-  const usdcAddress = addresses.USDC;
+  // Read pool addresses from ConfigCore (the actual addresses used by PriceOracle)
+  log("Reading pool addresses from ConfigCore...");
+  const pairAddress = await publicClient.readContract({
+    address: addresses.ConfigCore,
+    abi: CONFIG_CORE_ABI,
+    functionName: "POOL_WBTC_USDC",
+  });
+  const wbtcAddress = await publicClient.readContract({
+    address: addresses.ConfigCore,
+    abi: CONFIG_CORE_ABI,
+    functionName: "WBTC",
+  });
+  const usdcAddress = await publicClient.readContract({
+    address: addresses.ConfigCore,
+    abi: CONFIG_CORE_ABI,
+    functionName: "USDC",
+  });
+  log(`Pool: ${pairAddress}`);
 
   // Determine token order
   const token0 = await publicClient.readContract({

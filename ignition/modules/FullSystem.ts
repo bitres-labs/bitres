@@ -6,9 +6,6 @@ const DEFAULTS = {
   initialBtcPrice: BigInt(102_000 * 1e8), // Chainlink 8 decimals
   initialPceFeed: "0x0000000000000000000000000000000000000001", // placeholder, will be set via ConfigGov
   pythPriceId: "0x505954485f575442430000000000000000000000000000000000000000000000", // "PYTH_WTBC"
-  redstoneFeedId:
-    "0x52454453544f4e455f5754424300000000000000000000000000000000000000", // "REDSTONE_WTBC"
-  redstoneDecimals: 18n,
   iusdInitial: 10n ** 18n,
 };
 
@@ -42,7 +39,6 @@ export default buildModule("FullSystemLocal", (m) => {
     { id: "ChainlinkWBTCBTC" }
   );
   const mockPyth = m.contract("contracts/local/MockPyth.sol:MockPyth", [], { id: "MockPyth" });
-  const mockRedstone = m.contract("contracts/local/MockRedstone.sol:MockRedstone", [], { id: "MockRedstone" });
 
   // ===== 5. Mock pairs (Uniswap V2) =====
   const pairWbtcUsdc = m.contract("contracts/local/UniswapV2Pair.sol:UniswapV2Pair", [], { id: "PairWBTCUSDC" });
@@ -57,9 +53,10 @@ export default buildModule("FullSystemLocal", (m) => {
   m.call(pairBrsBtd, "initialize", [brs, btd], { id: "InitPairBRSBTD" });
 
   // ===== 6. Config contracts =====
+  // Note: Chainlink USDC/USD and USDT/USD feeds use mock BTC/USD for local testing
   const configCore = m.contract(
     "ConfigCore",
-    [wbtc, btd, btb, brs, weth, usdc, usdt, chainlinkBtcUsd, chainlinkWbtcBtc, mockPyth, mockRedstone],
+    [wbtc, btd, btb, brs, weth, usdc, usdt, chainlinkBtcUsd, chainlinkWbtcBtc, mockPyth, chainlinkBtcUsd, chainlinkBtcUsd],
     { id: "ConfigCore" }
   );
 
@@ -74,6 +71,7 @@ export default buildModule("FullSystemLocal", (m) => {
 
   // ===== 8. PriceOracle + TWAP =====
   // Deploy TWAP first, then PriceOracle, then wire it via setTWAPOracle
+  // Note: Redstone removed - using dual-source validation (Chainlink + Pyth)
   const twapOracle = m.contract("UniswapV2TWAPOracle", [], { id: "TWAPOracle" });
   const priceOracle = m.contract(
     "PriceOracle",
@@ -82,8 +80,6 @@ export default buildModule("FullSystemLocal", (m) => {
       configCore,
       twapOracle, // initial TWAP Oracle (can be replaced later)
       DEFAULTS.pythPriceId,
-      DEFAULTS.redstoneFeedId,
-      Number(DEFAULTS.redstoneDecimals),
     ],
     { after: [configCore] }
   );
@@ -194,10 +190,37 @@ export default buildModule("FullSystemLocal", (m) => {
   m.call(btb, "grantRole", [MINTER_ROLE, minter], { id: "BTBGrantMinterRoleMinter" });
   m.call(btb, "grantRole", [MINTER_ROLE, interestPool], { id: "BTBGrantMinterRoleInterestPool" });
 
+  // ===== 14. Faucet (test token distribution) =====
+  const faucet = m.contract("contracts/local/Faucet.sol:Faucet", [wbtc, usdc, usdt, deployer], {
+    id: "Faucet",
+    after: [wbtc, usdc, usdt],
+  });
+
+  // Transfer tokens to Faucet: 10M WBTC, 500M USDC, 500M USDT
+  const FAUCET_WBTC = 10_000_000n * 10n ** 8n;  // 10 million WBTC (8 decimals)
+  const FAUCET_USDC = 500_000_000n * 10n ** 6n; // 500 million USDC (6 decimals)
+  const FAUCET_USDT = 500_000_000n * 10n ** 6n; // 500 million USDT (6 decimals)
+
+  m.call(wbtc, "transfer", [faucet, FAUCET_WBTC], {
+    from: deployer,
+    id: "TransferWBTCToFaucet",
+    after: [faucet],
+  });
+  m.call(usdc, "transfer", [faucet, FAUCET_USDC], {
+    from: deployer,
+    id: "TransferUSDCToFaucet",
+    after: [faucet],
+  });
+  m.call(usdt, "transfer", [faucet, FAUCET_USDT], {
+    from: deployer,
+    id: "TransferUSDTToFaucet",
+    after: [faucet],
+  });
+
   // Output
   return {
     tokens: { wbtc, usdc, usdt, weth, brs, btd, btb, stBTD, stBTB },
-    mocks: { chainlinkBtcUsd, chainlinkWbtcBtc, mockPyth, mockRedstone },
+    mocks: { chainlinkBtcUsd, chainlinkWbtcBtc, mockPyth },
     pairs: { pairWbtcUsdc, pairBtdUsdc, pairBtbBtd, pairBrsBtd },
     configCore,
     configGov,
@@ -210,5 +233,6 @@ export default buildModule("FullSystemLocal", (m) => {
     twapOracle,
     idealUSDManager,
     governor,
+    faucet,
   };
 });

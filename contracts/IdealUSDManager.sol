@@ -168,6 +168,78 @@ contract IdealUSDManager is ConfirmedOwner, IIdealUSDManager {
     }
 
     /**
+     * @notice Minimum interval for lazy IUSD updates (25 days)
+     * @dev PCE is published monthly, 25 days ensures at most one update per month
+     */
+    uint256 public constant MIN_LAZY_UPDATE_INTERVAL = 25 days;
+
+    /**
+     * @notice Tries to update IUSD if enough time has passed (lazy update)
+     * @dev Can be called by anyone, but only executes if MIN_LAZY_UPDATE_INTERVAL has passed
+     * @dev Designed to be called by Minter during user operations (mint/redeem)
+     * @dev Silently returns if update conditions not met or PCE feed fails
+     * @return updated True if IUSD was actually updated
+     */
+    function tryUpdateIUSD() external returns (bool updated) {
+        // Only update if enough time has passed since last update
+        if (block.timestamp < lastUpdateTime + MIN_LAZY_UPDATE_INTERVAL) {
+            return false;
+        }
+
+        // Try to pull PCE data and update - silently fail if PCE feed unavailable
+        try this.updateIUSDInternal() {
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * @notice Internal update function callable only by this contract
+     * @dev Used by tryUpdateIUSD() to enable try-catch pattern
+     */
+    function updateIUSDInternal() external {
+        require(msg.sender == address(this), "Only internal call");
+
+        // Get data from PCE data source
+        (uint256 currentPCE, uint256 previousPCE) = _pullPCEData();
+        uint256 oldIUSD = iusdValue;
+
+        (uint256 actualInflationMultiplier, uint256 adjustmentFactor) =
+            IUSDMath.adjustmentFactor(currentPCE, previousPCE, Constants.MONTHLY_GROWTH_FACTOR);
+
+        // Update IUSD: IUSD = IUSD x adjustment factor
+        iusdValue = (iusdValue * adjustmentFactor) / Constants.PRECISION_18;
+        lastUpdateTime = block.timestamp;
+
+        // Calculate actual monthly inflation rate (for event)
+        uint256 actualMonthlyRate = actualInflationMultiplier > Constants.PRECISION_18 ?
+            actualInflationMultiplier - Constants.PRECISION_18 : 0;
+
+        // Record history
+        updateHistory.push(IUSDUpdate({
+            timestamp: block.timestamp,
+            oldValue: oldIUSD,
+            newValue: iusdValue,
+            currentPCE: currentPCE,
+            previousPCE: previousPCE,
+            actualMonthlyRate: actualMonthlyRate,
+            adjustmentFactor: adjustmentFactor
+        }));
+
+        emit IUSDUpdated(
+            block.timestamp,
+            oldIUSD,
+            iusdValue,
+            currentPCE,
+            previousPCE,
+            actualMonthlyRate,
+            Constants.MONTHLY_GROWTH_FACTOR - Constants.PRECISION_18,
+            adjustmentFactor
+        );
+    }
+
+    /**
      * @notice Queries whether an address has IUSD update permission
      * @dev If whitelist is not enabled, only owner has permission; when whitelist is enabled, checks authorization list
      * @param updater Address to query
@@ -362,7 +434,8 @@ contract IdealUSDManager is ConfirmedOwner, IIdealUSDManager {
         address pceFeedAddr = configGov.pceFeed();
         require(pceFeedAddr != address(0), "PCE Feed not configured");
 
-        currentPCE = FeedValidation.readAggregator(pceFeedAddr);
+        // Use PCE-specific reader with 35-day staleness (monthly macroeconomic data)
+        currentPCE = FeedValidation.readPCEAggregator(pceFeedAddr);
         previousPCE = lastPCEValue;
 
         // For first update, use current value as previous to avoid division by zero and record baseline

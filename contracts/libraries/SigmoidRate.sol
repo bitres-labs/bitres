@@ -37,9 +37,6 @@ library SigmoidRate {
     /// @notice Minimum rate for both tokens (2% = 200 bps)
     uint256 internal constant R_MIN_BPS = 200;
 
-    /// @notice Default base rate (5% = 500 bps)
-    uint256 internal constant R_DEFAULT_BPS = 500;
-
     // ============ Sigmoid Parameters ============
 
     /// @notice BTD Sigmoid steepness parameter (α = 25, scaled by 1e18)

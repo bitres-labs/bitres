@@ -62,6 +62,13 @@ const PRICE_ORACLE_ABI = [
   { inputs: [], name: "getBRSPrice", outputs: [{ type: "uint256" }], stateMutability: "view", type: "function" },
 ];
 
+const CONFIG_CORE_ABI = [
+  { inputs: [], name: "POOL_WBTC_USDC", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "POOL_BTD_USDC", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "POOL_BTB_BTD", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "POOL_BRS_BTD", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
+];
+
 async function main() {
   console.log("\n============================================================");
   console.log("  TWAP Warmup - Complete TWAP Initialization");
@@ -82,13 +89,42 @@ async function main() {
 
   console.log(`=> Deployer: ${walletClient.account.address}`);
   console.log(`=> TWAPOracle: ${addr.TWAPOracle}`);
+  console.log(`=> ConfigCore: ${addr.ConfigCore}`);
   console.log(`=> PriceOracle: ${addr.PriceOracle}\n`);
 
+  // Read pool addresses from ConfigCore (the actual addresses used by PriceOracle)
+  console.log("=> Reading pool addresses from ConfigCore...\n");
+  const poolWbtcUsdc = await publicClient.readContract({
+    address: addr.ConfigCore,
+    abi: CONFIG_CORE_ABI,
+    functionName: "POOL_WBTC_USDC",
+  });
+  const poolBtdUsdc = await publicClient.readContract({
+    address: addr.ConfigCore,
+    abi: CONFIG_CORE_ABI,
+    functionName: "POOL_BTD_USDC",
+  });
+  const poolBtbBtd = await publicClient.readContract({
+    address: addr.ConfigCore,
+    abi: CONFIG_CORE_ABI,
+    functionName: "POOL_BTB_BTD",
+  });
+  const poolBrsBtd = await publicClient.readContract({
+    address: addr.ConfigCore,
+    abi: CONFIG_CORE_ABI,
+    functionName: "POOL_BRS_BTD",
+  });
+
+  console.log(`   WBTC/USDC: ${poolWbtcUsdc}`);
+  console.log(`   BTD/USDC:  ${poolBtdUsdc}`);
+  console.log(`   BTB/BTD:   ${poolBtbBtd}`);
+  console.log(`   BRS/BTD:   ${poolBrsBtd}\n`);
+
   const pairs = [
-    { name: "WBTC/USDC", address: addr.PairWBTCUSDC },
-    { name: "BTD/USDC", address: addr.PairBTDUSDC },
-    { name: "BTB/BTD", address: addr.PairBTBBTD },
-    { name: "BRS/BTD", address: addr.PairBRSBTD },
+    { name: "WBTC/USDC", address: poolWbtcUsdc },
+    { name: "BTD/USDC", address: poolBtdUsdc },
+    { name: "BTB/BTD", address: poolBtbBtd },
+    { name: "BRS/BTD", address: poolBrsBtd },
   ];
 
   // Check current TWAP status

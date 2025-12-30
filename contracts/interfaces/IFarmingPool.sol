@@ -54,31 +54,6 @@ interface IFarmingPool {
      */
     function emergencyWithdraw(uint256 _pid) external;
 
-    // --- Proxy Operations (for Router contract) ---
-    /**
-     * @notice Deposit tokens on behalf of another user (called by Router contract)
-     * @param _pid Pool ID
-     * @param _amount Deposit amount
-     * @param _onBehalfOf Actual beneficiary address
-     */
-    function depositFor(uint256 _pid, uint256 _amount, address _onBehalfOf) external;
-
-    /**
-     * @notice Withdraw tokens on behalf of another user (called by Router contract)
-     * @param _pid Pool ID
-     * @param _amount Withdrawal amount
-     * @param _onBehalfOf Token owner address
-     * @param _to Recipient address
-     */
-    function withdrawFor(uint256 _pid, uint256 _amount, address _onBehalfOf, address _to) external;
-
-    /**
-     * @notice Claim rewards on behalf of another user (called by Router contract)
-     * @param _pid Pool ID
-     * @param _onBehalfOf Actual beneficiary address
-     */
-    function claimFor(uint256 _pid, address _onBehalfOf) external;
-
     /**
      * @notice Inject BRS reward tokens into reward pool
      * @param amount BRS amount

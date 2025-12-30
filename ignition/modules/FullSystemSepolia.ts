@@ -40,8 +40,6 @@ const FUND_ADDRESSES = {
 const DEFAULTS = {
   initialPceFeed: "0x0000000000000000000000000000000000000001", // placeholder, set via ConfigGov
   pythPriceId: "0x505954485f575442430000000000000000000000000000000000000000000000",
-  redstoneFeedId: "0x52454453544f4e455f5754424300000000000000000000000000000000000000",
-  redstoneDecimals: 18n,
   iusdInitial: 10n ** 18n,
 };
 
@@ -81,14 +79,26 @@ export default buildModule("FullSystemSepolia", (m) => {
     { id: "ChainlinkWBTCBTC" }
   );
 
-  // Mock Pyth and Redstone (no testnet support, use mocks)
+  // Mock Pyth (no testnet support, use mock)
+  // Note: Redstone removed - using dual-source validation (Chainlink + Pyth)
   const mockPyth = m.contract("contracts/local/MockPyth.sol:MockPyth", [], { id: "MockPyth" });
-  const mockRedstone = m.contract("contracts/local/MockRedstone.sol:MockRedstone", [], { id: "MockRedstone" });
+
+  // Mock stablecoin oracles (use chainlinkBtcUsd as placeholder)
+  const chainlinkUsdcUsd = m.contract(
+    "contracts/local/MockAggregatorV3.sol:MockAggregatorV3",
+    [BigInt(1e8)], // $1.00
+    { id: "ChainlinkUSDCUSD" }
+  );
+  const chainlinkUsdtUsd = m.contract(
+    "contracts/local/MockAggregatorV3.sol:MockAggregatorV3",
+    [BigInt(1e8)], // $1.00
+    { id: "ChainlinkUSDTUSD" }
+  );
 
   // ===== 5. Config contracts =====
   const configCore = m.contract(
     "ConfigCore",
-    [wbtc, btd, btb, brs, weth, usdc, usdt, chainlinkBtcUsd, chainlinkWbtcBtc, mockPyth, mockRedstone],
+    [wbtc, btd, btb, brs, weth, usdc, usdt, chainlinkBtcUsd, chainlinkWbtcBtc, mockPyth, chainlinkUsdcUsd, chainlinkUsdtUsd],
     { id: "ConfigCore" }
   );
 
@@ -109,8 +119,6 @@ export default buildModule("FullSystemSepolia", (m) => {
       configCore,
       twapOracle,
       DEFAULTS.pythPriceId,
-      DEFAULTS.redstoneFeedId,
-      Number(DEFAULTS.redstoneDecimals),
     ],
     { after: [configCore] }
   );
@@ -201,10 +209,37 @@ export default buildModule("FullSystemSepolia", (m) => {
   m.call(btb, "grantRole", [MINTER_ROLE, minter], { id: "BTBGrantMinterRoleMinter" });
   m.call(btb, "grantRole", [MINTER_ROLE, interestPool], { id: "BTBGrantMinterRoleInterestPool" });
 
+  // ===== 13. Faucet (test token distribution) =====
+  const faucet = m.contract("contracts/local/Faucet.sol:Faucet", [wbtc, usdc, usdt, deployer], {
+    id: "Faucet",
+    after: [wbtc, usdc, usdt],
+  });
+
+  // Transfer tokens to Faucet: 10M WBTC, 500M USDC, 500M USDT
+  const FAUCET_WBTC = 10_000_000n * 10n ** 8n;  // 10 million WBTC (8 decimals)
+  const FAUCET_USDC = 500_000_000n * 10n ** 6n; // 500 million USDC (6 decimals)
+  const FAUCET_USDT = 500_000_000n * 10n ** 6n; // 500 million USDT (6 decimals)
+
+  m.call(wbtc, "transfer", [faucet, FAUCET_WBTC], {
+    from: deployer,
+    id: "TransferWBTCToFaucet",
+    after: [faucet],
+  });
+  m.call(usdc, "transfer", [faucet, FAUCET_USDC], {
+    from: deployer,
+    id: "TransferUSDCToFaucet",
+    after: [faucet],
+  });
+  m.call(usdt, "transfer", [faucet, FAUCET_USDT], {
+    from: deployer,
+    id: "TransferUSDTToFaucet",
+    after: [faucet],
+  });
+
   // Output
   return {
     tokens: { wbtc, usdc, usdt, weth, brs, btd, btb, stBTD, stBTB },
-    oracles: { chainlinkBtcUsd, chainlinkWbtcBtc, mockPyth, mockRedstone },
+    oracles: { chainlinkBtcUsd, chainlinkWbtcBtc, mockPyth, chainlinkUsdcUsd, chainlinkUsdtUsd },
     configCore,
     configGov,
     treasury,
@@ -216,6 +251,7 @@ export default buildModule("FullSystemSepolia", (m) => {
     twapOracle,
     idealUSDManager,
     governor,
+    faucet,
     // Uniswap V2 addresses (for reference, pairs created in init-sepolia.mjs)
     uniswapV2: UNISWAP_V2_SEPOLIA,
   };

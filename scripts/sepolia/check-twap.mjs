@@ -12,24 +12,57 @@ const ADDR_FILE = path.join(
   `ignition/deployments/chain-${CHAIN_ID}/deployed_addresses.json`
 );
 
+const CONFIG_CORE_ABI = [
+  { inputs: [], name: "POOL_WBTC_USDC", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "POOL_BTD_USDC", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "POOL_BTB_BTD", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "POOL_BRS_BTD", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
+];
+
 async function main() {
   const addresses = JSON.parse(fs.readFileSync(ADDR_FILE, "utf8"));
   const { viem } = await hre.network.connect();
   const publicClient = await viem.getPublicClient();
 
   const twapOracleAddr = addresses["FullSystemSepolia#TWAPOracle"];
+  const configCoreAddr = addresses["FullSystemSepolia#ConfigCore"];
+
   console.log(`TWAP Oracle: ${twapOracleAddr}`);
+  console.log(`ConfigCore: ${configCoreAddr}`);
 
   const twapOracle = await viem.getContractAt(
     "contracts/UniswapV2TWAPOracle.sol:UniswapV2TWAPOracle",
     twapOracleAddr
   );
 
+  // Read pool addresses from ConfigCore (the actual addresses used by PriceOracle)
+  console.log("\nReading pool addresses from ConfigCore...");
+  const poolWbtcUsdc = await publicClient.readContract({
+    address: configCoreAddr,
+    abi: CONFIG_CORE_ABI,
+    functionName: "POOL_WBTC_USDC",
+  });
+  const poolBtdUsdc = await publicClient.readContract({
+    address: configCoreAddr,
+    abi: CONFIG_CORE_ABI,
+    functionName: "POOL_BTD_USDC",
+  });
+  const poolBtbBtd = await publicClient.readContract({
+    address: configCoreAddr,
+    abi: CONFIG_CORE_ABI,
+    functionName: "POOL_BTB_BTD",
+  });
+  const poolBrsBtd = await publicClient.readContract({
+    address: configCoreAddr,
+    abi: CONFIG_CORE_ABI,
+    functionName: "POOL_BRS_BTD",
+  });
+
   const pairs = [
-    { name: "WBTC/USDC", addr: addresses["FullSystemSepolia#PairWBTCUSDC"] },
-    { name: "BTD/USDC", addr: addresses["FullSystemSepolia#PairBTDUSDC"] },
-    { name: "BTB/BTD", addr: addresses["FullSystemSepolia#PairBTBBTD"] },
-    { name: "BRS/BTD", addr: addresses["FullSystemSepolia#PairBRSBTD"] },
+    { name: "WBTC/USDC", addr: poolWbtcUsdc },
+    { name: "BTD/USDC", addr: poolBtdUsdc },
+    { name: "BTB/BTD", addr: poolBtbBtd },
+    { name: "BRS/BTD", addr: poolBrsBtd },
   ];
 
   const now = Math.floor(Date.now() / 1000);

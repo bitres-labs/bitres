@@ -49,7 +49,6 @@ export interface SystemContracts {
   mockWbtcBtc: any;
   mockPce: any;
   mockPyth: any;
-  mockRedstone: any;
 
   // Mock pools
   mockPoolWbtcUsdc: any;
@@ -137,12 +136,6 @@ export async function deployOracles() {
     []
   );
 
-  // Redstone
-  const mockRedstone = await viem.deployContract(
-    "contracts/local/MockRedstone.sol:MockRedstone",
-    []
-  );
-
   // Chainlink USDC/USD: $1.0 (8 decimals)
   const mockUsdcUsd = await viem.deployContract(
     "contracts/local/MockAggregatorV3.sol:MockAggregatorV3",
@@ -155,7 +148,7 @@ export async function deployOracles() {
     [1n * 10n ** 8n]
   );
 
-  return { mockBtcUsd, mockWbtcBtc, mockPce, mockPyth, mockRedstone, mockUsdcUsd, mockUsdtUsd };
+  return { mockBtcUsd, mockWbtcBtc, mockPce, mockPyth, mockUsdcUsd, mockUsdtUsd };
 }
 
 /**
@@ -240,7 +233,7 @@ export async function deployConfig(
 ) {
   const [owner] = await getWallets();
 
-  // Deploy ConfigCore (13 constructor params: tokens + oracles)
+  // Deploy ConfigCore (12 constructor params: tokens + oracles, Redstone removed)
   const configCore = await viem.deployContract(
     "contracts/ConfigCore.sol:ConfigCore",
     [
@@ -254,7 +247,6 @@ export async function deployConfig(
       oracles.mockBtcUsd.address,                           // _chainlinkBtcUsd
       oracles.mockWbtcBtc.address,                          // _chainlinkWbtcBtc
       oracles.mockPyth.address,                             // _pythWbtc
-      oracles.mockRedstone.address,                         // _redstoneWbtc
       oracles.mockUsdcUsd.address,                          // _chainlinkUsdcUsd
       oracles.mockUsdtUsd.address,                          // _chainlinkUsdtUsd
     ]
@@ -273,11 +265,11 @@ export async function deployConfig(
 
 /**
  * Deploy PriceOracle
+ * Note: Redstone removed - using dual-source validation (Chainlink + Pyth)
  */
 export async function deployPriceOracle(
   configCoreAddress: `0x${string}`,
-  pythId: `0x${string}`,
-  redstoneId: `0x${string}`
+  pythId: `0x${string}`
 ) {
   const [owner] = await getWallets();
   const dummyAddr = "0x0000000000000000000000000000000000000000" as `0x${string}`;
@@ -289,8 +281,6 @@ export async function deployPriceOracle(
       configCoreAddress,              // _core (ConfigCore)
       dummyAddr,                      // twapOracle (unused placeholder)
       pythId,                         // pythWbtcPriceId (immutable)
-      redstoneId,                     // redstoneWbtcDataFeedId (immutable)
-      8                               // redstoneWbtcDecimals (immutable)
     ]
   );
 

@@ -73,6 +73,7 @@ contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
 
     event RateOracleUpdated(address indexed newOracle);
     event TreasuryFeeMinted(address indexed token, uint256 amount);
+    event LazyRateUpdateAttempted(bool btdUpdated, bool btbUpdated);
 
     modifier onlyRateOracle() {
         require(msg.sender == rateOracle, "InterestPool: only rate oracle");
@@ -88,9 +89,10 @@ contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
         require(initialOwner != address(0), "InterestPool: invalid owner");
         require(_core != address(0), "InterestPool: core zero");
         require(_gov != address(0), "InterestPool: gov zero");
+        require(_rateOracle != address(0), "InterestPool: rate oracle zero");
         core = ConfigCore(_core);
         gov = ConfigGov(_gov);
-        rateOracle = _rateOracle; // Can be zero, set later via setRateOracle()
+        rateOracle = _rateOracle;
 
         address btdAddress = core.BTD();
         address btbAddress = core.BTB();
@@ -242,6 +244,108 @@ contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
         emit BTBAnnualRateUpdated(oldRate, newRate, price, 0);
     }
 
+    // --- Lazy Rate Updates (user-triggered) ---
+
+    /// @notice Tries to update both BTD and BTB rates if enough time has passed (lazy update)
+    /// @dev Can be called by anyone, designed for stake/unstake to call during user operations
+    ///      Each rate can only update once per day (SECONDS_PER_DAY)
+    /// @return btdUpdated True if BTD rate was actually updated
+    /// @return btbUpdated True if BTB rate was actually updated
+    function tryUpdateRates() external returns (bool btdUpdated, bool btbUpdated) {
+        btdUpdated = _tryUpdateBTDRateInternal();
+        btbUpdated = _tryUpdateBTBRateInternal();
+
+        if (btdUpdated || btbUpdated) {
+            emit LazyRateUpdateAttempted(btdUpdated, btbUpdated);
+        }
+    }
+
+    /// @notice Internal function to try updating BTD rate
+    /// @dev Returns false if update is not due or if calculation fails
+    /// @return updated True if rate was successfully updated
+    function _tryUpdateBTDRateInternal() internal returns (bool updated) {
+        // Check if update is due (once per day)
+        if (btdLastRateUpdate != 0 && block.timestamp < btdLastRateUpdate + Constants.SECONDS_PER_DAY) {
+            return false;
+        }
+
+        // Try to update rate, fail silently on any error
+        try this.updateBTDRateLazy() {
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    /// @notice Internal function to try updating BTB rate
+    /// @dev Returns false if update is not due or if calculation fails
+    /// @return updated True if rate was successfully updated
+    function _tryUpdateBTBRateInternal() internal returns (bool updated) {
+        // Check if update is due (once per day)
+        if (btbLastRateUpdate != 0 && block.timestamp < btbLastRateUpdate + Constants.SECONDS_PER_DAY) {
+            return false;
+        }
+
+        // Try to update rate, fail silently on any error
+        try this.updateBTBRateLazy() {
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    /// @notice External entry point for lazy BTD rate update (called via try-catch)
+    /// @dev Only callable by this contract itself for try-catch pattern
+    function updateBTDRateLazy() external {
+        require(msg.sender == address(this), "Only internal call");
+
+        _accruePool(btdPool);
+
+        uint256 price = _currentBTDPriceInIUSD();
+        uint256 cr = _getCollateralRatio();
+        uint256 defaultRateBps = _getDefaultRate();
+
+        uint256 oldRate = btdPool.annualRateBps;
+        uint256 newRate = SigmoidRate.calculateBTDRate(price, cr, defaultRateBps);
+
+        uint256 maxRate = gov.maxBTDRate();
+        if (maxRate > 0 && newRate > maxRate) {
+            newRate = maxRate;
+        }
+
+        btdPool.annualRateBps = newRate;
+        btdLastPrice = price;
+        btdLastRateUpdate = block.timestamp;
+
+        emit BTDAnnualRateUpdated(oldRate, newRate);
+    }
+
+    /// @notice External entry point for lazy BTB rate update (called via try-catch)
+    /// @dev Only callable by this contract itself for try-catch pattern
+    function updateBTBRateLazy() external {
+        require(msg.sender == address(this), "Only internal call");
+
+        _accruePool(btbPool);
+
+        uint256 price = _currentBTBPrice();
+        uint256 cr = _getCollateralRatio();
+        uint256 defaultRateBps = _getDefaultRate();
+
+        uint256 oldRate = btbPool.annualRateBps;
+        uint256 newRate = SigmoidRate.calculateBTBRate(price, cr, defaultRateBps);
+
+        uint256 maxRate = gov.maxBTBRate();
+        if (maxRate > 0 && newRate > maxRate) {
+            newRate = maxRate;
+        }
+
+        btbPool.annualRateBps = newRate;
+        btbLastPrice = price;
+        btbLastRateUpdate = block.timestamp;
+
+        emit BTBAnnualRateUpdated(oldRate, newRate, price, 0);
+    }
+
     // --- Internal staking logic ---
     // Direct user staking functions (_stake, _withdraw, _claim) removed
     // Only stToken vault interface is supported
@@ -367,35 +471,46 @@ contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
 
     /// @notice Stakes BTD to interest pool
     /// @dev Anyone can call, automatically accrues interest and pays out pending interest
+    ///      Also triggers lazy rate update if enough time has passed
     /// @param amount BTD amount to stake, precision 1e18, must be >= minimum stake amount
     function stakeBTD(uint256 amount) external nonReentrant {
         require(amount >= Constants.MIN_STABLECOIN_18_AMOUNT, "Stake amount too small");
         require(amount <= Constants.MAX_STABLECOIN_18_AMOUNT, "Stake amount too large");
+
+        // Lazy rate update - silently attempt to update BTD rate if due
+        _tryUpdateBTDRateInternal();
 
         _accruePool(btdPool);
 
         UserInfo storage user = btdUsers[msg.sender];
         uint256 pendingAmount = _pendingCurrent(btdPool, user);
 
+        // CEI Pattern: Effects before Interactions
+        // Update state variables BEFORE external calls to prevent reentrancy
+        btdPool.token.safeTransferFrom(msg.sender, address(this), amount);
+        user.amount += amount;
+        btdPool.totalStaked += amount;
+        user.rewardDebt = InterestMath.rewardDebtValue(user.amount, btdPool.accInterestPerShare);
+
+        // Interactions: External calls after state updates
         if (pendingAmount > 0) {
             _payout(btdPool, msg.sender, pendingAmount);
             emit InterestClaimed(msg.sender, address(btdPool.token), pendingAmount);
         }
 
-        btdPool.token.safeTransferFrom(msg.sender, address(this), amount);
-        user.amount += amount;
-        btdPool.totalStaked += amount;
-
-        user.rewardDebt = InterestMath.rewardDebtValue(user.amount, btdPool.accInterestPerShare);
         emit Staked(msg.sender, address(btdPool.token), amount);
     }
 
     /// @notice Stakes BTB to interest pool
     /// @dev Anyone can call, automatically accrues interest and pays out pending interest
+    ///      Also triggers lazy rate update if enough time has passed
     /// @param amount BTB amount to stake, precision 1e18, must be >= minimum stake amount
     function stakeBTB(uint256 amount) external nonReentrant {
         require(amount >= Constants.MIN_STABLECOIN_18_AMOUNT, "Stake amount too small");
         require(amount <= Constants.MAX_STABLECOIN_18_AMOUNT, "Stake amount too large");
+
+        // Lazy rate update - silently attempt to update BTB rate if due
+        _tryUpdateBTBRateInternal();
 
         _accruePool(btbPool);
 
@@ -421,10 +536,14 @@ contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
     /// @notice Unstakes BTD
     /// @dev Anyone can call, withdrawal amount can include pending interest
     ///      Proportionally allocates interest and principal, interest portion is minted, principal portion is transferred from contract balance
+    ///      Also triggers lazy rate update if enough time has passed
     /// @param amount BTD amount to unstake (can include pending interest), precision 1e18
     function unstakeBTD(uint256 amount) external nonReentrant {
         require(amount >= Constants.MIN_STABLECOIN_18_AMOUNT, "Unstake amount too small");
         require(amount <= Constants.MAX_STABLECOIN_18_AMOUNT, "Unstake amount too large");
+
+        // Lazy rate update - silently attempt to update BTD rate if due
+        _tryUpdateBTDRateInternal();
 
         _accruePool(btdPool);
 
@@ -462,10 +581,14 @@ contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
     /// @notice Unstakes BTB
     /// @dev Anyone can call, withdrawal amount can include pending interest
     ///      Proportionally allocates interest and principal, interest portion is minted, principal portion is transferred from contract balance
+    ///      Also triggers lazy rate update if enough time has passed
     /// @param amount BTB amount to unstake (can include pending interest), precision 1e18
     function unstakeBTB(uint256 amount) external nonReentrant {
         require(amount >= Constants.MIN_STABLECOIN_18_AMOUNT, "Unstake amount too small");
         require(amount <= Constants.MAX_STABLECOIN_18_AMOUNT, "Unstake amount too large");
+
+        // Lazy rate update - silently attempt to update BTB rate if due
+        _tryUpdateBTBRateInternal();
 
         _accruePool(btbPool);
 

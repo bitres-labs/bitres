@@ -33,8 +33,7 @@ contract ConfigGov is Ownable {
      * @dev Used for managing governable oracle addresses, external contract addresses, etc.
      */
     enum AddressParamType {
-        PCE_FEED,         // 0 - Chainlink PCE oracle address
-        CDY_FEED          // 1 - Chainlink DeFi Yield (CDY) oracle address
+        PCE_FEED          // 0 - Chainlink PCE oracle address
         // Future extensions: BACKUP_PCE_FEED, CPI_FEED, etc.
     }
 
@@ -262,14 +261,5 @@ contract ConfigGov is Ownable {
      */
     function pceFeed() external view returns (address) {
         return _addressParams[AddressParamType.PCE_FEED];
-    }
-
-    /**
-     * @notice Gets CDY Feed oracle address
-     * @dev Chainlink DeFi Yield rate feed for interest rate anchoring
-     * @return CDY Feed address
-     */
-    function cdyFeed() external view returns (address) {
-        return _addressParams[AddressParamType.CDY_FEED];
     }
 }
