@@ -60,10 +60,10 @@ const ADDRESS_MAP = {
     Minter: "Minter",
     InterestPool: "InterestPool",
     FarmingPool: "FarmingPool",
-    StakingRouter: "StakingRouter",
     PriceOracle: "PriceOracle",
     IdealUSDManager: "IdealUSDManager",
     TWAPOracle: "TWAPOracle",
+    Faucet: "Faucet",
   },
   pairs: {
     WBTC_USDC: "PairWBTCUSDC",
@@ -75,7 +75,6 @@ const ADDRESS_MAP = {
     ChainlinkBTCUSD: "ChainlinkBTCUSD",
     ChainlinkWBTCBTC: "ChainlinkWBTCBTC",
     MockPyth: "MockPyth",
-    MockRedstone: "MockRedstone",
   },
   uniswap: {
     UniswapV2Factory: "UniswapV2Factory",
