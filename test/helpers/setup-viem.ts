@@ -42,7 +42,6 @@ export interface SystemContracts {
 
   // Pools
   farmingPool: any;
-  stakingRouter: any;
 
   // Mock oracles
   mockBtcUsd: any;
@@ -223,7 +222,6 @@ export async function deployConfig(
   oracles: Awaited<ReturnType<typeof deployOracles>>,
   pools: Awaited<ReturnType<typeof deployPools>>,
   additionalAddresses: {
-    stakingRouter: `0x${string}`;
     farmingPool: `0x${string}`;
     stBTD: `0x${string}`;
     stBTB: `0x${string}`;
@@ -269,17 +267,17 @@ export async function deployConfig(
  */
 export async function deployPriceOracle(
   configCoreAddress: `0x${string}`,
-  pythId: `0x${string}`
+  pythId: `0x${string}`,
+  twapOracleAddress: `0x${string}` = "0x0000000000000000000000000000000000000000" as `0x${string}`
 ) {
   const [owner] = await getWallets();
-  const dummyAddr = "0x0000000000000000000000000000000000000000" as `0x${string}`;
 
   const priceOracle = await viem.deployContract(
     "contracts/PriceOracle.sol:PriceOracle",
     [
       owner.account.address,          // owner
       configCoreAddress,              // _core (ConfigCore)
-      dummyAddr,                      // twapOracle (unused placeholder)
+      twapOracleAddress,              // twapOracle
       pythId,                         // pythWbtcPriceId (immutable)
     ]
   );
@@ -384,42 +382,33 @@ export async function deployFullSystem(): Promise<SystemContracts> {
   // Step 8: Governor placeholder (VestingVault removed - using fundShares mechanism)
   const governor = owner.account.address; // Placeholder
 
-  // Step 9: Deploy TWAP Oracle (placeholder for now)
-  const twapOracle = owner.account.address; // Placeholder
+  // Step 9: Deploy TWAP Oracle (real contract, no constructor args)
+  const twapOracle = await viem.deployContract(
+    "contracts/UniswapV2TWAPOracle.sol:UniswapV2TWAPOracle",
+    []
+  );
 
-  // Step 10: Deploy FarmingPool temporarily to get its address (needs StakingRouter later)
-  const tempFarmingPool = await viem.deployContract(
+  // Step 10: Deploy ConfigCore FIRST (needed by FarmingPool constructor)
+  // Note: We use placeholder for farmingPool address initially, then set it via setPeripheralContracts
+  const tempConfigCore = await deployConfig(tokens, oracles, pools, {
+    farmingPool: owner.account.address,  // Placeholder - will be set via setPeripheralContracts
+    stBTD: stBTD.address,
+    stBTB: stBTB.address,
+    governor: governor,
+    twapOracle: twapOracle.address
+  });
+
+  // Step 11: Deploy FarmingPool with REAL ConfigCore address
+  const farmingPool = await viem.deployContract(
     "contracts/FarmingPool.sol:FarmingPool",
     [
       owner.account.address,
       tokens.brs.address,
-      owner.account.address,  // Placeholder ConfigCore
-      [],                     // initial pools
-      []                      // initial alloc points
+      tempConfigCore.core.address,  // Real ConfigCore address
+      [],                           // initial pools
+      []                            // initial alloc points
     ]
   );
-
-  // Step 11: Deploy StakingRouter (needs FarmingPool address)
-  const stakingRouter = await viem.deployContract(
-    "contracts/StakingRouter.sol:StakingRouter",
-    [
-      tempFarmingPool.address,  // _farmingPool
-      stBTD.address,            // _stBTD
-      stBTB.address,            // _stBTB
-      0n,                       // _stBTDPoolId (pool 0)
-      1n                        // _stBTBPoolId (pool 1)
-    ]
-  );
-
-  // Step 12: Deploy ConfigCore with addresses (using placeholders for the 5 core contracts)
-  const tempConfigCore = await deployConfig(tokens, oracles, pools, {
-    stakingRouter: stakingRouter.address,
-    farmingPool: tempFarmingPool.address,
-    stBTD: stBTD.address,
-    stBTB: stBTB.address,
-    governor: governor,
-    twapOracle: twapOracle
-  });
 
   // Step 13: Deploy the 5 core contracts with the temporary ConfigCore
   const treasury = await deployTreasury(
@@ -428,15 +417,16 @@ export async function deployFullSystem(): Promise<SystemContracts> {
   );
 
   const pythId = toBytes32("PYTH_WBTC");
-  const redstoneId = toBytes32("REDSTONE_WBTC");
   await oracles.mockPyth.write.setPrice([pythId, 5_000_000_000_000n, -8]);
-  await oracles.mockRedstone.write.setValue([redstoneId, 50_000n * 10n ** 8n]);
 
   const priceOracle = await deployPriceOracle(
     tempConfigCore.core.address,
     pythId,
-    redstoneId
+    twapOracle.address  // Pass real TWAP oracle address
   );
+
+  // Disable TWAP for testing (TWAP requires 30 min observation period)
+  await priceOracle.write.setUseTWAP([false], { account: owner.account });
 
   const interestPool = await viem.deployContract(
     "contracts/InterestPool.sol:InterestPool",
@@ -445,17 +435,6 @@ export async function deployFullSystem(): Promise<SystemContracts> {
       tempConfigCore.core.address,  // Real ConfigCore (with BTD/BTB)
       configGov.address,            // Real ConfigGov
       owner.account.address         // _rateOracle (placeholder)
-    ]
-  );
-
-  const farmingPool = await viem.deployContract(
-    "contracts/FarmingPool.sol:FarmingPool",
-    [
-      owner.account.address,
-      tokens.brs.address,
-      tempConfigCore.core.address,  // Real ConfigCore
-      [],                           // initial pools
-      []                            // initial alloc points
     ]
   );
 
@@ -472,12 +451,11 @@ export async function deployFullSystem(): Promise<SystemContracts> {
 
   // Step 14b: Set peripheral contracts in ConfigCore
   await tempConfigCore.core.write.setPeripheralContracts([
-    stakingRouter.address,    // _stakingRouter
     farmingPool.address,      // _farmingPool
     stBTD.address,            // _stBTD
     stBTB.address,            // _stBTB
     governor,                 // _governor (already an address string)
-    twapOracle,               // _twapOracle (already an address string)
+    twapOracle.address,       // _twapOracle (contract address)
     pools.mockPoolWbtcUsdc.address,  // _poolWbtcUsdc
     pools.mockPoolBtdUsdc.address,   // _poolBtdUsdc
     pools.mockPoolBtbBtd.address,    // _poolBtbBtd
@@ -534,20 +512,20 @@ export async function deployFullSystem(): Promise<SystemContracts> {
 
     // Pools
     farmingPool,
-    stakingRouter,
     stBTD,
     stBTB,
+
+    // TWAP Oracle (real contract)
+    twapOracle,
 
     // Mock oracles
     mockBtcUsd: oracles.mockBtcUsd,
     mockWbtcBtc: oracles.mockWbtcBtc,
     mockPce: oracles.mockPce,
     mockPyth: oracles.mockPyth,
-    mockRedstone: oracles.mockRedstone,
 
     // Oracle IDs (needed for price updates)
     pythId,
-    redstoneId,
 
     // Mock pools
     mockPoolWbtcUsdc: pools.mockPoolWbtcUsdc,

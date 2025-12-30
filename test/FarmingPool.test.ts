@@ -21,7 +21,6 @@ describe("FarmingPool", function () {
   let wbtc: any;
   let btd: any;
   let minter: any;
-  let stakingRouter: any;
 
   beforeEach(async function () {
     const wallets = await getWallets();
@@ -34,7 +33,6 @@ describe("FarmingPool", function () {
     wbtc = system.wbtc;
     btd = system.btd;
     minter = system.minter;
-    stakingRouter = system.stakingRouter;
 
     // Transfer some BRS to FarmingPool for rewards
     const brsAmount = parseEther("100000");

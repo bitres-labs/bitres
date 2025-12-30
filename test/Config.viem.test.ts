@@ -55,8 +55,7 @@ describe("Config Architecture (ConfigCore + ConfigGov - Viem)", function () {
         mockBtcUsd: system.mockBtcUsd,
         mockWbtcBtc: system.mockWbtcBtc,
         mockPce: system.mockPce,
-        mockPyth: system.mockPyth,
-        mockRedstone: system.mockRedstone
+        mockPyth: system.mockPyth
       },
       pools: {
         mockPoolWbtcUsdc: system.mockPoolWbtcUsdc,
@@ -97,11 +96,11 @@ describe("Config Architecture (ConfigCore + ConfigGov - Viem)", function () {
       expect((await config.read.WETH()).toLowerCase()).to.equal(tokens.weth.address.toLowerCase());
     });
 
-    it("should set all 4 oracle feed addresses correctly (immutable)", async function () {
+    it("should set all 3 oracle feed addresses correctly (immutable)", async function () {
+      // Note: Redstone removed - using dual-source validation (Chainlink + Pyth)
       expect((await config.read.CHAINLINK_BTC_USD()).toLowerCase()).to.equal(oracles.mockBtcUsd.address.toLowerCase());
       expect((await config.read.CHAINLINK_WBTC_BTC()).toLowerCase()).to.equal(oracles.mockWbtcBtc.address.toLowerCase());
       expect((await config.read.PYTH_WBTC()).toLowerCase()).to.equal(oracles.mockPyth.address.toLowerCase());
-      expect((await config.read.REDSTONE_WBTC()).toLowerCase()).to.equal(oracles.mockRedstone.address.toLowerCase());
     });
 
     it("should set all 4 pool addresses correctly (immutable)", async function () {

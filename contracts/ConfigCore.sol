@@ -105,10 +105,6 @@ contract ConfigCore {
 
     // ==================== Core Pool Addresses (deferred binding) ====================
 
-    /// @notice Staking router address - handles staking operation routing
-    /// @dev Set once via setPeripheralContracts() and cannot be changed afterward
-    address public STAKING_ROUTER;
-
     /// @notice Farming pool address - BRS liquidity mining
     /// @dev Set once via setPeripheralContracts() and cannot be changed afterward
     address public FARMING_POOL;
@@ -230,7 +226,6 @@ contract ConfigCore {
      * @dev Can only be called once by deployer, permanently locked after deployment
      */
     function setPeripheralContracts(
-        address _stakingRouter,
         address _farmingPool,
         address _stBTD,
         address _stBTB,
@@ -242,7 +237,6 @@ contract ConfigCore {
         address _poolBrsBtd
     ) external onlyDeployer {
         require(!peripheralContractsSet, "Peripheral contracts already set");
-        require(_stakingRouter != address(0), "Invalid StakingRouter");
         require(_farmingPool != address(0), "Invalid FarmingPool");
         require(_stBTD != address(0), "Invalid stBTD");
         require(_stBTB != address(0), "Invalid stBTB");
@@ -253,7 +247,6 @@ contract ConfigCore {
         require(_poolBtbBtd != address(0), "Invalid Pool BTB/BTD");
         require(_poolBrsBtd != address(0), "Invalid Pool BRS/BTD");
 
-        STAKING_ROUTER = _stakingRouter;
         FARMING_POOL = _farmingPool;
         ST_BTD = _stBTD;
         ST_BTB = _stBTB;

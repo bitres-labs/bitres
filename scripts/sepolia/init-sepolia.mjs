@@ -366,7 +366,6 @@ async function main() {
       abi: configCoreAbi,
       functionName: "setPeripheralContracts",
       args: [
-        addresses.StakingRouter,
         addresses.FarmingPool,
         addresses.stBTD,
         addresses.stBTB,

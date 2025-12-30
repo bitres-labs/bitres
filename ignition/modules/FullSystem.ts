@@ -108,18 +108,6 @@ export default buildModule("FullSystemLocal", (m) => {
     id: "FarmingPool",
   });
 
-  const stakingRouter = m.contract(
-    "StakingRouter",
-    [
-      farmingPool,
-      stBTD,
-      stBTB,
-      7, // stBTD poolId (must match FarmingPool config)
-      8, // stBTB poolId
-    ],
-    { after: [farmingPool, stBTD, stBTB], id: "StakingRouter" }
-  );
-
   // ===== 10. BRS Distribution & Governor =====
   // BRS goes to FarmingPool, distributed via fundShares mechanism:
   // - 60% to miners (stakers)
@@ -148,7 +136,6 @@ export default buildModule("FullSystemLocal", (m) => {
     configCore,
     "setPeripheralContracts",
     [
-      stakingRouter,
       farmingPool,
       stBTD,
       stBTB,
@@ -228,7 +215,6 @@ export default buildModule("FullSystemLocal", (m) => {
     minter,
     interestPool,
     farmingPool,
-    stakingRouter,
     priceOracle,
     twapOracle,
     idealUSDManager,

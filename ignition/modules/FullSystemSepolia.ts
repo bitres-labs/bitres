@@ -145,18 +145,6 @@ export default buildModule("FullSystemSepolia", (m) => {
     id: "FarmingPool",
   });
 
-  const stakingRouter = m.contract(
-    "StakingRouter",
-    [
-      farmingPool,
-      stBTD,
-      stBTB,
-      7, // stBTD poolId
-      8, // stBTB poolId
-    ],
-    { after: [farmingPool, stBTD, stBTB], id: "StakingRouter" }
-  );
-
   // ===== 9. BRS Distribution =====
   // Reserve some BRS for:
   // - LP initialization: 1 BRS (for BRS/BTD pair)
@@ -246,7 +234,6 @@ export default buildModule("FullSystemSepolia", (m) => {
     minter,
     interestPool,
     farmingPool,
-    stakingRouter,
     priceOracle,
     twapOracle,
     idealUSDManager,
