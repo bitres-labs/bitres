@@ -123,7 +123,7 @@ export default buildModule("FullSystemSepolia", (m) => {
     { after: [configCore] }
   );
 
-  // ===== 8. Treasury / Minter / InterestPool / FarmingPool / StakingRouter =====
+  // ===== 8. Treasury / Minter / InterestPool / FarmingPool =====
   const treasury = m.contract("Treasury", [deployer, configCore, deployer], {
     after: [configCore],
     id: "Treasury",

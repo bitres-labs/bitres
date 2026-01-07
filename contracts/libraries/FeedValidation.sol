@@ -10,9 +10,9 @@ import "./OracleMath.sol";
  * @dev Provides standardized price data reading interface with automatic precision conversion
  */
 library FeedValidation {
-    /// @notice Maximum staleness for Chainlink price data (1 hour)
-    /// @dev Chainlink BTC/USD updates every ~1 hour, so 1 hour + buffer is reasonable
-    uint256 internal constant MAX_STALENESS = 3600;
+    /// @notice Maximum staleness for Chainlink price data (2 hours)
+    /// @dev Chainlink BTC/USD on Sepolia updates every ~1 hour, 2 hours gives buffer
+    uint256 internal constant MAX_STALENESS = 7200;
 
     /// @notice Maximum staleness for PCE data (35 days)
     /// @dev Chainlink PCE Feed has 35-day heartbeat (monthly macroeconomic data)

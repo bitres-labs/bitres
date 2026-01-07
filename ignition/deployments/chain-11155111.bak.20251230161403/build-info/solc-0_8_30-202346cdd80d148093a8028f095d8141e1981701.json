@@ -1,0 +1,39 @@
+{
+  "_format": "hh3-sol-build-info-1",
+  "id": "solc-0_8_30-202346cdd80d148093a8028f095d8141e1981701",
+  "solcVersion": "0.8.30",
+  "solcLongVersion": "0.8.30+commit.73712a01",
+  "userSourceNameMap": {
+    "contracts/local/MockPyth.sol": "project/contracts/local/MockPyth.sol"
+  },
+  "input": {
+    "language": "Solidity",
+    "settings": {
+      "evmVersion": "prague",
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "outputSelection": {
+        "*": {
+          "": [
+            "ast"
+          ],
+          "*": [
+            "abi",
+            "evm.bytecode",
+            "evm.deployedBytecode",
+            "evm.methodIdentifiers",
+            "metadata"
+          ]
+        }
+      },
+      "remappings": []
+    },
+    "sources": {
+      "project/contracts/local/MockPyth.sol": {
+        "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.20;\n\n/// @notice Simplified Pyth mock for local testing getPriceUnsafe\ncontract MockPyth {\n    struct Price {\n        int64 price;\n        uint64 conf;\n        int32 expo;\n        uint256 publishTime;\n    }\n\n    mapping(bytes32 => Price) private prices;\n\n    function setPrice(bytes32 id, int64 price, int32 expo) external {\n        prices[id] = Price({\n            price: price,\n            conf: 0,\n            expo: expo,\n            publishTime: block.timestamp\n        });\n    }\n\n    function getPriceUnsafe(bytes32 id) external view returns (Price memory) {\n        Price memory p = prices[id];\n        require(p.price != 0, \"Price not set\");\n        // Always return current block.timestamp to prevent staleness in local testing\n        p.publishTime = block.timestamp;\n        return p;\n    }\n}\n"
+      }
+    }
+  }
+}

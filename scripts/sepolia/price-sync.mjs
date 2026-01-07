@@ -38,6 +38,9 @@ const UNISWAP_V2 = {
   ROUTER: "0xeE567Fe1712Faf6149d80dA1E6934E354124CfE3",
 };
 
+// Pyth price ID for WBTC (same as in init-sepolia.mjs)
+const PYTH_WBTC_PRICE_ID = "0x505954485f575442430000000000000000000000000000000000000000000000";
+
 // Configuration (can be overridden by environment variables)
 const CONFIG = {
   SYNC_INTERVAL: parseInt(process.env.SYNC_INTERVAL || "300", 10), // 5 minutes
@@ -81,6 +84,22 @@ const ROUTER_ABI = [
       { name: "amountA", type: "uint256" },
       { name: "amountB", type: "uint256" },
     ],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+];
+
+const SWAP_ABI = [
+  {
+    inputs: [
+      { name: "amountIn", type: "uint256" },
+      { name: "amountOutMin", type: "uint256" },
+      { name: "path", type: "address[]" },
+      { name: "to", type: "address" },
+      { name: "deadline", type: "uint256" },
+    ],
+    name: "swapExactTokensForTokens",
+    outputs: [{ name: "amounts", type: "uint256[]" }],
     stateMutability: "nonpayable",
     type: "function",
   },
@@ -149,8 +168,25 @@ const CHAINLINK_ABI = [
 
 const CONFIG_CORE_ABI = [
   { inputs: [], name: "POOL_WBTC_USDC", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "POOL_BTD_USDC", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "POOL_BTB_BTD", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
+  { inputs: [], name: "POOL_BRS_BTD", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
   { inputs: [], name: "WBTC", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
   { inputs: [], name: "USDC", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
+];
+
+const MOCK_PYTH_ABI = [
+  {
+    inputs: [
+      { name: "id", type: "bytes32" },
+      { name: "price", type: "int64" },
+      { name: "expo", type: "int32" },
+    ],
+    name: "setPrice",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
 ];
 
 function loadAddresses() {
@@ -179,7 +215,7 @@ let isRunning = true;
 let currentTimeout = null;
 
 async function checkAndSync(context) {
-  const { publicClient, owner, addresses, twapOracle } = context;
+  const { publicClient, owner, addresses, twapOracle, mockPythAddress, allPools } = context;
   const { pairAddress, wbtcAddress, usdcAddress, isWbtcToken0 } = context.pool;
 
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
@@ -192,6 +228,23 @@ async function checkAndSync(context) {
       functionName: "latestRoundData",
     });
     const btcPriceUsd = Number(btcPrice) / 1e8;
+
+    // 1.1) Sync MockPyth price with Chainlink
+    if (mockPythAddress) {
+      try {
+        const setPriceTx = await owner.writeContract({
+          address: mockPythAddress,
+          abi: MOCK_PYTH_ABI,
+          functionName: "setPrice",
+          args: [PYTH_WBTC_PRICE_ID, btcPrice, -8],
+          account: owner.account,
+        });
+        await publicClient.waitForTransactionReceipt({ hash: setPriceTx });
+        log(`✓ MockPyth synced: $${btcPriceUsd.toLocaleString()}`);
+      } catch (err) {
+        log(`⚠ MockPyth sync failed: ${err.message?.slice(0, 60) || err}`);
+      }
+    }
 
     // 2) Read current pool reserves
     const [reserve0, reserve1] = await publicClient.readContract({
@@ -215,6 +268,8 @@ async function checkAndSync(context) {
 
     if (priceDiff < CONFIG.DEVIATION_THRESHOLD) {
       log(`✓ Price within ${CONFIG.DEVIATION_THRESHOLD}% tolerance`);
+      // Update TWAP for all pools
+      await updateAllTWAP(twapOracle, allPools, owner, publicClient, log);
       return;
     }
 
@@ -228,113 +283,133 @@ async function checkAndSync(context) {
       args: [owner.account.address],
     });
 
-    if (lpBalance === 0n) {
-      log(`⚠ No LP tokens to rebalance`);
-      return;
-    }
+    // Use swap to correct the price
+    // Pool price low = buy WBTC (sell USDC)
+    // Pool price high = sell WBTC (buy USDC)
 
-    // Approve LP tokens
-    const approveLpTx = await owner.writeContract({
-      address: pairAddress,
-      abi: ERC20_ABI,
-      functionName: "approve",
-      args: [UNISWAP_V2.ROUTER, lpBalance],
-      account: owner.account,
-    });
-    await publicClient.waitForTransactionReceipt({ hash: approveLpTx });
+    // Calculate how much to swap using x*y=k formula
+    // Target: newUsdcReserve / newWbtcReserve = btcPriceUsd * 1e6 / 1e8
+    // Let's find the swap amount needed
 
-    // Remove liquidity
-    const removeTx = await owner.writeContract({
-      address: UNISWAP_V2.ROUTER,
-      abi: ROUTER_ABI,
-      functionName: "removeLiquidity",
-      args: [wbtcAddress, usdcAddress, lpBalance, 0n, 0n, owner.account.address, deadline],
-      account: owner.account,
-    });
-    await publicClient.waitForTransactionReceipt({ hash: removeTx });
+    // Price = (usdcReserve / 1e6) / (wbtcReserve / 1e8) = usdcReserve * 100 / wbtcReserve
+    // So: usdcReserve / wbtcReserve = price / 100
+    const targetRatio = btcPriceUsd / 100;
+    const currentRatio = Number(usdcReserve) / Number(wbtcReserve);
 
-    // Get token balances
-    const wbtcBal = await publicClient.readContract({
-      address: wbtcAddress,
-      abi: ERC20_ABI,
-      functionName: "balanceOf",
-      args: [owner.account.address],
-    });
-    const usdcBal = await publicClient.readContract({
-      address: usdcAddress,
-      abi: ERC20_ABI,
-      functionName: "balanceOf",
-      args: [owner.account.address],
-    });
+    if (currentPoolPrice < btcPriceUsd) {
+      // Pool price too low -> buy WBTC with USDC
+      // After swap: (usdcReserve + usdcIn) * (wbtcReserve - wbtcOut) = k
+      // And: (usdcReserve + usdcIn) / (wbtcReserve - wbtcOut) = targetRatio
 
-    // Calculate correct amounts
-    const wbtcToUse = wbtcBal;
-    const usdcNeeded = BigInt(Math.floor((Number(wbtcToUse) / 1e8) * btcPriceUsd * 1e6));
+      // Solve for usdcIn:
+      // Let k = usdcReserve * wbtcReserve
+      // newUsdc = sqrt(k * targetRatio), newWbtc = sqrt(k / targetRatio)
+      // usdcIn = newUsdc - usdcReserve
 
-    let finalWbtc = wbtcToUse;
-    let finalUsdc = usdcNeeded <= usdcBal ? usdcNeeded : usdcBal;
+      const k = Number(usdcReserve) * Number(wbtcReserve);
+      const newUsdcFloat = Math.sqrt(k * targetRatio);
+      const usdcIn = BigInt(Math.ceil(newUsdcFloat - Number(usdcReserve)));
 
-    if (usdcNeeded > usdcBal) {
-      finalUsdc = usdcBal;
-      finalWbtc = BigInt(Math.floor((Number(usdcBal) / 1e6 / btcPriceUsd) * 1e8));
-      if (finalWbtc > wbtcBal) finalWbtc = wbtcBal;
-    }
+      if (usdcIn <= 0n) {
+        log(`⚠ Calculated usdcIn <= 0, skipping`);
+        return;
+      }
 
-    if (finalWbtc > 0n && finalUsdc > 0n) {
-      // Approve tokens
-      const approveTxA = await owner.writeContract({
-        address: wbtcAddress,
-        abi: ERC20_ABI,
-        functionName: "approve",
-        args: [UNISWAP_V2.ROUTER, finalWbtc],
-        account: owner.account,
-      });
-      await publicClient.waitForTransactionReceipt({ hash: approveTxA });
+      log(`   Swapping ${Number(usdcIn) / 1e6} USDC -> WBTC...`);
 
-      const approveTxB = await owner.writeContract({
+      // Approve USDC
+      const approveTx = await owner.writeContract({
         address: usdcAddress,
         abi: ERC20_ABI,
         functionName: "approve",
-        args: [UNISWAP_V2.ROUTER, finalUsdc],
+        args: [UNISWAP_V2.ROUTER, usdcIn],
         account: owner.account,
       });
-      await publicClient.waitForTransactionReceipt({ hash: approveTxB });
+      await publicClient.waitForTransactionReceipt({ hash: approveTx });
 
-      // Add liquidity
-      const addLiqTx = await owner.writeContract({
+      // Swap USDC -> WBTC
+      const swapTx = await owner.writeContract({
         address: UNISWAP_V2.ROUTER,
-        abi: ROUTER_ABI,
-        functionName: "addLiquidity",
-        args: [wbtcAddress, usdcAddress, finalWbtc, finalUsdc, 0n, 0n, owner.account.address, deadline],
+        abi: SWAP_ABI,
+        functionName: "swapExactTokensForTokens",
+        args: [usdcIn, 0n, [usdcAddress, wbtcAddress], owner.account.address, deadline],
         account: owner.account,
       });
-      await publicClient.waitForTransactionReceipt({ hash: addLiqTx });
+      await publicClient.waitForTransactionReceipt({ hash: swapTx });
 
-      // Verify
-      const [newR0, newR1] = await publicClient.readContract({
-        address: pairAddress,
-        abi: PAIR_ABI,
-        functionName: "getReserves",
+    } else {
+      // Pool price too high -> sell WBTC for USDC
+      const k = Number(usdcReserve) * Number(wbtcReserve);
+      const newWbtcFloat = Math.sqrt(k / targetRatio);
+      const wbtcIn = BigInt(Math.ceil(newWbtcFloat - Number(wbtcReserve)));
+
+      if (wbtcIn <= 0n) {
+        log(`⚠ Calculated wbtcIn <= 0, skipping`);
+        return;
+      }
+
+      log(`   Swapping ${Number(wbtcIn) / 1e8} WBTC -> USDC...`);
+
+      // Approve WBTC
+      const approveTx = await owner.writeContract({
+        address: wbtcAddress,
+        abi: ERC20_ABI,
+        functionName: "approve",
+        args: [UNISWAP_V2.ROUTER, wbtcIn],
+        account: owner.account,
       });
-      const newWbtcReserve = isWbtcToken0 ? newR0 : newR1;
-      const newUsdcReserve = isWbtcToken0 ? newR1 : newR0;
-      const newPoolPrice = (Number(newUsdcReserve) / 1e6) / (Number(newWbtcReserve) / 1e8);
-      const newDeviation = Math.abs(newPoolPrice - btcPriceUsd) / btcPriceUsd * 100;
+      await publicClient.waitForTransactionReceipt({ hash: approveTx });
 
-      log(`✓ Rebalanced: $${newPoolPrice.toLocaleString()} (deviation: ${newDeviation.toFixed(2)}%)`);
+      // Swap WBTC -> USDC
+      const swapTx = await owner.writeContract({
+        address: UNISWAP_V2.ROUTER,
+        abi: SWAP_ABI,
+        functionName: "swapExactTokensForTokens",
+        args: [wbtcIn, 0n, [wbtcAddress, usdcAddress], owner.account.address, deadline],
+        account: owner.account,
+      });
+      await publicClient.waitForTransactionReceipt({ hash: swapTx });
     }
 
-    // 4) Take TWAP observation (only if >= 30 min since last update)
-    try {
-      const updateTx = await twapOracle.write.updateIfNeeded([pairAddress], { account: owner.account });
-      await publicClient.waitForTransactionReceipt({ hash: updateTx });
-      log(`✓ TWAP observation recorded`);
-    } catch (err) {
-      log(`⚠ TWAP update failed: ${err.message?.slice(0, 60) || err}`);
-    }
+    // Verify new price
+    const [newR0, newR1] = await publicClient.readContract({
+      address: pairAddress,
+      abi: PAIR_ABI,
+      functionName: "getReserves",
+    });
+    const newWbtcReserve = isWbtcToken0 ? newR0 : newR1;
+    const newUsdcReserve = isWbtcToken0 ? newR1 : newR0;
+    const newPoolPrice = (Number(newUsdcReserve) / 1e6) / (Number(newWbtcReserve) / 1e8);
+    const newDeviation = Math.abs(newPoolPrice - btcPriceUsd) / btcPriceUsd * 100;
+
+    log(`✓ Synced: $${newPoolPrice.toLocaleString()} (deviation: ${newDeviation.toFixed(2)}%)`);
+
+    // 4) Update TWAP for all pools
+    await updateAllTWAP(twapOracle, allPools, owner, publicClient, log);
 
   } catch (err) {
     log(`❌ Error: ${err.message || err}`);
+  }
+}
+
+// Update TWAP observations for all pools
+async function updateAllTWAP(twapOracle, allPools, owner, publicClient, log) {
+  const poolNames = Object.keys(allPools);
+  let updated = 0;
+
+  for (const name of poolNames) {
+    const poolAddr = allPools[name];
+    try {
+      const updateTx = await twapOracle.write.updateIfNeeded([poolAddr], { account: owner.account });
+      await publicClient.waitForTransactionReceipt({ hash: updateTx });
+      updated++;
+    } catch (err) {
+      // Silently skip if not needed (will throw if < 30 min since last update)
+    }
+  }
+
+  if (updated > 0) {
+    log(`✓ TWAP observations updated: ${updated}/${poolNames.length} pools`);
   }
 }
 
@@ -387,7 +462,27 @@ async function main() {
     abi: CONFIG_CORE_ABI,
     functionName: "USDC",
   });
-  log(`Pool: ${pairAddress}`);
+
+  // Read all pool addresses for TWAP updates
+  const allPools = {
+    WBTC_USDC: pairAddress,
+    BTD_USDC: await publicClient.readContract({
+      address: addresses.ConfigCore,
+      abi: CONFIG_CORE_ABI,
+      functionName: "POOL_BTD_USDC",
+    }),
+    BTB_BTD: await publicClient.readContract({
+      address: addresses.ConfigCore,
+      abi: CONFIG_CORE_ABI,
+      functionName: "POOL_BTB_BTD",
+    }),
+    BRS_BTD: await publicClient.readContract({
+      address: addresses.ConfigCore,
+      abi: CONFIG_CORE_ABI,
+      functionName: "POOL_BRS_BTD",
+    }),
+  };
+  log(`Pool WBTC/USDC: ${pairAddress}`);
 
   // Determine token order
   const token0 = await publicClient.readContract({
@@ -397,11 +492,21 @@ async function main() {
   });
   const isWbtcToken0 = token0.toLowerCase() === wbtcAddress.toLowerCase();
 
+  // Get MockPyth address
+  const mockPythAddress = addresses.MockPyth;
+  if (!mockPythAddress) {
+    log("⚠ MockPyth address not found - Pyth sync disabled");
+  } else {
+    log(`MockPyth: ${mockPythAddress}`);
+  }
+
   const context = {
     publicClient,
     owner,
     addresses,
     twapOracle,
+    mockPythAddress,
+    allPools,
     pool: {
       pairAddress,
       wbtcAddress,

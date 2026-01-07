@@ -84,7 +84,7 @@ export default buildModule("FullSystemLocal", (m) => {
     { after: [configCore] }
   );
 
-  // ===== 9. Treasury / Minter / InterestPool / FarmingPool / StakingRouter =====
+  // ===== 9. Treasury / Minter / InterestPool / FarmingPool =====
   const treasury = m.contract("Treasury", [deployer, configCore, deployer], {
     after: [configCore],
     id: "Treasury",
