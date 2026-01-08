@@ -2,7 +2,7 @@
 // Compatible with OpenZeppelin Contracts ^5.4.0
 pragma solidity ^0.8.30;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -34,7 +34,7 @@ import "./libraries/SigmoidRate.sol";
 ///         - Range: 2%-20%, with ΔCR = 3×(1-CR)/0.8 when CR < 100%
 ///
 /// @dev Only stBTD and stBTB vault contracts are authorized to call deposit/withdraw functions.
-contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
+contract InterestPool is Ownable2Step, ReentrancyGuard, IInterestPool {
     using SafeERC20 for IMintableERC20;
 
     // Fallback default rate when gov parameter is not set (5% = 500 bps)
@@ -59,6 +59,7 @@ contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
 
     Pool public btdPool;
     Pool public btbPool;
+    bool public initialized;
 
     mapping(address => UserInfo) private btdUsers;
     mapping(address => UserInfo) private btbUsers;
@@ -93,6 +94,13 @@ contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
         core = ConfigCore(_core);
         gov = ConfigGov(_gov);
         rateOracle = _rateOracle;
+        // Note: btdPool and btbPool are initialized via initialize() after all contracts are deployed
+    }
+
+    /// @notice Initialize pools after all contracts are deployed
+    /// @dev Must be called once after ConfigCore has BTD/BTB addresses set
+    function initialize() external onlyOwner {
+        require(!initialized, "InterestPool: already initialized");
 
         address btdAddress = core.BTD();
         address btbAddress = core.BTB();
@@ -103,7 +111,7 @@ contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
             totalStaked: 0,
             accInterestPerShare: 0,
             lastAccrual: block.timestamp,
-            annualRateBps: FALLBACK_DEFAULT_RATE_BPS  // Initial rate = fallback default rate
+            annualRateBps: FALLBACK_DEFAULT_RATE_BPS
         });
 
         btbPool = Pool({
@@ -111,9 +119,10 @@ contract InterestPool is Ownable, ReentrancyGuard, IInterestPool {
             totalStaked: 0,
             accInterestPerShare: 0,
             lastAccrual: block.timestamp,
-            annualRateBps: FALLBACK_DEFAULT_RATE_BPS  // Initial rate = fallback default rate
+            annualRateBps: FALLBACK_DEFAULT_RATE_BPS
         });
 
+        initialized = true;
     }
 
     // --- User-facing staking functions removed ---

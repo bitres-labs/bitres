@@ -138,6 +138,12 @@ export default buildModule("FullSystemSepolia", (m) => {
     id: "InterestPool",
   });
 
+  // Initialize InterestPool after deployment (reads BTD/BTB from ConfigCore)
+  m.call(interestPool, "initialize", [], {
+    id: "InterestPoolInitialize",
+    after: [interestPool, configCore],
+  });
+
   // FarmingPool fund split: Treasury 20%, Foundation 10%, Team 10%
   // Uses real addresses: Treasury (contract), Foundation, Team
   const farmingPool = m.contract("FarmingPool", [deployer, brs, configCore, [treasury, FUND_ADDRESSES.foundation, FUND_ADDRESSES.team], [20, 10, 10]], {
@@ -192,12 +198,24 @@ export default buildModule("FullSystemSepolia", (m) => {
 
   // ===== 12. Grant MINTER_ROLE =====
   const MINTER_ROLE = keccak256(toHex("MINTER_ROLE"));
-  m.call(btd, "grantRole", [MINTER_ROLE, minter], { id: "BTDGrantMinterRoleMinter" });
-  m.call(btd, "grantRole", [MINTER_ROLE, interestPool], { id: "BTDGrantMinterRoleInterestPool" });
-  m.call(btb, "grantRole", [MINTER_ROLE, minter], { id: "BTBGrantMinterRoleMinter" });
-  m.call(btb, "grantRole", [MINTER_ROLE, interestPool], { id: "BTBGrantMinterRoleInterestPool" });
+  const DEFAULT_ADMIN_ROLE = "0x0000000000000000000000000000000000000000000000000000000000000000";
 
-  // ===== 13. Faucet (test token distribution) =====
+  const btdGrantMinter = m.call(btd, "grantRole", [MINTER_ROLE, minter], { id: "BTDGrantMinterRoleMinter" });
+  const btdGrantInterest = m.call(btd, "grantRole", [MINTER_ROLE, interestPool], { id: "BTDGrantMinterRoleInterestPool" });
+  const btbGrantMinter = m.call(btb, "grantRole", [MINTER_ROLE, minter], { id: "BTBGrantMinterRoleMinter" });
+  const btbGrantInterest = m.call(btb, "grantRole", [MINTER_ROLE, interestPool], { id: "BTBGrantMinterRoleInterestPool" });
+
+  // ===== 13. Renounce admin roles to permanently lock permissions =====
+  m.call(btd, "renounceRole", [DEFAULT_ADMIN_ROLE, deployer], {
+    id: "BTDRenounceAdmin",
+    after: [btdGrantMinter, btdGrantInterest],
+  });
+  m.call(btb, "renounceRole", [DEFAULT_ADMIN_ROLE, deployer], {
+    id: "BTBRenounceAdmin",
+    after: [btbGrantMinter, btbGrantInterest],
+  });
+
+  // ===== 14. Faucet (test token distribution) =====
   const faucet = m.contract("contracts/local/Faucet.sol:Faucet", [wbtc, usdc, usdt, deployer], {
     id: "Faucet",
     after: [wbtc, usdc, usdt],

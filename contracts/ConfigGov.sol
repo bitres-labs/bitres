@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "./libraries/Constants.sol";
 
 /**
@@ -10,7 +10,7 @@ import "./libraries/Constants.sol";
  * @dev Separated from ConfigCore: Core manages immutable addresses, Gov manages mutable parameters
  *      Governance logic can be upgraded without affecting core architecture
  */
-contract ConfigGov is Ownable {
+contract ConfigGov is Ownable2Step {
 
     /**
      * @notice Parameter type enum (uint256 type)

@@ -18,14 +18,12 @@ export default buildModule("FullSystemLocal", (m) => {
   const usdt = m.contract("contracts/local/MockUSDT.sol:MockUSDT", [deployer], { id: "USDT" });
   const weth = m.contract("contracts/local/MockWETH.sol:MockWETH", [deployer], { id: "WETH" });
 
-  // ===== 2. Core tokens =====
+  // ===== 2. BRS token (fixed supply, minted at deployment) =====
   const brs = m.contract("BRS", [deployer], { id: "BRS" });
+
+  // ===== 3. BTD & BTB (with deployer as admin) =====
   const btd = m.contract("BTD", [deployer], { id: "BTD" });
   const btb = m.contract("BTB", [deployer], { id: "BTB" });
-
-  // ===== 3. stTokens (pure ERC4626) =====
-  const stBTD = m.contract("stBTD", [btd], { id: "stBTD" });
-  const stBTB = m.contract("stBTB", [btb], { id: "stBTB" });
 
   // ===== 4. Mock oracles =====
   const chainlinkBtcUsd = m.contract(
@@ -38,53 +36,43 @@ export default buildModule("FullSystemLocal", (m) => {
     [BigInt(1e8)],
     { id: "ChainlinkWBTCBTC" }
   );
+  const chainlinkUsdcUsd = m.contract(
+    "contracts/local/MockAggregatorV3.sol:MockAggregatorV3",
+    [BigInt(1e8)], // $1.00
+    { id: "ChainlinkUSDCUSD" }
+  );
+  const chainlinkUsdtUsd = m.contract(
+    "contracts/local/MockAggregatorV3.sol:MockAggregatorV3",
+    [BigInt(1e8)], // $1.00
+    { id: "ChainlinkUSDTUSD" }
+  );
   const mockPyth = m.contract("contracts/local/MockPyth.sol:MockPyth", [], { id: "MockPyth" });
 
-  // ===== 5. Mock pairs (Uniswap V2) =====
-  const pairWbtcUsdc = m.contract("contracts/local/UniswapV2Pair.sol:UniswapV2Pair", [], { id: "PairWBTCUSDC" });
-  const pairBtdUsdc = m.contract("contracts/local/UniswapV2Pair.sol:UniswapV2Pair", [], { id: "PairBTDUSDC" });
-  const pairBtbBtd = m.contract("contracts/local/UniswapV2Pair.sol:UniswapV2Pair", [], { id: "PairBTBBTD" });
-  const pairBrsBtd = m.contract("contracts/local/UniswapV2Pair.sol:UniswapV2Pair", [], { id: "PairBRSBTD" });
-
-  // initialize pairs token0/token1
-  m.call(pairWbtcUsdc, "initialize", [wbtc, usdc], { id: "InitPairWBTCUSDC" });
-  m.call(pairBtdUsdc, "initialize", [btd, usdc], { id: "InitPairBTDUSDC" });
-  m.call(pairBtbBtd, "initialize", [btb, btd], { id: "InitPairBTBBTD" });
-  m.call(pairBrsBtd, "initialize", [brs, btd], { id: "InitPairBRSBTD" });
-
-  // ===== 6. Config contracts =====
-  // Note: Chainlink USDC/USD and USDT/USD feeds use mock BTC/USD for local testing
-  const configCore = m.contract(
-    "ConfigCore",
-    [wbtc, btd, btb, brs, weth, usdc, usdt, chainlinkBtcUsd, chainlinkWbtcBtc, mockPyth, chainlinkBtcUsd, chainlinkBtcUsd],
-    { id: "ConfigCore" }
-  );
-
+  // ===== 5. ConfigGov =====
   const configGov = m.contract("ConfigGov", [deployer], { id: "ConfigGov" });
 
-  // ===== 7. IdealUSDManager (uses ConfigGov) =====
-  // Requires ConfigGov PCE feed to be set first
+  // ===== 6. IdealUSDManager =====
   const idealUSDManager = m.contract("IdealUSDManager", [deployer, configGov, DEFAULTS.iusdInitial], {
     id: "IdealUSDManager",
     after: [m.call(configGov, "setAddressParam", [0, DEFAULTS.initialPceFeed], { id: "SetPceFeed" })],
   });
 
+  // ===== 7. ConfigCore (with BTD/BTB as immutable) =====
+  const configCore = m.contract(
+    "ConfigCore",
+    [wbtc, btd, btb, brs, weth, usdc, usdt, chainlinkBtcUsd, chainlinkWbtcBtc, mockPyth, chainlinkUsdcUsd, chainlinkUsdtUsd],
+    { id: "ConfigCore", after: [btd, btb] }
+  );
+
   // ===== 8. PriceOracle + TWAP =====
-  // Deploy TWAP first, then PriceOracle, then wire it via setTWAPOracle
-  // Note: Redstone removed - using dual-source validation (Chainlink + Pyth)
   const twapOracle = m.contract("UniswapV2TWAPOracle", [], { id: "TWAPOracle" });
   const priceOracle = m.contract(
     "PriceOracle",
-    [
-      deployer,
-      configCore,
-      twapOracle, // initial TWAP Oracle (can be replaced later)
-      DEFAULTS.pythPriceId,
-    ],
+    [deployer, configCore, twapOracle, DEFAULTS.pythPriceId],
     { after: [configCore] }
   );
 
-  // ===== 9. Treasury / Minter / InterestPool / FarmingPool =====
+  // ===== 9. Treasury / Minter / InterestPool =====
   const treasury = m.contract("Treasury", [deployer, configCore, deployer], {
     after: [configCore],
     id: "Treasury",
@@ -93,14 +81,52 @@ export default buildModule("FullSystemLocal", (m) => {
     after: [configCore, configGov],
     id: "Minter",
   });
-
-  // rateOracle uses deployer as placeholder
   const interestPool = m.contract("InterestPool", [deployer, configCore, configGov, deployer], {
     after: [configCore, configGov],
     id: "InterestPool",
   });
 
-  // FarmingPool fund split: Treasury 20%, Foundation(account1) 10%, Team(account2) 10%
+  // ===== 10. Initialize InterestPool (reads BTD/BTB from ConfigCore) =====
+  m.call(interestPool, "initialize", [], {
+    id: "InterestPoolInitialize",
+    after: [interestPool, configCore],
+  });
+
+  // ===== 11. Grant MINTER_ROLE to Minter and InterestPool =====
+  const MINTER_ROLE = keccak256(toHex("MINTER_ROLE"));
+  const DEFAULT_ADMIN_ROLE = "0x0000000000000000000000000000000000000000000000000000000000000000";
+
+  const btdGrantMinter = m.call(btd, "grantRole", [MINTER_ROLE, minter], { id: "BTDGrantMinterRoleMinter" });
+  const btdGrantInterest = m.call(btd, "grantRole", [MINTER_ROLE, interestPool], { id: "BTDGrantMinterRoleInterestPool" });
+  const btbGrantMinter = m.call(btb, "grantRole", [MINTER_ROLE, minter], { id: "BTBGrantMinterRoleMinter" });
+  const btbGrantInterest = m.call(btb, "grantRole", [MINTER_ROLE, interestPool], { id: "BTBGrantMinterRoleInterestPool" });
+
+  // ===== 12. Renounce admin roles to permanently lock permissions =====
+  m.call(btd, "renounceRole", [DEFAULT_ADMIN_ROLE, deployer], {
+    id: "BTDRenounceAdmin",
+    after: [btdGrantMinter, btdGrantInterest],
+  });
+  m.call(btb, "renounceRole", [DEFAULT_ADMIN_ROLE, deployer], {
+    id: "BTBRenounceAdmin",
+    after: [btbGrantMinter, btbGrantInterest],
+  });
+
+  // ===== 13. stTokens (need BTD/BTB) =====
+  const stBTD = m.contract("stBTD", [btd], { id: "stBTD", after: [btd] });
+  const stBTB = m.contract("stBTB", [btb], { id: "stBTB", after: [btb] });
+
+  // ===== 14. Mock pairs (Uniswap V2) =====
+  const pairWbtcUsdc = m.contract("contracts/local/UniswapV2Pair.sol:UniswapV2Pair", [], { id: "PairWBTCUSDC" });
+  const pairBtdUsdc = m.contract("contracts/local/UniswapV2Pair.sol:UniswapV2Pair", [], { id: "PairBTDUSDC", after: [btd] });
+  const pairBtbBtd = m.contract("contracts/local/UniswapV2Pair.sol:UniswapV2Pair", [], { id: "PairBTBBTD", after: [btd, btb] });
+  const pairBrsBtd = m.contract("contracts/local/UniswapV2Pair.sol:UniswapV2Pair", [], { id: "PairBRSBTD", after: [btd] });
+
+  m.call(pairWbtcUsdc, "initialize", [wbtc, usdc], { id: "InitPairWBTCUSDC" });
+  m.call(pairBtdUsdc, "initialize", [btd, usdc], { id: "InitPairBTDUSDC", after: [btd] });
+  m.call(pairBtbBtd, "initialize", [btb, btd], { id: "InitPairBTBBTD", after: [btd, btb] });
+  m.call(pairBrsBtd, "initialize", [brs, btd], { id: "InitPairBRSBTD", after: [btd] });
+
+  // ===== 15. FarmingPool =====
   const foundation = m.getAccount(1);
   const team = m.getAccount(2);
   const farmingPool = m.contract("FarmingPool", [deployer, brs, configCore, [treasury, foundation, team], [20, 10, 10]], {
@@ -108,106 +134,73 @@ export default buildModule("FullSystemLocal", (m) => {
     id: "FarmingPool",
   });
 
-  // ===== 10. BRS Distribution & Governor =====
-  // BRS goes to FarmingPool, distributed via fundShares mechanism:
-  // - 60% to miners (stakers)
-  // - 20% to Treasury
-  // - 10% to Foundation
-  // - 10% to Team
+  // ===== 16. BRS Distribution =====
   const totalSupply = 2100000000n * 10n ** 18n;
-  const reservedForLP = 1n * 10n ** 18n; // 1 BRS for initial LP
+  const reservedForLP = 1n * 10n ** 18n;
   const toFarmingPool = totalSupply - reservedForLP;
 
-  // Transfer most BRS to FarmingPool, keep 1 BRS for LP initialization
   m.call(brs, "transfer", [farmingPool, toFarmingPool], {
     from: deployer,
     id: "TransferBRSToFarmingPool",
   });
 
-  // Governor placeholder: use deployer to avoid zero address
   const governor = deployer;
 
-  // ===== 11. Fill ConfigCore core/peripheral addresses =====
+  // ===== 17. Fill ConfigCore addresses =====
   m.call(configCore, "setCoreContracts", [treasury, minter, priceOracle, idealUSDManager, interestPool], {
     from: deployer,
   });
 
-  m.call(
+  const setPeripheral = m.call(
     configCore,
     "setPeripheralContracts",
-    [
-      farmingPool,
-      stBTD,
-      stBTB,
-      governor,
-      twapOracle,
-      pairWbtcUsdc,
-      pairBtdUsdc,
-      pairBtbBtd,
-      pairBrsBtd,
-    ],
-    { from: deployer }
+    [farmingPool, stBTD, stBTB, governor, twapOracle, pairWbtcUsdc, pairBtdUsdc, pairBtbBtd, pairBrsBtd],
+    { from: deployer, id: "SetPeripheralContracts" }
   );
 
-  // ===== 12. ConfigGov params =====
-  // ParamType enum: 0=MINT_FEE_BP, 1=INTEREST_FEE_BP, 2=MIN_BTB_PRICE, 3=MAX_BTB_RATE,
-  //                 4=PCE_MAX_DEVIATION, 5=REDEEM_FEE_BP, 6=MAX_BTD_RATE
+  // Renounce ownership after all configuration is complete
+  m.call(configCore, "renounceOwnership", [], {
+    from: deployer,
+    id: "RenounceOwnership",
+    after: [setPeripheral],
+  });
+
+  // ===== 18. ConfigGov params =====
   m.call(
     configGov,
     "setParamsBatch",
     [
       [0, 1, 2, 3, 4, 5, 6],
       [
-        50, // mintFeeBP 0.5%
-        1000, // interestFeeBP 10%
-        5n * 10n ** 17n, // minBTBPrice 0.5 BTD
-        2000, // maxBTBRate 20% (2000 bps, per whitepaper)
-        1n * 10n ** 16n, // PCE deviation 1%
-        50, // redeemFeeBP 0.5%
-        2000, // maxBTDRate 20% (2000 bps, per whitepaper)
+        50,                    // mintFeeBP 0.5%
+        1000,                  // interestFeeBP 10%
+        5n * 10n ** 17n,       // minBTBPrice 0.5 BTD
+        2000,                  // maxBTBRate 20%
+        1n * 10n ** 16n,       // PCE deviation 1%
+        50,                    // redeemFeeBP 0.5%
+        2000,                  // maxBTDRate 20%
       ],
     ],
     { id: "ConfigGovSetParams" }
   );
 
-  // ===== 13. Grant MINTER_ROLE to Minter & InterestPool =====
-  const MINTER_ROLE = keccak256(toHex("MINTER_ROLE"));
-  m.call(btd, "grantRole", [MINTER_ROLE, minter], { id: "BTDGrantMinterRoleMinter" });
-  m.call(btd, "grantRole", [MINTER_ROLE, interestPool], { id: "BTDGrantMinterRoleInterestPool" });
-  m.call(btb, "grantRole", [MINTER_ROLE, minter], { id: "BTBGrantMinterRoleMinter" });
-  m.call(btb, "grantRole", [MINTER_ROLE, interestPool], { id: "BTBGrantMinterRoleInterestPool" });
-
-  // ===== 14. Faucet (test token distribution) =====
+  // ===== 19. Faucet =====
   const faucet = m.contract("contracts/local/Faucet.sol:Faucet", [wbtc, usdc, usdt, deployer], {
     id: "Faucet",
     after: [wbtc, usdc, usdt],
   });
 
-  // Transfer tokens to Faucet: 10M WBTC, 500M USDC, 500M USDT
-  const FAUCET_WBTC = 10_000_000n * 10n ** 8n;  // 10 million WBTC (8 decimals)
-  const FAUCET_USDC = 500_000_000n * 10n ** 6n; // 500 million USDC (6 decimals)
-  const FAUCET_USDT = 500_000_000n * 10n ** 6n; // 500 million USDT (6 decimals)
+  const FAUCET_WBTC = 10_000_000n * 10n ** 8n;
+  const FAUCET_USDC = 500_000_000n * 10n ** 6n;
+  const FAUCET_USDT = 500_000_000n * 10n ** 6n;
 
-  m.call(wbtc, "transfer", [faucet, FAUCET_WBTC], {
-    from: deployer,
-    id: "TransferWBTCToFaucet",
-    after: [faucet],
-  });
-  m.call(usdc, "transfer", [faucet, FAUCET_USDC], {
-    from: deployer,
-    id: "TransferUSDCToFaucet",
-    after: [faucet],
-  });
-  m.call(usdt, "transfer", [faucet, FAUCET_USDT], {
-    from: deployer,
-    id: "TransferUSDTToFaucet",
-    after: [faucet],
-  });
+  m.call(wbtc, "transfer", [faucet, FAUCET_WBTC], { from: deployer, id: "TransferWBTCToFaucet", after: [faucet] });
+  m.call(usdc, "transfer", [faucet, FAUCET_USDC], { from: deployer, id: "TransferUSDCToFaucet", after: [faucet] });
+  m.call(usdt, "transfer", [faucet, FAUCET_USDT], { from: deployer, id: "TransferUSDTToFaucet", after: [faucet] });
 
-  // Output
   return {
     tokens: { wbtc, usdc, usdt, weth, brs, btd, btb, stBTD, stBTB },
-    mocks: { chainlinkBtcUsd, chainlinkWbtcBtc, mockPyth },
+    mocks: { chainlinkBtcUsd, chainlinkWbtcBtc, chainlinkUsdcUsd, chainlinkUsdtUsd, mockPyth },
     pairs: { pairWbtcUsdc, pairBtdUsdc, pairBtbBtd, pairBrsBtd },
     configCore,
     configGov,

@@ -380,6 +380,17 @@ async function main() {
     });
     await publicClient.waitForTransactionReceipt({ hash: setPeripheralTx });
     console.log("   ✓ Peripheral contracts set with official Uniswap V2 pairs");
+
+    // Renounce ownership after all configuration is complete
+    const renounceTx = await owner.writeContract({
+      address: configCore.address,
+      abi: configCoreAbi,
+      functionName: "renounceOwnership",
+      args: [],
+      account: owner.account,
+    });
+    await publicClient.waitForTransactionReceipt({ hash: renounceTx });
+    console.log("   ✓ Ownership renounced");
   }
 
   // =========================================================================

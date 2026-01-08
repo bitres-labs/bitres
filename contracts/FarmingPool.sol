@@ -3,7 +3,7 @@ pragma solidity ^0.8.30;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./interfaces/IFarmingPool.sol";
 import "./interfaces/ITreasury.sol";
@@ -13,7 +13,7 @@ import "./libraries/RewardMath.sol";
 import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
 
 /// @notice Minimal Farm contract: responsible for distributing pre-minted BRS, no longer has minting or pause privileges
-contract FarmingPool is Ownable, ReentrancyGuard, IFarmingPool {
+contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
     using SafeERC20 for IERC20;
 
     IERC20 public immutable rewardToken;

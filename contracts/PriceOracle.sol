@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import "./ConfigCore.sol";
@@ -37,7 +37,7 @@ interface IUniswapV2Pair {
  * @notice Provides TWAP-protected unified price query service for the entire Bitres system
  * @dev Implements separation of concerns, isolating price query logic from business contracts
  */
-contract PriceOracle is Ownable, IPriceOracle {
+contract PriceOracle is Ownable2Step, IPriceOracle {
     // ============ State Variables ============
 
     // Immutable core configuration (fixed at deployment)

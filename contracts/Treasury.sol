@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -30,7 +30,7 @@ interface IPriceOracleForTreasury {
  * @notice Manages WBTC/BTD/BRS assets, provides liquidity support for Minter
  * @dev Core functions: WBTC deposit/withdraw, BRS compensation, BTD buyback BRS
  */
-contract Treasury is Ownable, ReentrancyGuard, ITreasury {
+contract Treasury is Ownable2Step, ReentrancyGuard, ITreasury {
     using SafeERC20 for IERC20;
 
     ConfigCore public immutable core;

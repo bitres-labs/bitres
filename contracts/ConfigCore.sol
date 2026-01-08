@@ -1,24 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
+import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+
 /**
  * @title ConfigCore
  * @notice Immutable configuration core - stores critical system addresses
  * @dev Cannot be changed after deployment, ensuring system core architecture stability
  * @dev All core addresses are set once via constructor and permanently fixed
+ * @dev Uses Ownable2Step for secure two-step ownership transfer; owner should call renounceOwnership() after setup
  */
-contract ConfigCore {
-    // ==================== Deployer Access Control ====================
-
-    /// @notice Deployer address - only this address can call setCoreContracts and setPeripheralContracts
-    /// @dev Set in constructor, cannot be changed after deployment
-    address public immutable deployer;
-
-    /// @notice Modifier to restrict access to deployer only
-    modifier onlyDeployer() {
-        require(msg.sender == deployer, "ConfigCore: caller is not deployer");
-        _;
-    }
+contract ConfigCore is Ownable2Step {
 
     // ==================== Core Token Addresses (immutable) ====================
 
@@ -146,7 +138,7 @@ contract ConfigCore {
     /**
      * @notice Constructor - sets all non-circular-dependency addresses
      * @dev The 5 core contracts with circular dependencies are set separately via setCoreContracts()
-     * @dev The deployer (msg.sender) is recorded and only they can call setCoreContracts/setPeripheralContracts
+     * @dev Owner (msg.sender) can call setCoreContracts/setPeripheralContracts, then renounceOwnership
      */
     constructor(
         address _wbtc,                 // WBTC token address
@@ -161,7 +153,7 @@ contract ConfigCore {
         address _pythWbtc,             // Pyth WBTC price feed address
         address _chainlinkUsdcUsd,     // Chainlink USDC/USD price feed address
         address _chainlinkUsdtUsd      // Chainlink USDT/USD price feed address
-    ) {
+    ) Ownable(msg.sender) {
         require(_wbtc != address(0), "Invalid WBTC");
         require(_btd != address(0), "Invalid BTD");
         require(_btb != address(0), "Invalid BTB");
@@ -174,8 +166,6 @@ contract ConfigCore {
         require(_pythWbtc != address(0), "Invalid Pyth WBTC");
         require(_chainlinkUsdcUsd != address(0), "Invalid Chainlink USDC/USD");
         require(_chainlinkUsdtUsd != address(0), "Invalid Chainlink USDT/USD");
-
-        deployer = msg.sender;
         WBTC = _wbtc;
         BTD = _btd;
         BTB = _btb;
@@ -192,7 +182,7 @@ contract ConfigCore {
 
     /**
      * @notice Sets the 5 core contract addresses with circular dependencies
-     * @dev Can only be called once by deployer, permanently locked after deployment
+     * @dev Can only be called once by owner, permanently locked after deployment
      * @param _treasury Treasury contract address
      * @param _minter Minter contract address
      * @param _priceOracle Price oracle address
@@ -205,7 +195,7 @@ contract ConfigCore {
         address _priceOracle,
         address _idealUSDManager,
         address _interestPool
-    ) external onlyDeployer {
+    ) external onlyOwner {
         require(!coreContractsSet, "Core contracts already set");
         require(_treasury != address(0), "Invalid Treasury");
         require(_minter != address(0), "Invalid Minter");
@@ -223,7 +213,7 @@ contract ConfigCore {
 
     /**
      * @notice Sets peripheral contracts and pools with circular dependencies
-     * @dev Can only be called once by deployer, permanently locked after deployment
+     * @dev Can only be called once by owner, permanently locked after deployment
      */
     function setPeripheralContracts(
         address _farmingPool,
@@ -235,7 +225,7 @@ contract ConfigCore {
         address _poolBtdUsdc,
         address _poolBtbBtd,
         address _poolBrsBtd
-    ) external onlyDeployer {
+    ) external onlyOwner {
         require(!peripheralContractsSet, "Peripheral contracts already set");
         require(_farmingPool != address(0), "Invalid FarmingPool");
         require(_stBTD != address(0), "Invalid stBTD");
@@ -257,5 +247,16 @@ contract ConfigCore {
         POOL_BTB_BTD = _poolBtbBtd;
         POOL_BRS_BTD = _poolBrsBtd;
         peripheralContractsSet = true;
+    }
+
+    /**
+     * @notice Permanently renounce ownership
+     * @dev Can only be called after both core and peripheral contracts are set
+     *      Once called, no further configuration changes are possible
+     */
+    function renounceOwnership() public override onlyOwner {
+        require(coreContractsSet, "ConfigCore: core contracts not set");
+        require(peripheralContractsSet, "ConfigCore: peripheral contracts not set");
+        super.renounceOwnership();
     }
 }

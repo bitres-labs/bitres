@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import {ConfirmedOwner} from "@chainlink/contracts/src/v0.8/shared/access/ConfirmedOwner.sol";
+import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IIdealUSDManager} from "./interfaces/IIdealUSDManager.sol";
 import {IAggregatorV3} from "./interfaces/IAggregatorV3.sol";
 import {ConfigGov} from "./ConfigGov.sol";
@@ -18,7 +18,7 @@ import "./libraries/FeedValidation.sol";
  * @dev Inflation parameters use Constants library constants (ANNUAL_INFLATION_RATE, MONTHLY_GROWTH_FACTOR)
  * @dev PCE Feed address is dynamically retrieved from ConfigGov, supports governance replacement
  */
-contract IdealUSDManager is ConfirmedOwner, IIdealUSDManager {
+contract IdealUSDManager is Ownable2Step, IIdealUSDManager {
 
     // ============ Immutable State ============
 
@@ -100,7 +100,7 @@ contract IdealUSDManager is ConfirmedOwner, IIdealUSDManager {
         address _owner,                  // Contract owner address
         address _configGov,              // ConfigGov contract address
         uint256 _initialIUSD             // Initial IUSD value (18 decimals, e.g., 1e18 = 1.0)
-    ) ConfirmedOwner(_owner) {
+    ) Ownable(_owner) {
         require(_configGov != address(0), "Invalid ConfigGov");
         require(_initialIUSD > 0, "Invalid initial value");
 

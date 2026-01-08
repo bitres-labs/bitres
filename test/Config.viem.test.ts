@@ -366,7 +366,13 @@ describe("Config Architecture (ConfigCore + ConfigGov - Viem)", function () {
     });
 
     it("should allow ownership transfer", async function () {
+      // Step 1: Current owner proposes new owner (Ownable2Step)
       await configGov.write.transferOwnership([addr1.account.address], { account: owner.account });
+      // Owner is still the original until new owner accepts
+      expect((await configGov.read.owner()).toLowerCase()).to.equal(owner.account.address.toLowerCase());
+
+      // Step 2: New owner accepts ownership
+      await configGov.write.acceptOwnership([], { account: addr1.account });
       expect((await configGov.read.owner()).toLowerCase()).to.equal(addr1.account.address.toLowerCase());
 
       // New owner can update parameters

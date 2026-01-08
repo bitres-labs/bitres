@@ -2,7 +2,7 @@
 // Compatible with OpenZeppelin Contracts ^5.4.0
 pragma solidity ^0.8.30;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
@@ -27,7 +27,7 @@ import "./libraries/CollateralMath.sol";
  * @notice Handles BTD minting and redemption business logic
  * @dev Price queries delegated to PriceOracle contract, this contract focuses on business logic
  */
-contract Minter is ReentrancyGuard, Ownable, Pausable, IMinter {
+contract Minter is ReentrancyGuard, Ownable2Step, Pausable, IMinter {
     using SafeERC20 for IERC20;
 
     // ============ State Variables ============
