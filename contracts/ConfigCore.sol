@@ -1,159 +1,79 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title ConfigCore
  * @notice Immutable configuration core - stores critical system addresses
- * @dev Cannot be changed after deployment, ensuring system core architecture stability
- * @dev All core addresses are set once via constructor and permanently fixed
- * @dev Uses Ownable2Step for secure two-step ownership transfer; owner should call renounceOwnership() after setup
+ * @dev Most addresses are immutable (set at deployment), only contracts with
+ *      circular dependencies use storage variables set via setCoreContracts()
+ *      Owner should call renounceOwnership() after setup is complete
  */
-contract ConfigCore is Ownable2Step {
+contract ConfigCore is Ownable {
 
-    // ==================== Core Token Addresses (immutable) ====================
+    // ==================== Core Token Addresses ====================
+    // All token addresses are immutable, set at deployment
 
-    /// @notice WBTC token address - used for collateral to mint BTD
-    /// @dev Cannot be changed after deployment
-    address public immutable WBTC;
+    address public immutable WBTC;    // Wrapped BTC, Collateral token
+    address public immutable BTD;     // Primary stablecoin
+    address public immutable BTB;     // Bond token
+    address public immutable BRS;     // Governance token
+    address public immutable WETH;    // Wrapped ETH
+    address public immutable USDC;    // Stablecoin reserve
+    address public immutable USDT;    // Stablecoin reserve
 
-    /// @notice BTD stablecoin address - primary stablecoin
-    /// @dev Cannot be changed after deployment
-    address public immutable BTD;
+    // ==================== Uniswap V2 Pool Addresses ====================
+    // All pool addresses are immutable, created before ConfigCore deployment
 
-    /// @notice BTB bond token address - redemption bonds
-    /// @dev Cannot be changed after deployment
-    address public immutable BTB;
+    address public immutable POOL_WBTC_USDC;    // WBTC-USDC pair
+    address public immutable POOL_BTD_USDC;     // BTD-USDC pair
+    address public immutable POOL_BTB_BTD;      // BTB-BTD pair
+    address public immutable POOL_BRS_BTD;      // BRS-BTD pair
 
-    /// @notice BRS governance token address - governance token
-    /// @dev Cannot be changed after deployment
-    address public immutable BRS;
+    // ==================== Staking Token Addresses ====================
+    // Immutable, deployed before ConfigCore
 
-    /// @notice WETH token address - Wrapped ETH
-    /// @dev Cannot be changed after deployment
-    address public immutable WETH;
+    address public immutable ST_BTD;            // BTD staking receipt token
+    address public immutable ST_BTB;            // BTB staking receipt token
 
-    /// @notice USDC token address - stablecoin reserve
-    /// @dev Cannot be changed after deployment
-    address public immutable USDC;
+    // ==================== Core Contract Addresses ====================
+    // These contracts have circular dependencies with ConfigCore
+    // Set once via setCoreContracts(), cannot be changed afterward
 
-    /// @notice USDT token address - stablecoin reserve
-    /// @dev Cannot be changed after deployment
-    address public immutable USDT;
+    address public TREASURY;          // System asset management
+    address public MINTER;            // BTD minting and redemption
+    address public PRICE_ORACLE;      // WBTC price data
+    address public IDEAL_USD_MANAGER; // IUSD inflation adjustments
+    address public INTEREST_POOL;     // BTD/BTB interest distribution
+    address public FARMING_POOL;      // BRS liquidity mining
 
-    // ==================== Core Contract Addresses (storage - deferred binding) ====================
-    // These 5 contracts have circular dependencies with ConfigCore, so they use storage and are set via setCoreContracts()
-
-    /// @notice Treasury contract address - manages system assets
-    /// @dev Set once via setCoreContracts() and cannot be changed afterward
-    address public TREASURY;
-
-    /// @notice Minter contract address - handles BTD minting and redemption
-    /// @dev Set once via setCoreContracts() and cannot be changed afterward
-    address public MINTER;
-
-    /// @notice Price oracle address - provides WBTC price data
-    /// @dev Set once via setCoreContracts() and cannot be changed afterward
-    address public PRICE_ORACLE;
-
-    /// @notice IUSD manager address - manages Ideal USD inflation adjustments
-    /// @dev Set once via setCoreContracts() and cannot be changed afterward
-    address public IDEAL_USD_MANAGER;
-
-    /// @notice Interest pool address - manages BTD and BTB interest distribution
-    /// @dev Set once via setCoreContracts() and cannot be changed afterward
-    address public INTEREST_POOL;
-
-    /// @notice Flag indicating whether core contracts have been set
-    /// @dev Ensures setCoreContracts() can only be called once
     bool public coreContractsSet;
 
-    /// @notice Flag indicating whether peripheral contracts have been set
-    /// @dev Ensures setPeripheralContracts() can only be called once
-    bool public peripheralContractsSet;
-
-    // ==================== Price Oracle Data Source Addresses (immutable) ====================
-
-    /// @notice Chainlink BTC/USD price feed address
-    /// @dev Cannot be changed after deployment
-    address public immutable CHAINLINK_BTC_USD;
-
-    /// @notice Chainlink WBTC/BTC price feed address
-    /// @dev Cannot be changed after deployment
-    address public immutable CHAINLINK_WBTC_BTC;
-
-    /// @notice Pyth WBTC price feed address
-    /// @dev Cannot be changed after deployment
-    address public immutable PYTH_WBTC;
-
-    /// @notice Chainlink USDC/USD price feed address
-    /// @dev Cannot be changed after deployment, used for stablecoin depeg detection
-    address public immutable CHAINLINK_USDC_USD;
-
-    /// @notice Chainlink USDT/USD price feed address
-    /// @dev Cannot be changed after deployment, used for stablecoin depeg detection
-    address public immutable CHAINLINK_USDT_USD;
-
-    // ==================== Core Pool Addresses (deferred binding) ====================
-
-    /// @notice Farming pool address - BRS liquidity mining
-    /// @dev Set once via setPeripheralContracts() and cannot be changed afterward
-    address public FARMING_POOL;
-
-    /// @notice stBTD token address - BTD staking receipt
-    /// @dev Set once via setPeripheralContracts() and cannot be changed afterward
-    address public ST_BTD;
-
-    /// @notice stBTB token address - BTB staking receipt
-    /// @dev Set once via setPeripheralContracts() and cannot be changed afterward
-    address public ST_BTB;
-
-    /// @notice Governor contract address - DAO governance
-    /// @dev Set once via setPeripheralContracts() and cannot be changed afterward
-    address public GOVERNOR;
-
-    /// @notice TWAP oracle address - time-weighted average price oracle
-    /// @dev Set once via setPeripheralContracts() and cannot be changed afterward
-    address public TWAP_ORACLE;
-
-    // ==================== Uniswap V2 Pool Addresses (deferred binding) ====================
-
-    /// @notice WBTC-USDC Uniswap V2 pair address
-    /// @dev Set once via setPeripheralContracts() and cannot be changed afterward
-    address public POOL_WBTC_USDC;
-
-    /// @notice BTD-USDC Uniswap V2 pair address
-    /// @dev Set once via setPeripheralContracts() and cannot be changed afterward
-    address public POOL_BTD_USDC;
-
-    /// @notice BTB-BTD Uniswap V2 pair address
-    /// @dev Set once via setPeripheralContracts() and cannot be changed afterward
-    address public POOL_BTB_BTD;
-
-    /// @notice BRS-BTD Uniswap V2 pair address
-    /// @dev Set once via setPeripheralContracts() and cannot be changed afterward
-    address public POOL_BRS_BTD;
-
     /**
-     * @notice Constructor - sets all non-circular-dependency addresses
-     * @dev The 5 core contracts with circular dependencies are set separately via setCoreContracts()
-     * @dev Owner (msg.sender) can call setCoreContracts/setPeripheralContracts, then renounceOwnership
+     * @notice Constructor - sets all immutable addresses
+     * @dev Tokens must be deployed first, then LP pools created, then ConfigCore deployed
+     *      Core contracts with circular dependencies are set separately via setCoreContracts()
      */
     constructor(
-        address _wbtc,                 // WBTC token address
-        address _btd,                  // BTD stablecoin address
-        address _btb,                  // BTB bond token address
-        address _brs,                  // BRS governance token address
-        address _weth,                 // WETH token address
-        address _usdc,                 // USDC token address
-        address _usdt,                 // USDT token address
-        address _chainlinkBtcUsd,      // Chainlink BTC/USD price feed address
-        address _chainlinkWbtcBtc,     // Chainlink WBTC/BTC price feed address
-        address _pythWbtc,             // Pyth WBTC price feed address
-        address _chainlinkUsdcUsd,     // Chainlink USDC/USD price feed address
-        address _chainlinkUsdtUsd      // Chainlink USDT/USD price feed address
+        // Tokens (7)
+        address _wbtc,
+        address _btd,
+        address _btb,
+        address _brs,
+        address _weth,
+        address _usdc,
+        address _usdt,
+        // Pools (4)
+        address _poolWbtcUsdc,
+        address _poolBtdUsdc,
+        address _poolBtbBtd,
+        address _poolBrsBtd,
+        // Staking tokens (2)
+        address _stBTD,
+        address _stBTB
     ) Ownable(msg.sender) {
+        // Validate token addresses
         require(_wbtc != address(0), "Invalid WBTC");
         require(_btd != address(0), "Invalid BTD");
         require(_btb != address(0), "Invalid BTB");
@@ -161,11 +81,18 @@ contract ConfigCore is Ownable2Step {
         require(_weth != address(0), "Invalid WETH");
         require(_usdc != address(0), "Invalid USDC");
         require(_usdt != address(0), "Invalid USDT");
-        require(_chainlinkBtcUsd != address(0), "Invalid Chainlink BTC/USD");
-        require(_chainlinkWbtcBtc != address(0), "Invalid Chainlink WBTC/BTC");
-        require(_pythWbtc != address(0), "Invalid Pyth WBTC");
-        require(_chainlinkUsdcUsd != address(0), "Invalid Chainlink USDC/USD");
-        require(_chainlinkUsdtUsd != address(0), "Invalid Chainlink USDT/USD");
+
+        // Validate pool addresses
+        require(_poolWbtcUsdc != address(0), "Invalid Pool WBTC/USDC");
+        require(_poolBtdUsdc != address(0), "Invalid Pool BTD/USDC");
+        require(_poolBtbBtd != address(0), "Invalid Pool BTB/BTD");
+        require(_poolBrsBtd != address(0), "Invalid Pool BRS/BTD");
+
+        // Validate staking token addresses
+        require(_stBTD != address(0), "Invalid stBTD");
+        require(_stBTB != address(0), "Invalid stBTB");
+
+        // Set immutable token addresses
         WBTC = _wbtc;
         BTD = _btd;
         BTB = _btb;
@@ -173,28 +100,30 @@ contract ConfigCore is Ownable2Step {
         WETH = _weth;
         USDC = _usdc;
         USDT = _usdt;
-        CHAINLINK_BTC_USD = _chainlinkBtcUsd;
-        CHAINLINK_WBTC_BTC = _chainlinkWbtcBtc;
-        PYTH_WBTC = _pythWbtc;
-        CHAINLINK_USDC_USD = _chainlinkUsdcUsd;
-        CHAINLINK_USDT_USD = _chainlinkUsdtUsd;
+
+        // Set immutable pool addresses
+        POOL_WBTC_USDC = _poolWbtcUsdc;
+        POOL_BTD_USDC = _poolBtdUsdc;
+        POOL_BTB_BTD = _poolBtbBtd;
+        POOL_BRS_BTD = _poolBrsBtd;
+
+        // Set immutable staking token addresses
+        ST_BTD = _stBTD;
+        ST_BTB = _stBTB;
     }
 
     /**
-     * @notice Sets the 5 core contract addresses with circular dependencies
-     * @dev Can only be called once by owner, permanently locked after deployment
-     * @param _treasury Treasury contract address
-     * @param _minter Minter contract address
-     * @param _priceOracle Price oracle address
-     * @param _idealUSDManager IUSD manager address
-     * @param _interestPool Interest pool address
+     * @notice Sets the 6 core contract addresses with circular dependencies
+     * @dev Can only be called once by owner
+     *      Governor address is managed by ConfigGov for upgradability
      */
     function setCoreContracts(
         address _treasury,
         address _minter,
         address _priceOracle,
         address _idealUSDManager,
-        address _interestPool
+        address _interestPool,
+        address _farmingPool
     ) external onlyOwner {
         require(!coreContractsSet, "Core contracts already set");
         require(_treasury != address(0), "Invalid Treasury");
@@ -202,61 +131,23 @@ contract ConfigCore is Ownable2Step {
         require(_priceOracle != address(0), "Invalid PriceOracle");
         require(_idealUSDManager != address(0), "Invalid IdealUSDManager");
         require(_interestPool != address(0), "Invalid InterestPool");
+        require(_farmingPool != address(0), "Invalid FarmingPool");
 
         TREASURY = _treasury;
         MINTER = _minter;
         PRICE_ORACLE = _priceOracle;
         IDEAL_USD_MANAGER = _idealUSDManager;
         INTEREST_POOL = _interestPool;
+        FARMING_POOL = _farmingPool;
         coreContractsSet = true;
     }
 
     /**
-     * @notice Sets peripheral contracts and pools with circular dependencies
-     * @dev Can only be called once by owner, permanently locked after deployment
-     */
-    function setPeripheralContracts(
-        address _farmingPool,
-        address _stBTD,
-        address _stBTB,
-        address _governor,
-        address _twapOracle,
-        address _poolWbtcUsdc,
-        address _poolBtdUsdc,
-        address _poolBtbBtd,
-        address _poolBrsBtd
-    ) external onlyOwner {
-        require(!peripheralContractsSet, "Peripheral contracts already set");
-        require(_farmingPool != address(0), "Invalid FarmingPool");
-        require(_stBTD != address(0), "Invalid stBTD");
-        require(_stBTB != address(0), "Invalid stBTB");
-        require(_governor != address(0), "Invalid Governor");
-        require(_twapOracle != address(0), "Invalid TWAPOracle");
-        require(_poolWbtcUsdc != address(0), "Invalid Pool WBTC/USDC");
-        require(_poolBtdUsdc != address(0), "Invalid Pool BTD/USDC");
-        require(_poolBtbBtd != address(0), "Invalid Pool BTB/BTD");
-        require(_poolBrsBtd != address(0), "Invalid Pool BRS/BTD");
-
-        FARMING_POOL = _farmingPool;
-        ST_BTD = _stBTD;
-        ST_BTB = _stBTB;
-        GOVERNOR = _governor;
-        TWAP_ORACLE = _twapOracle;
-        POOL_WBTC_USDC = _poolWbtcUsdc;
-        POOL_BTD_USDC = _poolBtdUsdc;
-        POOL_BTB_BTD = _poolBtbBtd;
-        POOL_BRS_BTD = _poolBrsBtd;
-        peripheralContractsSet = true;
-    }
-
-    /**
      * @notice Permanently renounce ownership
-     * @dev Can only be called after both core and peripheral contracts are set
-     *      Once called, no further configuration changes are possible
+     * @dev Can only be called after core contracts are set
      */
     function renounceOwnership() public override onlyOwner {
         require(coreContractsSet, "ConfigCore: core contracts not set");
-        require(peripheralContractsSet, "ConfigCore: peripheral contracts not set");
         super.renounceOwnership();
     }
 }

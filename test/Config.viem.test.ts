@@ -55,7 +55,9 @@ describe("Config Architecture (ConfigCore + ConfigGov - Viem)", function () {
         mockBtcUsd: system.mockBtcUsd,
         mockWbtcBtc: system.mockWbtcBtc,
         mockPce: system.mockPce,
-        mockPyth: system.mockPyth
+        mockPyth: system.mockPyth,
+        mockUsdcUsd: system.mockUsdcUsd,
+        mockUsdtUsd: system.mockUsdtUsd
       },
       pools: {
         mockPoolWbtcUsdc: system.mockPoolWbtcUsdc,
@@ -96,11 +98,13 @@ describe("Config Architecture (ConfigCore + ConfigGov - Viem)", function () {
       expect((await config.read.WETH()).toLowerCase()).to.equal(tokens.weth.address.toLowerCase());
     });
 
-    it("should set all 3 oracle feed addresses correctly (immutable)", async function () {
-      // Note: Redstone removed - using dual-source validation (Chainlink + Pyth)
-      expect((await config.read.CHAINLINK_BTC_USD()).toLowerCase()).to.equal(oracles.mockBtcUsd.address.toLowerCase());
-      expect((await config.read.CHAINLINK_WBTC_BTC()).toLowerCase()).to.equal(oracles.mockWbtcBtc.address.toLowerCase());
-      expect((await config.read.PYTH_WBTC()).toLowerCase()).to.equal(oracles.mockPyth.address.toLowerCase());
+    it("should set all 5 oracle feed addresses correctly (in ConfigGov)", async function () {
+      // Oracle addresses moved from ConfigCore to ConfigGov for governance flexibility
+      expect((await configGov.read.chainlinkBtcUsd()).toLowerCase()).to.equal(oracles.mockBtcUsd.address.toLowerCase());
+      expect((await configGov.read.chainlinkWbtcBtc()).toLowerCase()).to.equal(oracles.mockWbtcBtc.address.toLowerCase());
+      expect((await configGov.read.pythWbtc()).toLowerCase()).to.equal(oracles.mockPyth.address.toLowerCase());
+      expect((await configGov.read.chainlinkUsdcUsd()).toLowerCase()).to.equal(oracles.mockUsdcUsd.address.toLowerCase());
+      expect((await configGov.read.chainlinkUsdtUsd()).toLowerCase()).to.equal(oracles.mockUsdtUsd.address.toLowerCase());
     });
 
     it("should set all 4 pool addresses correctly (immutable)", async function () {

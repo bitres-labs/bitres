@@ -33,8 +33,12 @@ contract ConfigGov is Ownable2Step {
      * @dev Used for managing governable oracle addresses, external contract addresses, etc.
      */
     enum AddressParamType {
-        PCE_FEED          // 0 - Chainlink PCE oracle address
-        // Future extensions: BACKUP_PCE_FEED, CPI_FEED, etc.
+        PCE_FEED,              // 0 - Chainlink PCE oracle
+        CHAINLINK_BTC_USD,     // 1 - Chainlink BTC/USD feed
+        CHAINLINK_WBTC_BTC,    // 2 - Chainlink WBTC/BTC feed
+        PYTH_WBTC,             // 3 - Pyth WBTC feed
+        CHAINLINK_USDC_USD,    // 4 - Chainlink USDC/USD feed
+        CHAINLINK_USDT_USD     // 5 - Chainlink USDT/USD feed
     }
 
     // ============ Storage ============
@@ -45,6 +49,9 @@ contract ConfigGov is Ownable2Step {
     /// @notice Address parameter registry (governable oracle addresses, etc.)
     mapping(AddressParamType => address) private _addressParams;
 
+    /// @notice DAO governance contract address (upgradable)
+    address private _governor;
+
     // ============ Events ============
 
     /// @notice Generic parameter update event (uint256 type)
@@ -52,6 +59,9 @@ contract ConfigGov is Ownable2Step {
 
     /// @notice Address parameter update event
     event AddressParamUpdated(AddressParamType indexed paramType, address newValue);
+
+    /// @notice Governor address update event
+    event GovernorUpdated(address indexed oldGovernor, address indexed newGovernor);
 
     // ============ Initialization ============
 
@@ -261,5 +271,49 @@ contract ConfigGov is Ownable2Step {
      */
     function pceFeed() external view returns (address) {
         return _addressParams[AddressParamType.PCE_FEED];
+    }
+
+    // ============ Oracle Address Convenience Functions ============
+
+    function chainlinkBtcUsd() external view returns (address) {
+        return _addressParams[AddressParamType.CHAINLINK_BTC_USD];
+    }
+
+    function chainlinkWbtcBtc() external view returns (address) {
+        return _addressParams[AddressParamType.CHAINLINK_WBTC_BTC];
+    }
+
+    function pythWbtc() external view returns (address) {
+        return _addressParams[AddressParamType.PYTH_WBTC];
+    }
+
+    function chainlinkUsdcUsd() external view returns (address) {
+        return _addressParams[AddressParamType.CHAINLINK_USDC_USD];
+    }
+
+    function chainlinkUsdtUsd() external view returns (address) {
+        return _addressParams[AddressParamType.CHAINLINK_USDT_USD];
+    }
+
+    // ============ Governor Management ============
+
+    /**
+     * @notice Sets the DAO governance contract address
+     * @dev Only owner can call, allows governance upgrades
+     * @param newGovernor New governor contract address
+     */
+    function setGovernor(address newGovernor) external onlyOwner {
+        require(newGovernor != address(0), "ConfigGov: zero governor");
+        address oldGovernor = _governor;
+        _governor = newGovernor;
+        emit GovernorUpdated(oldGovernor, newGovernor);
+    }
+
+    /**
+     * @notice Gets the current DAO governance contract address
+     * @return Current governor address
+     */
+    function governor() external view returns (address) {
+        return _governor;
     }
 }

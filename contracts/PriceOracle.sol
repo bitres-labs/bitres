@@ -5,6 +5,7 @@ import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import "./ConfigCore.sol";
+import "./ConfigGov.sol";
 import "./interfaces/IIdealUSDManager.sol";
 import "./interfaces/IPriceOracle.sol";
 import "./interfaces/IUniswapV2TWAPOracle.sol";
@@ -42,6 +43,7 @@ contract PriceOracle is Ownable2Step, IPriceOracle {
 
     // Immutable core configuration (fixed at deployment)
     ConfigCore public immutable core;
+    ConfigGov public immutable gov;
     bytes32 public immutable pythWbtcPriceId;
     bool public immutable useTWAPDefault;
 
@@ -89,14 +91,17 @@ contract PriceOracle is Ownable2Step, IPriceOracle {
     constructor(
         address initialOwner,                  // Contract owner address, cannot be zero address
         address _core,                         // ConfigCore contract address, cannot be zero address
+        address _gov,                          // ConfigGov contract address, cannot be zero address
         address _twapOracle,                   // TWAP Oracle address, can be zero address (set later)
         bytes32 _pythWbtcPriceId               // Pyth WBTC price ID, cannot be zero
     ) Ownable(initialOwner) {
         require(initialOwner != address(0), "Invalid owner");
         require(_core != address(0), "Invalid core address");
+        require(_gov != address(0), "Invalid gov address");
         require(_pythWbtcPriceId != bytes32(0), "Invalid Pyth price id");
 
         core = ConfigCore(_core);
+        gov = ConfigGov(_gov);
         pythWbtcPriceId = _pythWbtcPriceId;
         useTWAPDefault = true;
         useTWAP = true;
@@ -253,7 +258,7 @@ contract PriceOracle is Ownable2Step, IPriceOracle {
      * @return BTC price (18 decimal USD)
      */
     function getChainlinkBTCUSD() public view returns (uint256) {
-        return _getChainlinkPrice(core.CHAINLINK_BTC_USD());
+        return _getChainlinkPrice(gov.chainlinkBtcUsd());
     }
 
     /**
@@ -272,7 +277,7 @@ contract PriceOracle is Ownable2Step, IPriceOracle {
      * @return WBTC price (18 decimal USD)
      */
     function _getChainlinkWBTCUSD() internal view returns (uint256) {
-        uint256 wbtcToBtc = _getChainlinkPrice(core.CHAINLINK_WBTC_BTC());
+        uint256 wbtcToBtc = _getChainlinkPrice(gov.chainlinkWbtcBtc());
         uint256 btcToUsd = getChainlinkBTCUSD();
         return Math.mulDiv(wbtcToBtc, btcToUsd, 1e18);
     }
@@ -283,7 +288,7 @@ contract PriceOracle is Ownable2Step, IPriceOracle {
      * @return WBTC price (18 decimal USD)
      */
     function _getPythWBTCUSD() internal view returns (uint256) {
-        address pythFeed = core.PYTH_WBTC();
+        address pythFeed = gov.pythWbtc();
         require(pythFeed != address(0), "Pyth feed not set");
         require(pythWbtcPriceId != bytes32(0), "Pyth price id not set");
 
@@ -571,7 +576,7 @@ contract PriceOracle is Ownable2Step, IPriceOracle {
      * @return USDC price (18 decimals)
      */
     function getUSDCPrice() public view returns (uint256) {
-        return _getStablecoinPrice(core.CHAINLINK_USDC_USD());
+        return _getStablecoinPrice(gov.chainlinkUsdcUsd());
     }
 
     /**
@@ -581,7 +586,7 @@ contract PriceOracle is Ownable2Step, IPriceOracle {
      * @return USDT price (18 decimals)
      */
     function getUSDTPrice() public view returns (uint256) {
-        return _getStablecoinPrice(core.CHAINLINK_USDT_USD());
+        return _getStablecoinPrice(gov.chainlinkUsdtUsd());
     }
 
     /**
