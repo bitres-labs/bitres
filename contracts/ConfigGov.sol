@@ -17,15 +17,14 @@ contract ConfigGov is Ownable2Step {
      * @dev Used for unified management of all system parameters, supports unlimited extension
      */
     enum ParamType {
-        MINT_FEE_BP,        // 0 - Minting fee rate (basis points)
-        INTEREST_FEE_BP,    // 1 - Interest fee rate (basis points)
-        MIN_BTB_PRICE,      // 2 - BTB minimum price (18 decimals)
-        MAX_BTB_RATE,       // 3 - BTB maximum interest rate (basis points)
-        PCE_MAX_DEVIATION,  // 4 - PCE maximum deviation rate (18 decimals, e.g., 2e16 = 2%)
-        REDEEM_FEE_BP,      // 5 - Redemption fee rate (basis points)
-        MAX_BTD_RATE,       // 6 - BTD maximum interest rate (basis points)
-        BASE_RATE_DEFAULT   // 7 - Default base interest rate (basis points, e.g., 500 = 5%)
-        // Future extensions: LIQUIDATION_FEE, STABILITY_FEE, etc.
+        MintFeeBp,        // 0 - Minting fee rate (basis points)
+        InterestFeeBp,    // 1 - Interest fee rate (basis points)
+        MinBtbPrice,      // 2 - BTB minimum price (18 decimals)
+        MaxBtbRate,       // 3 - BTB maximum interest rate (basis points)
+        PceMaxDeviation,  // 4 - PCE maximum deviation rate (18 decimals, e.g., 2e16 = 2%)
+        RedeemFeeBp,      // 5 - Redemption fee rate (basis points)
+        MaxBtdRate,       // 6 - BTD maximum interest rate (basis points)
+        BaseRateDefault   // 7 - Default base interest rate (basis points, e.g., 500 = 5%)
     }
 
     /**
@@ -33,12 +32,12 @@ contract ConfigGov is Ownable2Step {
      * @dev Used for managing governable oracle addresses, external contract addresses, etc.
      */
     enum AddressParamType {
-        PCE_FEED,              // 0 - Chainlink PCE oracle
-        CHAINLINK_BTC_USD,     // 1 - Chainlink BTC/USD feed
-        CHAINLINK_WBTC_BTC,    // 2 - Chainlink WBTC/BTC feed
-        PYTH_WBTC,             // 3 - Pyth WBTC feed
-        CHAINLINK_USDC_USD,    // 4 - Chainlink USDC/USD feed
-        CHAINLINK_USDT_USD     // 5 - Chainlink USDT/USD feed
+        PceFeed,           // 0 - Chainlink PCE oracle
+        ChainlinkBtcUsd,   // 1 - Chainlink BTC/USD feed
+        ChainlinkWbtcBtc,  // 2 - Chainlink WBTC/BTC feed
+        PythWbtc,          // 3 - Pyth WBTC feed
+        ChainlinkUsdcUsd,  // 4 - Chainlink USDC/USD feed
+        ChainlinkUsdtUsd   // 5 - Chainlink USDT/USD feed
     }
 
     // ============ Storage ============
@@ -79,10 +78,10 @@ contract ConfigGov is Ownable2Step {
         require(initialOwner != address(0), "ConfigGov: zero owner");
 
         // Initialize default fee parameters
-        _params[ParamType.MINT_FEE_BP] = 50;       // 0.5% minting fee
-        _params[ParamType.REDEEM_FEE_BP] = 50;     // 0.5% redemption fee
-        _params[ParamType.INTEREST_FEE_BP] = 500;  // 5% interest fee
-        _params[ParamType.BASE_RATE_DEFAULT] = 500; // 5% default base interest rate
+        _params[ParamType.MintFeeBp] = 50;       // 0.5% minting fee
+        _params[ParamType.RedeemFeeBp] = 50;     // 0.5% redemption fee
+        _params[ParamType.InterestFeeBp] = 500;  // 5% interest fee
+        _params[ParamType.BaseRateDefault] = 500; // 5% default base interest rate
     }
 
     // ============ Parameter Management ============
@@ -108,28 +107,28 @@ contract ConfigGov is Ownable2Step {
      * @param value Parameter value
      */
     function _validateParam(ParamType paramType, uint256 value) private pure {
-        if (paramType == ParamType.MINT_FEE_BP) {
+        if (paramType == ParamType.MintFeeBp) {
             // Range: 0-1000 bps (0%-10%), default 50 bps (0.5%)
             require(value <= 1000, "ConfigGov: mint fee too high"); // Maximum 10%
-        } else if (paramType == ParamType.INTEREST_FEE_BP) {
+        } else if (paramType == ParamType.InterestFeeBp) {
             // Range: 0-2000 bps (0%-20%), default 500 bps (5%)
             require(value <= 2000, "ConfigGov: interest fee too high"); // Maximum 20%
-        } else if (paramType == ParamType.REDEEM_FEE_BP) {
+        } else if (paramType == ParamType.RedeemFeeBp) {
             // Range: 0-1000 bps (0%-10%), default 50 bps (0.5%)
             require(value <= 1000, "ConfigGov: redeem fee too high"); // Maximum 10%
-        } else if (paramType == ParamType.MIN_BTB_PRICE) {
+        } else if (paramType == ParamType.MinBtbPrice) {
             require(value >= 1e17, "ConfigGov: min BTB price too low"); // Minimum 0.1 BTD
             require(value <= 1e18, "ConfigGov: min BTB price too high"); // Maximum 1 BTD
-        } else if (paramType == ParamType.MAX_BTB_RATE) {
+        } else if (paramType == ParamType.MaxBtbRate) {
             require(value >= 100, "ConfigGov: max BTB rate too low"); // Minimum 1% APR (100 bps)
             require(value <= 3000, "ConfigGov: max BTB rate too high"); // Maximum 30% APR (3000 bps)
-        } else if (paramType == ParamType.MAX_BTD_RATE) {
+        } else if (paramType == ParamType.MaxBtdRate) {
             require(value >= 100, "ConfigGov: max BTD rate too low"); // Minimum 1% APR (100 bps)
             require(value <= 3000, "ConfigGov: max BTD rate too high"); // Maximum 30% APR (3000 bps)
-        } else if (paramType == ParamType.PCE_MAX_DEVIATION) {
+        } else if (paramType == ParamType.PceMaxDeviation) {
             require(value >= 1e15, "ConfigGov: PCE deviation too low"); // Minimum 0.1%
             require(value <= 1e17, "ConfigGov: PCE deviation too high"); // Maximum 10%
-        } else if (paramType == ParamType.BASE_RATE_DEFAULT) {
+        } else if (paramType == ParamType.BaseRateDefault) {
             require(value >= 100, "ConfigGov: base rate too low"); // Minimum 1% APR (100 bps)
             require(value <= 1000, "ConfigGov: base rate too high"); // Maximum 10% APR (1000 bps)
         }
@@ -172,19 +171,19 @@ contract ConfigGov is Ownable2Step {
      * @return Minting fee rate (basis points, e.g., 50 = 0.5%)
      */
     function mintFeeBP() external view returns (uint256) {
-        return _params[ParamType.MINT_FEE_BP];
+        return _params[ParamType.MintFeeBp];
     }
 
     function interestFeeBP() external view returns (uint256) {
-        return _params[ParamType.INTEREST_FEE_BP];
+        return _params[ParamType.InterestFeeBp];
     }
 
     function minBTBPrice() external view returns (uint256) {
-        return _params[ParamType.MIN_BTB_PRICE];
+        return _params[ParamType.MinBtbPrice];
     }
 
     function maxBTBRate() external view returns (uint256) {
-        return _params[ParamType.MAX_BTB_RATE];
+        return _params[ParamType.MaxBtbRate];
     }
 
     /**
@@ -193,7 +192,7 @@ contract ConfigGov is Ownable2Step {
      * @return BTD maximum interest rate (basis points, e.g., 2000 = 20%)
      */
     function maxBTDRate() external view returns (uint256) {
-        return _params[ParamType.MAX_BTD_RATE];
+        return _params[ParamType.MaxBtdRate];
     }
 
     /**
@@ -202,7 +201,7 @@ contract ConfigGov is Ownable2Step {
      * @return PCE maximum deviation rate (18 decimals, e.g., 2e16 = 2%)
      */
     function pceMaxDeviation() external view returns (uint256) {
-        return _params[ParamType.PCE_MAX_DEVIATION];
+        return _params[ParamType.PceMaxDeviation];
     }
 
     /**
@@ -211,7 +210,7 @@ contract ConfigGov is Ownable2Step {
      * @return Redemption fee rate (basis points, e.g., 50 = 0.5%)
      */
     function redeemFeeBP() external view returns (uint256) {
-        return _params[ParamType.REDEEM_FEE_BP];
+        return _params[ParamType.RedeemFeeBp];
     }
 
     /**
@@ -220,7 +219,7 @@ contract ConfigGov is Ownable2Step {
      * @return Default base rate (basis points, e.g., 500 = 5%)
      */
     function baseRateDefault() external view returns (uint256) {
-        return _params[ParamType.BASE_RATE_DEFAULT];
+        return _params[ParamType.BaseRateDefault];
     }
 
     // ============ Address Parameter Management ============
@@ -270,29 +269,29 @@ contract ConfigGov is Ownable2Step {
      * @return PCE Feed address
      */
     function pceFeed() external view returns (address) {
-        return _addressParams[AddressParamType.PCE_FEED];
+        return _addressParams[AddressParamType.PceFeed];
     }
 
     // ============ Oracle Address Convenience Functions ============
 
     function chainlinkBtcUsd() external view returns (address) {
-        return _addressParams[AddressParamType.CHAINLINK_BTC_USD];
+        return _addressParams[AddressParamType.ChainlinkBtcUsd];
     }
 
     function chainlinkWbtcBtc() external view returns (address) {
-        return _addressParams[AddressParamType.CHAINLINK_WBTC_BTC];
+        return _addressParams[AddressParamType.ChainlinkWbtcBtc];
     }
 
     function pythWbtc() external view returns (address) {
-        return _addressParams[AddressParamType.PYTH_WBTC];
+        return _addressParams[AddressParamType.PythWbtc];
     }
 
     function chainlinkUsdcUsd() external view returns (address) {
-        return _addressParams[AddressParamType.CHAINLINK_USDC_USD];
+        return _addressParams[AddressParamType.ChainlinkUsdcUsd];
     }
 
     function chainlinkUsdtUsd() external view returns (address) {
-        return _addressParams[AddressParamType.CHAINLINK_USDT_USD];
+        return _addressParams[AddressParamType.ChainlinkUsdtUsd];
     }
 
     // ============ Governor Management ============
