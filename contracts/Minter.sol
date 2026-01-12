@@ -53,9 +53,7 @@ contract Minter is ReentrancyGuard, Ownable2Step, Pausable, IMinter {
         return address(gov);
     }
 
-    // ============ Rate Limiting ============
-
-    // ============ Constants ============
+    // ============ Events ============
 
     /// @notice ConfigGov address update event
     /// @param oldConfigGov Old ConfigGov address
@@ -103,48 +101,27 @@ contract Minter is ReentrancyGuard, Ownable2Step, Pausable, IMinter {
         emit ConfigGovUpdated(oldGov, newGov);
     }
 
-    // ============ Price Queries (delegated to PriceOracle) ============
-
     // ============ Precision Conversion Helpers ============
 
-    /**
-     * @notice Convert WBTC amount (8 decimals) to normalized amount (18 decimals)
-     * @dev Uses precomputed constant, ~8 gas (vs Math.mulDiv's 250 gas)
-     * @param wbtcAmount WBTC amount (8 decimals)
-     * @return Normalized amount (18 decimals)
-     */
+    /// @notice Convert WBTC (8 decimals) to normalized (18 decimals)
     function _wbtcToNormalized(uint256 wbtcAmount) internal pure returns (uint256) {
         return wbtcAmount * Constants.SCALE_WBTC_TO_NORM;
     }
 
-    /**
-     * @notice Convert normalized amount (18 decimals) back to WBTC amount (8 decimals)
-     * @dev Uses precomputed constant, ~8 gas
-     * @param normalizedAmount Normalized amount (18 decimals)
-     * @return WBTC amount (8 decimals)
-     */
+    /// @notice Convert normalized (18 decimals) to WBTC (8 decimals)
     function _wbtcFromNormalized(uint256 normalizedAmount) internal pure returns (uint256) {
         return normalizedAmount / Constants.SCALE_WBTC_TO_NORM;
     }
 
+    // ============ Amount Validation ============
 
-    // ============ Max Value Limit Checks ============
-
-    /**
-     * @notice Check WBTC operation amount limits (anti-hack protection)
-     * @dev Validates WBTC amount within safe range: min 154 satoshi, max 10,000 BTC
-     * @param wbtcAmount WBTC amount (8 decimals)
-     */
+    /// @notice Validate WBTC amount within safe bounds (1 satoshi to 10,000 BTC)
     function _checkWBTCAmount(uint256 wbtcAmount) internal pure {
         require(wbtcAmount >= Constants.MIN_BTC_AMOUNT, "Amount below minimum BTC");
         require(wbtcAmount <= Constants.MAX_WBTC_AMOUNT, "Amount exceeds max WBTC");
     }
 
-    /**
-     * @notice Check BTD/BTB 18-decimal stablecoin operation amount limits (anti-hack protection)
-     * @dev Validates amount within safe range: min 0.001 token, max 1 billion tokens
-     * @param amount Stablecoin amount (18 decimals)
-     */
+    /// @notice Validate stablecoin amount within safe bounds (0.001 to 1 billion)
     function _checkStablecoinAmount(uint256 amount) internal pure {
         require(amount >= Constants.MIN_STABLECOIN_18_AMOUNT, "Amount below minimum");
         require(amount <= Constants.MAX_STABLECOIN_18_AMOUNT, "Amount exceeds max");
@@ -162,27 +139,17 @@ contract Minter is ReentrancyGuard, Ownable2Step, Pausable, IMinter {
         return IPriceOracle(oracle);
     }
 
-    /**
-     * @notice Update TWAP for WBTC price if needed
-     * @dev Ensures TWAP is fresh before querying price
-     */
+    /// @notice Update TWAP for WBTC price if needed
     function _updateTWAPForWBTC() internal {
         _getPriceOracle().updateTWAPForWBTC();
     }
 
-    /**
-     * @notice Update TWAP for all prices if needed
-     * @dev Ensures all TWAPs are fresh before querying prices
-     */
+    /// @notice Update TWAP for all prices if needed
     function _updateTWAPAll() internal {
         _getPriceOracle().updateTWAPAll();
     }
 
-    /**
-     * @notice Try to update IUSD if enough time has passed (lazy update)
-     * @dev Called during mint/redeem operations to keep IUSD fresh
-     * @dev Silently fails if update conditions not met or PCE feed unavailable
-     */
+    /// @notice Try to update IUSD if enough time has passed (lazy update, silently fails if unavailable)
     function _tryUpdateIUSD() internal {
         address manager = core.IDEAL_USD_MANAGER();
         if (manager != address(0)) {
@@ -190,106 +157,57 @@ contract Minter is ReentrancyGuard, Ownable2Step, Pausable, IMinter {
         }
     }
 
-    /**
-     * @notice Get WBTC/USD price (internal use)
-     * @dev Queries from PriceOracle contract, price in 18-decimal USD
-     * @dev For external calls use priceOracle.getWBTCPrice() directly
-     * @return WBTC price (18-decimal USD)
-     */
+    /// @notice Get WBTC/USD price from oracle (18 decimals)
     function getWBTCPrice() internal view returns (uint256) {
         return _getPriceOracle().getWBTCPrice();
     }
 
-    /**
-     * @notice Get BTD/USD actual market price (internal use)
-     * @dev Queries Uniswap market price from PriceOracle contract, price in 18-decimal USD
-     * @dev For external calls use priceOracle.getBTDPrice() directly
-     * @return BTD price (18-decimal USD)
-     */
+    /// @notice Get BTD/USD market price from oracle (18 decimals)
     function getBTDPrice() internal view returns (uint256) {
         return _getPriceOracle().getBTDPrice();
     }
 
-    /**
-     * @notice Get BTB/USD price (internal use)
-     * @dev Queries from PriceOracle, calculated via BTB/BTD and BTD/USDC pools, price in 18-decimal USD
-     * @dev For external calls use priceOracle.getBTBPrice() directly
-     * @return BTB price (18-decimal USD)
-     */
+    /// @notice Get BTB/USD price from oracle (18 decimals)
     function getBTBPrice() internal view returns (uint256) {
         return _getPriceOracle().getBTBPrice();
     }
 
-    /**
-     * @notice Get BRS/USD price (internal use)
-     * @dev Queries from PriceOracle, calculated via BRS/BTD and BTD/USDC pools, price in 18-decimal USD
-     * @dev For external calls use priceOracle.getBRSPrice() directly
-     * @return BRS price (18-decimal USD)
-     */
+    /// @notice Get BRS/USD price from oracle (18 decimals)
     function getBRSPrice() internal view returns (uint256) {
         return _getPriceOracle().getBRSPrice();
     }
 
-    /**
-     * @notice Get IUSD (Ideal USD) price (internal use)
-     * @dev Queries from IdealUSDManager contract, IUSD adjusts with inflation, price in 18 decimals
-     * @dev For external calls use priceOracle.getIUSDPrice() directly
-     * @return IUSD price (18 decimals)
-     */
+    /// @notice Get IUSD (inflation-adjusted USD) price from oracle (18 decimals)
     function getIUSDPrice() internal view returns (uint256) {
         return _getPriceOracle().getIUSDPrice();
     }
 
     // ============ Collateral and Liabilities ============
 
-    /**
-     * @notice Get WBTC balance in Treasury contract
-     * @dev Queries actual WBTC holdings in Treasury, 8 decimals
-     * @return WBTC balance (8 decimals)
-     */
+    /// @notice Get WBTC balance in Treasury (8 decimals)
     function totalWBTC() public view returns (uint256) {
-        (uint256 wbtcBalance, , ) = ITreasury(core.TREASURY())
-            .getBalances();
+        (uint256 wbtcBalance, , ) = ITreasury(core.TREASURY()).getBalances();
         return wbtcBalance;
     }
 
-    /**
-     * @notice Get BTD token total supply
-     * @dev Queries BTD contract totalSupply, 18 decimals
-     * @return BTD total supply (18 decimals)
-     */
+    /// @notice Get BTD total supply (18 decimals)
     function totalBTD() public view returns (uint256) {
         return IMintableERC20(core.BTD()).totalSupply();
     }
 
-    /**
-     * @notice Get BTD equivalent amount from stBTD
-     * @dev Uses ERC4626 totalAssets() to get total BTD locked in stBTD pool
-     * @return stBTD equivalent BTD amount (18 decimals)
-     */
+    /// @notice Get BTD equivalent from stBTD vault (18 decimals)
     function totalStBTDEquivalent() public view returns (uint256) {
         address stBTD = core.ST_BTD();
-        if (stBTD == address(0)) {
-            return 0;
-        }
-        // ERC4626 totalAssets() returns underlying assets locked in pool
-        return IERC4626(stBTD).totalAssets();
+        return stBTD == address(0) ? 0 : IERC4626(stBTD).totalAssets();
     }
 
     /**
-     * @notice Get system Collateral Ratio
-     * @dev CR = (WBTC amount * WBTC price) / (BTD equivalent total * IUSD price), 18 decimals
-     *      BTD equivalent total = BTD supply + stBTD equivalent BTD amount
-     *      CR=100% equals 1e18, CR>100% means overcollateralized, CR<100% means undercollateralized
-     * @return Collateral ratio (18 decimals, 1e18=100%)
+     * @notice Get system Collateral Ratio (1e18 = 100%)
+     * @dev CR = (WBTC value) / (BTD + stBTD equivalent) * IUSD price
      */
     function getCollateralRatio() public view override returns (uint256) {
         return CollateralMath.collateralRatio(
-            totalWBTC(),
-            getWBTCPrice(),
-            totalBTD(),
-            totalStBTDEquivalent(),
-            getIUSDPrice()
+            totalWBTC(), getWBTCPrice(), totalBTD(), totalStBTDEquivalent(), getIUSDPrice()
         );
     }
 
@@ -324,29 +242,10 @@ contract Minter is ReentrancyGuard, Ownable2Step, Pausable, IMinter {
         uint256 iusdPrice = getIUSDPrice();
         uint256 cr = _getCRWithPrice(wbtcPrice, iusdPrice);
 
-        RedeemLogic.RedeemInputs memory redeemInputs = RedeemLogic.RedeemInputs({
-            btdAmount: btdAmount,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            cr: cr,
-            btdPrice: 0,
-            btbPrice: 0,
-            brsPrice: 0,
-            minBTBPriceInBTD: 0,
-            redeemFeeBP: gov.redeemFeeBP()
-        });
+        RedeemLogic.RedeemInputs memory inputs = _buildRedeemInputs(btdAmount, wbtcPrice, iusdPrice, cr);
+        RedeemLogic.RedeemOutputs memory outputs = RedeemLogic.evaluate(inputs);
 
-        if (cr < Constants.PRECISION_18) {
-            redeemInputs.btdPrice = getBTDPrice();
-            redeemInputs.btbPrice = getBTBPrice();
-            redeemInputs.brsPrice = getBRSPrice();
-            redeemInputs.minBTBPriceInBTD = gov.minBTBPrice();
-        }
-
-        RedeemLogic.RedeemOutputs memory redeemOutputs = RedeemLogic.evaluate(redeemInputs);
-        wbtcAmount = _wbtcFromNormalized(redeemOutputs.wbtcOutNormalized);
-        fee = redeemOutputs.fee;
-        return (wbtcAmount, fee);
+        return (_wbtcFromNormalized(outputs.wbtcOutNormalized), outputs.fee);
     }
 
     /**
@@ -363,21 +262,54 @@ contract Minter is ReentrancyGuard, Ownable2Step, Pausable, IMinter {
         );
     }
 
+    /**
+     * @notice Build RedeemInputs struct with current prices
+     * @dev Consolidates common redemption input preparation logic
+     * @param btdAmount BTD amount to redeem (18 decimals)
+     * @param wbtcPrice Current WBTC price (18 decimals)
+     * @param iusdPrice Current IUSD price (18 decimals)
+     * @param cr Current collateral ratio (18 decimals)
+     * @return Populated RedeemInputs struct
+     */
+    function _buildRedeemInputs(
+        uint256 btdAmount,
+        uint256 wbtcPrice,
+        uint256 iusdPrice,
+        uint256 cr
+    ) private view returns (RedeemLogic.RedeemInputs memory) {
+        RedeemLogic.RedeemInputs memory inputs = RedeemLogic.RedeemInputs({
+            btdAmount: btdAmount,
+            wbtcPrice: wbtcPrice,
+            iusdPrice: iusdPrice,
+            cr: cr,
+            btdPrice: 0,
+            btbPrice: 0,
+            brsPrice: 0,
+            minBTBPriceInBTD: 0,
+            redeemFeeBP: gov.redeemFeeBP()
+        });
+
+        // Only fetch additional prices when undercollateralized
+        if (cr < Constants.PRECISION_18) {
+            inputs.btdPrice = getBTDPrice();
+            inputs.btbPrice = getBTBPrice();
+            inputs.brsPrice = getBRSPrice();
+            inputs.minBTBPriceInBTD = gov.minBTBPrice();
+        }
+
+        return inputs;
+    }
+
     // ============ Mint BTD ============
 
     /**
      * @notice Deposit WBTC to mint BTD
-     * @dev User must approve Minter first, flow: User->Minter->Treasury, mints BTD and fee
-     * @dev Security: reentrancy guard, pause protection, amount limit checks
+     * @dev User must approve Minter first. Flow: User -> Minter -> Treasury
      * @param wbtcAmount WBTC amount to deposit (8 decimals)
      */
     function mintBTD(uint256 wbtcAmount) external nonReentrant whenNotPaused {
-        // Update TWAP for WBTC price (only if needed, saves gas if recently updated)
         _updateTWAPForWBTC();
-        // Try to update IUSD if enough time has passed (lazy update)
         _tryUpdateIUSD();
-
-        // Deposit limit check: BTC min/max amount
         _checkWBTCAmount(wbtcAmount);
 
         MintLogic.MintInputs memory inputs = MintLogic.MintInputs({
@@ -389,25 +321,20 @@ contract Minter is ReentrancyGuard, Ownable2Step, Pausable, IMinter {
         });
         MintLogic.MintOutputs memory outputs = MintLogic.evaluate(inputs);
 
-        // Security: Minter receives WBTC first, then transfers to Treasury
-        // Step 1: User transfers WBTC to Minter (user needs to approve Minter)
-        IERC20(core.WBTC()).safeTransferFrom(msg.sender, address(this), wbtcAmount);
-
-        // Step 2: Minter approves Treasury (if not enough allowance)
+        // Transfer WBTC: User -> Minter -> Treasury
         IERC20 wbtc = IERC20(core.WBTC());
         address treasuryAddr = core.TREASURY();
+        wbtc.safeTransferFrom(msg.sender, address(this), wbtcAmount);
         if (wbtc.allowance(address(this), treasuryAddr) < wbtcAmount) {
             wbtc.forceApprove(treasuryAddr, type(uint256).max);
         }
-
-        // Step 3: Treasury transfers from Minter
         ITreasury(treasuryAddr).depositWBTC(wbtcAmount);
 
-        // Mint BTD: user gets net amount, fee goes to Treasury
+        // Mint BTD: user receives net amount, Treasury receives fee
         IMintableERC20 btdToken = IMintableERC20(core.BTD());
-        btdToken.mint(msg.sender, outputs.btdToMint);  // User gets amount after fee
+        btdToken.mint(msg.sender, outputs.btdToMint);
         if (outputs.fee > 0) {
-            btdToken.mint(treasuryAddr, outputs.fee);  // Treasury gets fee
+            btdToken.mint(treasuryAddr, outputs.fee);
         }
 
         emit BTDMinted(msg.sender, wbtcAmount, outputs.btdToMint, outputs.fee);
@@ -462,72 +389,43 @@ contract Minter is ReentrancyGuard, Ownable2Step, Pausable, IMinter {
      * @param btdAmount BTD amount to burn (18 decimals)
      */
     function _redeemBTD(address account, uint256 btdAmount) internal {
-        // Update TWAP for all prices (WBTC always needed, BTD/BTB/BRS needed when CR<100%)
         _updateTWAPAll();
-        // Try to update IUSD if enough time has passed (lazy update)
         _tryUpdateIUSD();
 
         require(btdAmount > 0, "Invalid amount");
-        require(
-            IMintableERC20(core.BTD()).balanceOf(account) >= btdAmount,
-            "Not enough BTD"
-        );
-
-        // Withdrawal limit check: BTD is stablecoin
+        require(IMintableERC20(core.BTD()).balanceOf(account) >= btdAmount, "Not enough BTD");
         _checkStablecoinAmount(btdAmount);
 
         uint256 wbtcPrice = getWBTCPrice();
         uint256 iusdPrice = getIUSDPrice();
         uint256 cr = _getCRWithPrice(wbtcPrice, iusdPrice);
 
-        RedeemLogic.RedeemInputs memory redeemInputs = RedeemLogic.RedeemInputs({
-            btdAmount: btdAmount,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            cr: cr,
-            btdPrice: 0,
-            btbPrice: 0,
-            brsPrice: 0,
-            minBTBPriceInBTD: 0,
-            redeemFeeBP: gov.redeemFeeBP()
-        });
+        RedeemLogic.RedeemInputs memory inputs = _buildRedeemInputs(btdAmount, wbtcPrice, iusdPrice, cr);
+        RedeemLogic.RedeemOutputs memory outputs = RedeemLogic.evaluate(inputs);
 
-        if (cr < Constants.PRECISION_18) {
-            redeemInputs.btdPrice = getBTDPrice();
-            redeemInputs.btbPrice = getBTBPrice();
-            redeemInputs.brsPrice = getBRSPrice();
-            redeemInputs.minBTBPriceInBTD = gov.minBTBPrice();
-        }
-
-        RedeemLogic.RedeemOutputs memory redeemOutputs = RedeemLogic.evaluate(redeemInputs);
-
-        // Burn all user's BTD (including fee)
+        // Burn user's BTD, mint fee to Treasury if applicable
         IMintableERC20(core.BTD()).burnFrom(account, btdAmount);
-
-        // If there's redemption fee, mint to Treasury
-        if (redeemOutputs.fee > 0) {
-            IMintableERC20(core.BTD()).mint(core.TREASURY(), redeemOutputs.fee);
+        if (outputs.fee > 0) {
+            IMintableERC20(core.BTD()).mint(core.TREASURY(), outputs.fee);
         }
 
-        uint256 wbtcOut = _wbtcFromNormalized(redeemOutputs.wbtcOutNormalized);
+        // Transfer WBTC to user
+        uint256 wbtcOut = _wbtcFromNormalized(outputs.wbtcOutNormalized);
         if (wbtcOut > 0) {
             _checkWBTCAmount(wbtcOut);
             ITreasury(core.TREASURY()).withdrawWBTC(wbtcOut);
             IERC20(core.WBTC()).safeTransfer(account, wbtcOut);
         }
 
-        if (redeemOutputs.brsOut > 0) {
-            ITreasury(core.TREASURY()).compensate(account, redeemOutputs.brsOut);
+        // Compensate with BRS/BTB when undercollateralized
+        if (outputs.brsOut > 0) {
+            ITreasury(core.TREASURY()).compensate(account, outputs.brsOut);
+        }
+        if (outputs.btbOut > 0) {
+            IMintableERC20(core.BTB()).mint(account, outputs.btbOut);
         }
 
-        if (redeemOutputs.btbOut > 0) {
-            IMintableERC20(core.BTB()).mint(account, redeemOutputs.btbOut);
-        }
-
-        emit BTDRedeemed(account, btdAmount, wbtcOut, redeemOutputs.btbOut, redeemOutputs.brsOut);
-
-        // Note: fee is collected by burning user's BTD and minting back to Treasury
-        // The effective BTD removed from circulation is (btdAmount - fee)
+        emit BTDRedeemed(account, btdAmount, wbtcOut, outputs.btbOut, outputs.brsOut);
     }
 
     // ============ Redeem BTB ============
@@ -578,34 +476,24 @@ contract Minter is ReentrancyGuard, Ownable2Step, Pausable, IMinter {
     /**
      * @notice Validate BTB redemption request
      * @dev Checks amount range and user balance
-     * @param account Redeemer address
-     * @param btbAmount BTB amount (18 decimals)
      */
     function _validateRedeemBTBRequest(address account, uint256 btbAmount) internal view {
         _checkStablecoinAmount(btbAmount);
-        require(
-            IMintableERC20(core.BTB()).balanceOf(account) >= btbAmount,
-            "Not enough BTB"
-        );
+        require(IMintableERC20(core.BTB()).balanceOf(account) >= btbAmount, "Not enough BTB");
     }
 
     /**
      * @notice Internal BTB redemption implementation
-     * @dev Checks CR>=100%, redemption value meets minimum, doesn't exceed max redeemable, then burns BTB and mints BTD
-     * @param account Redeemer address
-     * @param btbAmount BTB amount (18 decimals)
+     * @dev Requires CR>=100%, burns BTB and mints equal BTD
      */
     function _redeemBTB(address account, uint256 btbAmount) internal {
-        // Update TWAP for WBTC price (needed for CR calculation)
         _updateTWAPForWBTC();
-        // Try to update IUSD if enough time has passed (lazy update)
         _tryUpdateIUSD();
 
-        // Get all prices at once (gas saving)
         uint256 wbtcPrice = getWBTCPrice();
         uint256 iusdPrice = getIUSDPrice();
         uint256 cr = _getCRWithPrice(wbtcPrice, iusdPrice);
-        require(cr >= 1e18, "CR<100%, BTB not redeemable");
+        require(cr >= Constants.PRECISION_18, "CR<100%, BTB not redeemable");
 
         uint256 collateralValue = CollateralMath.collateralValue(totalWBTC(), wbtcPrice);
         uint256 liabilityValue = CollateralMath.liabilityValue(totalBTD(), totalStBTDEquivalent(), iusdPrice);
@@ -624,12 +512,6 @@ contract Minter is ReentrancyGuard, Ownable2Step, Pausable, IMinter {
     /**
      * @notice Get overall system status information
      * @dev Returns all key metrics at once for frontend display
-     * @return _totalBTD BTD total supply (18 decimals)
-     * @return _totalWBTC WBTC balance in Treasury (8 decimals)
-     * @return _collateralRatio Collateral ratio (18 decimals, 1e18=100%)
-     * @return _wbtcPrice WBTC price (18-decimal USD)
-     * @return _btbPrice BTB price (18-decimal USD)
-     * @return _brsPrice BRS price (18-decimal USD)
      */
     function getSystemInfo()
         external
@@ -643,11 +525,6 @@ contract Minter is ReentrancyGuard, Ownable2Step, Pausable, IMinter {
             uint256 _brsPrice
         )
     {
-        _totalBTD = totalBTD();
-        _totalWBTC = totalWBTC();
-        _collateralRatio = getCollateralRatio();
-        _wbtcPrice = getWBTCPrice();
-        _btbPrice = getBTBPrice();
-        _brsPrice = getBRSPrice();
+        return (totalBTD(), totalWBTC(), getCollateralRatio(), getWBTCPrice(), getBTBPrice(), getBRSPrice());
     }
 }

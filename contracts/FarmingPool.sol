@@ -12,7 +12,7 @@ import "./libraries/Constants.sol";
 import "./libraries/RewardMath.sol";
 import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
 
-/// @notice Minimal Farm contract: responsible for distributing pre-minted BRS, no longer has minting or pause privileges
+/// @notice Minimal Farm contract for distributing pre-minted BRS rewards
 contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
     using SafeERC20 for IERC20;
 
@@ -20,25 +20,24 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
     ConfigCore public immutable core;
 
     uint256 public immutable override startTime;
-    uint256 public override minted; // Track distributed rewards, maintain interface compatibility
+    uint256 public override minted;
 
     IFarmingPool.PoolInfo[] private _poolInfo;
     mapping(uint256 => mapping(address => IFarmingPool.UserInfo)) private _userInfo;
     uint256 public totalAllocPoint;
 
     address[] public fundAddrs;
-    uint256[] public fundShares; // Percentage (base 100)
+    uint256[] public fundShares;
     uint256 public constant SHARE_BASE = 100;
 
     event RewardsFunded(address indexed from, uint256 amount);
 
-    /** @notice Constructor */
     constructor(
-        address owner_,                   // Admin address
-        address rewardToken_,             // Reward token (BRS)
-        address _core,                    // ConfigCore contract
-        address[] memory initialFunds,    // Initial fund addresses
-        uint256[] memory initialShares    // Fund shares (base 100)
+        address owner_,
+        address rewardToken_,
+        address _core,
+        address[] memory initialFunds,
+        uint256[] memory initialShares
     ) Ownable(owner_) {
         require(owner_ != address(0), "FarmingPool: invalid owner");
         require(rewardToken_ != address(0), "FarmingPool: zero reward");
@@ -51,26 +50,22 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
 
     // ============ Fund Management ============
 
-    /// @notice Gets BRS reward token address
-    /// @dev For interface compatibility
-    /// @return BRS token contract address
+    /// @notice Returns BRS token address
     function brs() external view override returns (address) {
         return address(rewardToken);
     }
 
-    /// @notice Fund provider injects reward tokens
-    /// @dev Anyone can call to inject BRS rewards into FarmingPool
-    /// @param amount Amount of BRS to inject, precision 1e18
+    /// @notice Injects reward tokens into the pool
+    /// @param amount Amount of BRS to inject (1e18 precision)
     function fundRewards(uint256 amount) external {
         require(amount > 0, "FarmingPool: amount zero");
         rewardToken.safeTransferFrom(msg.sender, address(this), amount);
         emit RewardsFunded(msg.sender, amount);
     }
 
-    /// @notice Sets fund shares
-    /// @dev Only contract owner can call, sets reward distribution ratio to funds
+    /// @notice Sets fund addresses and their share ratios
     /// @param addrs Fund address array
-    /// @param shares Share ratio array (base 100), total cannot exceed 100
+    /// @param shares Share ratios (base 100, total <= 100)
     function setFunds(address[] calldata addrs, uint256[] calldata shares) external onlyOwner {
         _setFunds(addrs, shares);
     }
@@ -88,22 +83,12 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
 
     // ============ Pool Management ============
 
-    /// @notice Gets pool count
-    /// @dev Returns the total number of pools currently added
-    /// @return Total pool count
+    /// @notice Returns total number of pools
     function poolLength() external view override returns (uint256) {
         return _poolInfo.length;
     }
 
-    /// @notice Gets pool detailed information
-    /// @dev Returns all configuration parameters and status for the specified pool
-    /// @param pid Pool ID
-    /// @return lpToken Staking token address
-    /// @return allocPoint Allocation points (determines reward weight)
-    /// @return lastRewardTime Timestamp of last reward calculation
-    /// @return accRewardPerShare Accumulated reward per share, precision 1e18
-    /// @return totalStaked Total staked amount
-    /// @return kind Pool type (LP or single token)
+    /// @notice Returns pool configuration and status
     function poolInfo(uint256 pid)
         external
         view
@@ -128,20 +113,12 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
         );
     }
 
-    /// @notice Gets pool type
-    /// @dev Returns whether the pool is an LP pool or single token pool
-    /// @param pid Pool ID
-    /// @return Pool type (LP or Single)
+    /// @notice Returns pool type (LP or Single)
     function poolKind(uint256 pid) external view override returns (PoolKind) {
         return _poolInfo[pid].kind;
     }
 
-    /// @notice Gets user staking info for a specific pool
-    /// @dev Returns user's staked amount and reward debt
-    /// @param pid Pool ID
-    /// @param user User address
-    /// @return amount User's staked amount, precision 1e18
-    /// @return rewardDebt Reward debt, used for calculating pending rewards
+    /// @notice Returns user's staked amount and reward debt
     function userInfo(uint256 pid, address user)
         external
         view
@@ -152,12 +129,7 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
         return (info.amount, info.rewardDebt);
     }
 
-    /// @notice Adds new pool (optional immediate batch update)
-    /// @dev Only contract owner can call, adds a new staking pool
-    /// @param token Staking token address (LP or single token)
-    /// @param allocPoint Allocation points, determines the pool's weight in total rewards
-    /// @param kind Pool type (LP or Single)
-    /// @param withUpdate Whether to batch update all pools before adding
+    /// @notice Adds new pool with optional batch update
     function addPool(
         IERC20 token,
         uint256 allocPoint,
@@ -167,20 +139,12 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
         _addPoolInternal(allocPoint, token, kind, withUpdate);
     }
 
-    /// @notice Adds new pool (default no batch update)
-    /// @dev Only contract owner can call, adds new pool without triggering batch update
-    /// @param token Staking token address
-    /// @param allocPoint Allocation points
-    /// @param kind Pool type
+    /// @notice Adds new pool without batch update
     function addPool(IERC20 token, uint256 allocPoint, PoolKind kind) external override onlyOwner {
         _addPoolInternal(allocPoint, token, kind, false);
     }
 
-    /// @notice Batch adds pools
-    /// @dev Only contract owner can call, adds multiple pools at once
-    /// @param tokens Staking token address array
-    /// @param allocPoints Allocation points array
-    /// @param kinds Pool type array
+    /// @notice Batch adds multiple pools
     function addPools(
         IERC20[] calldata tokens,
         uint256[] calldata allocPoints,
@@ -215,11 +179,7 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
         );
     }
 
-    /// @notice Modifies pool allocation points
-    /// @dev Only contract owner can call, adjusts the pool's reward weight
-    /// @param pid Pool ID
-    /// @param allocPoint New allocation points
-    /// @param withUpdate Whether to batch update all pools before modifying
+    /// @notice Updates pool allocation points
     function setPool(uint256 pid, uint256 allocPoint, bool withUpdate) external override onlyOwner {
         if (withUpdate) {
             massUpdatePools();
@@ -231,9 +191,7 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
 
     // ============ Reward Calculation ============
 
-    /// @notice Gets current reward rate per second
-    /// @dev Calculates current epoch's reward rate based on start time, halving each epoch
-    /// @return Current BRS reward per second, precision 1e18
+    /// @notice Returns current reward rate per second (halves each epoch)
     function currentRewardPerSecond() external view override returns (uint256) {
         return _currentRewardPerSec();
     }
@@ -245,8 +203,7 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
         return initialRate >> era;
     }
 
-    /// @notice Batch updates all pools
-    /// @dev Iterates through all pools and updates their accumulated rewards, recommended to call before modifying allocation points
+    /// @notice Updates all pools' accumulated rewards
     function massUpdatePools() public {
         uint256 length = _poolInfo.length;
         for (uint256 pid = 0; pid < length; pid++) {
@@ -254,10 +211,7 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
         }
     }
 
-    /// @notice Updates accumulated rewards for a specific pool
-    /// @dev Calculates rewards since last update and updates accRewardPerShare
-    ///      Also distributes fund shares to specified fund addresses
-    /// @param pid Pool ID
+    /// @notice Updates a pool's accumulated rewards and distributes fund shares
     function updatePool(uint256 pid) public {
         IFarmingPool.PoolInfo storage pool = _poolInfo[pid];
         if (block.timestamp <= pool.lastRewardTime) return;
@@ -319,11 +273,7 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
         pool.lastRewardTime = block.timestamp;
     }
 
-    /// @notice Queries user's pending BRS rewards
-    /// @dev Calculates user's current claimable rewards (including unupdated accumulated rewards)
-    /// @param pid Pool ID
-    /// @param account User address
-    /// @return Pending BRS amount, precision 1e18
+    /// @notice Returns user's pending BRS rewards
     function pendingReward(uint256 pid, address account) external view override returns (uint256) {
         IFarmingPool.PoolInfo storage pool = _poolInfo[pid];
         IFarmingPool.UserInfo storage user = _userInfo[pid][account];
@@ -347,11 +297,7 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
 
     // ============ User Operations ============
 
-    /// @notice User stakes tokens
-    /// @dev Stakes tokens to a specific pool to earn BRS rewards, automatically claims accumulated rewards
-    ///      Stake amount must meet minimum USD value requirement
-    /// @param pid Pool ID
-    /// @param amount Stake amount, precision depends on token
+    /// @notice Stakes tokens to earn BRS rewards, auto-claims pending rewards
     function deposit(uint256 pid, uint256 amount) external override nonReentrant {
         _deposit(pid, amount, msg.sender);
     }
@@ -361,13 +307,11 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
         IFarmingPool.UserInfo storage user = _userInfo[pid][account];
         updatePool(pid);
 
-        // CEI Pattern: Calculate pending rewards first
         uint256 pending = 0;
         if (user.amount > 0) {
             pending = RewardMath.pending(user.amount, pool.accRewardPerShare, user.rewardDebt);
         }
 
-        // Effects: Update all state variables before external calls
         if (amount > 0) {
             _validateStakeAmount(pool, amount, pool.kind);
             pool.lpToken.safeTransferFrom(account, address(this), amount);
@@ -376,22 +320,16 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
         }
         user.rewardDebt = RewardMath.rewardDebtValue(user.amount, pool.accRewardPerShare);
 
-        // Interactions: External calls after state updates
         if (pending > 0) {
             rewardToken.safeTransfer(account, pending);
             emit Claim(account, pid, pending);
-
-            // Try lazy BRS buyback when claiming rewards (gas compensated by Treasury)
             _tryLazyBuyback();
         }
 
         emit Deposit(account, pid, amount);
     }
 
-    /// @notice User withdraws staked tokens
-    /// @dev Withdraws staked tokens from specified pool, automatically claims accumulated rewards
-    /// @param pid Pool ID
-    /// @param amount Withdraw amount, cannot exceed staked amount
+    /// @notice Withdraws staked tokens, auto-claims pending rewards
     function withdraw(uint256 pid, uint256 amount) external override nonReentrant {
         _withdraw(pid, amount, msg.sender);
     }
@@ -401,29 +339,23 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
         IFarmingPool.UserInfo storage user = _userInfo[pid][account];
         require(user.amount >= amount, "FarmingPool: withdraw exceeds staked");
 
-        // Validate withdraw amount (prevent dust and overflow attacks)
         if (amount > 0) {
             _validateStakeAmount(pool, amount, pool.kind);
         }
 
         updatePool(pid);
 
-        // CEI Pattern: Calculate pending rewards first
         uint256 pending = RewardMath.pending(user.amount, pool.accRewardPerShare, user.rewardDebt);
 
-        // Effects: Update all state variables before external calls
         if (amount > 0) {
             user.amount -= amount;
             pool.totalStaked -= amount;
         }
         user.rewardDebt = RewardMath.rewardDebtValue(user.amount, pool.accRewardPerShare);
 
-        // Interactions: External calls after state updates
         if (pending > 0) {
             rewardToken.safeTransfer(account, pending);
             emit Claim(account, pid, pending);
-
-            // Try lazy BRS buyback when claiming rewards (gas compensated by Treasury)
             _tryLazyBuyback();
         }
         if (amount > 0) {
@@ -433,9 +365,7 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
         emit Withdraw(account, pid, amount);
     }
 
-    /// @notice Claims BRS rewards
-    /// @dev Claims accumulated rewards from specified pool without affecting staked principal
-    /// @param pid Pool ID
+    /// @notice Claims pending rewards without affecting staked amount
     function claim(uint256 pid) external override nonReentrant {
         _claim(pid, msg.sender);
     }
@@ -445,26 +375,17 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
         IFarmingPool.UserInfo storage user = _userInfo[pid][account];
         updatePool(pid);
 
-        // CEI Pattern: Calculate pending rewards first
         uint256 pending = RewardMath.pending(user.amount, pool.accRewardPerShare, user.rewardDebt);
-
-        // Effects: Update state before external calls
         user.rewardDebt = RewardMath.rewardDebtValue(user.amount, pool.accRewardPerShare);
 
-        // Interactions: External calls after state updates
         if (pending > 0) {
             rewardToken.safeTransfer(account, pending);
             emit Claim(account, pid, pending);
-
-            // Try lazy BRS buyback when claiming rewards (gas compensated by Treasury)
             _tryLazyBuyback();
         }
     }
 
-    /// @notice Emergency withdrawal of all staked tokens
-    /// @dev Forfeits all pending rewards, only withdraws staked principal
-    ///      For emergency situations requiring quick exit
-    /// @param pid Pool ID
+    /// @notice Emergency withdrawal forfeiting all pending rewards
     function emergencyWithdraw(uint256 pid) external override nonReentrant {
         IFarmingPool.PoolInfo storage pool = _poolInfo[pid];
         IFarmingPool.UserInfo storage user = _userInfo[pid][msg.sender];
@@ -481,10 +402,6 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
 
     // ============ Token Amount Validation ============
 
-    /// @notice Validates token amount against system limits
-    /// @dev Uses token-specific min/max limits instead of USD value
-    /// @param token Token address
-    /// @param amount Token amount (in token's native decimals)
     function _validateTokenAmount(address token, uint256 amount) internal view {
         if (token == core.WBTC()) {
             require(amount >= Constants.MIN_BTC_AMOUNT, "FarmingPool: amount too small");
@@ -496,16 +413,11 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
             require(amount >= Constants.MIN_ETH_AMOUNT, "FarmingPool: amount too small");
             require(amount <= Constants.MAX_ETH_AMOUNT, "FarmingPool: amount too large");
         } else {
-            // 18-decimal tokens: BTD, BTB, BRS, stBTD, stBTB
             require(amount >= Constants.MIN_STABLECOIN_18_AMOUNT, "FarmingPool: amount too small");
             require(amount <= Constants.MAX_STABLECOIN_18_AMOUNT, "FarmingPool: amount too large");
         }
     }
 
-    /// @notice Validates LP token amount by checking underlying token amounts
-    /// @dev Calculates underlying amounts from LP and validates each
-    /// @param lpToken LP token address
-    /// @param lpAmount LP token amount
     function _validateLPTokenAmount(IERC20 lpToken, uint256 lpAmount) internal view {
         IUniswapV2Pair pair = IUniswapV2Pair(address(lpToken));
         uint256 totalSupply = pair.totalSupply();
@@ -515,21 +427,13 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
         address token0 = pair.token0();
         address token1 = pair.token1();
 
-        // Calculate underlying amounts
         uint256 amount0 = Math.mulDiv(lpAmount, reserve0, totalSupply);
         uint256 amount1 = Math.mulDiv(lpAmount, reserve1, totalSupply);
 
-        // Validate each underlying token amount
         _validateTokenAmount(token0, amount0);
         _validateTokenAmount(token1, amount1);
     }
 
-    /// @notice Validates stake amount based on pool type
-    /// @dev For Single pools: validates token amount directly
-    ///      For LP pools: validates underlying token amounts
-    /// @param pool Pool info storage
-    /// @param amount Stake amount
-    /// @param kind Pool type
     function _validateStakeAmount(
         IFarmingPool.PoolInfo storage pool,
         uint256 amount,
@@ -544,10 +448,7 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
 
     // ============ Lazy BRS Buyback ============
 
-    /// @notice Try to trigger lazy BRS buyback
-    /// @dev Called when users claim BRS rewards
-    /// @dev Treasury will execute buyback if conditions are met (balance, cooldown, random)
-    /// @dev Gas cost is compensated by Treasury in ETH
+    /// @notice Triggers lazy BRS buyback via Treasury (gas compensated)
     function _tryLazyBuyback() internal {
         address treasury = core.TREASURY();
         if (treasury != address(0)) {

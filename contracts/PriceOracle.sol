@@ -59,7 +59,6 @@ contract PriceOracle is Ownable2Step, IPriceOracle {
     uint256 public constant MAX_DEVIATION_CEILING = 500;  // Cannot exceed 5%
     uint256 public constant MIN_DEVIATION_FLOOR = 50;     // Cannot be below 0.5%
     uint256 public constant DEVIATION_UPDATE_COOLDOWN = 1 days;
-    uint256 public constant GOV_COOLDOWN = 1 days;
 
     // Pyth price safety parameters
     uint256 public constant PYTH_MAX_STALENESS = 60;      // Maximum staleness: 60 seconds
@@ -196,13 +195,25 @@ contract PriceOracle is Ownable2Step, IPriceOracle {
     // ============ TWAP Update Functions ============
 
     /**
+     * @notice Internal helper to update TWAP for specified pools
+     * @dev Checks TWAP availability before updating
+     * @param pools Array of pool addresses to update
+     */
+    function _updateTWAPForPools(address[] memory pools) internal {
+        if (!useTWAP || address(twapOracle) == address(0)) return;
+        for (uint256 i = 0; i < pools.length; i++) {
+            twapOracle.updateIfNeeded(pools[i]);
+        }
+    }
+
+    /**
      * @notice Update TWAP for WBTC price query (WBTC/USDC pair)
      * @dev Call before getWBTCPrice() if TWAP might be stale
      */
     function updateTWAPForWBTC() external {
-        if (useTWAP && address(twapOracle) != address(0)) {
-            twapOracle.updateIfNeeded(core.POOL_WBTC_USDC());
-        }
+        address[] memory pools = new address[](1);
+        pools[0] = core.POOL_WBTC_USDC();
+        _updateTWAPForPools(pools);
     }
 
     /**
@@ -210,9 +221,9 @@ contract PriceOracle is Ownable2Step, IPriceOracle {
      * @dev Call before getBTDPrice() if TWAP might be stale
      */
     function updateTWAPForBTD() external {
-        if (useTWAP && address(twapOracle) != address(0)) {
-            twapOracle.updateIfNeeded(core.POOL_BTD_USDC());
-        }
+        address[] memory pools = new address[](1);
+        pools[0] = core.POOL_BTD_USDC();
+        _updateTWAPForPools(pools);
     }
 
     /**
@@ -220,10 +231,10 @@ contract PriceOracle is Ownable2Step, IPriceOracle {
      * @dev Call before getBTBPrice() if TWAP might be stale
      */
     function updateTWAPForBTB() external {
-        if (useTWAP && address(twapOracle) != address(0)) {
-            twapOracle.updateIfNeeded(core.POOL_BTB_BTD());
-            twapOracle.updateIfNeeded(core.POOL_BTD_USDC());
-        }
+        address[] memory pools = new address[](2);
+        pools[0] = core.POOL_BTB_BTD();
+        pools[1] = core.POOL_BTD_USDC();
+        _updateTWAPForPools(pools);
     }
 
     /**
@@ -231,10 +242,10 @@ contract PriceOracle is Ownable2Step, IPriceOracle {
      * @dev Call before getBRSPrice() if TWAP might be stale
      */
     function updateTWAPForBRS() external {
-        if (useTWAP && address(twapOracle) != address(0)) {
-            twapOracle.updateIfNeeded(core.POOL_BRS_BTD());
-            twapOracle.updateIfNeeded(core.POOL_BTD_USDC());
-        }
+        address[] memory pools = new address[](2);
+        pools[0] = core.POOL_BRS_BTD();
+        pools[1] = core.POOL_BTD_USDC();
+        _updateTWAPForPools(pools);
     }
 
     /**
@@ -242,12 +253,12 @@ contract PriceOracle is Ownable2Step, IPriceOracle {
      * @dev Updates all 4 pairs: WBTC/USDC, BTD/USDC, BTB/BTD, BRS/BTD
      */
     function updateTWAPAll() external {
-        if (useTWAP && address(twapOracle) != address(0)) {
-            twapOracle.updateIfNeeded(core.POOL_WBTC_USDC());
-            twapOracle.updateIfNeeded(core.POOL_BTD_USDC());
-            twapOracle.updateIfNeeded(core.POOL_BTB_BTD());
-            twapOracle.updateIfNeeded(core.POOL_BRS_BTD());
-        }
+        address[] memory pools = new address[](4);
+        pools[0] = core.POOL_WBTC_USDC();
+        pools[1] = core.POOL_BTD_USDC();
+        pools[2] = core.POOL_BTB_BTD();
+        pools[3] = core.POOL_BRS_BTD();
+        _updateTWAPForPools(pools);
     }
 
     // ============ Chainlink Price Queries ============
@@ -304,7 +315,7 @@ contract PriceOracle is Ownable2Step, IPriceOracle {
         // Check confidence level (conf should be small relative to price)
         // conf/price < 1% means price uncertainty is acceptable
         require(
-            price.conf * 100 <= uint64(price.price),
+            price.conf * PYTH_MAX_CONF_RATIO <= uint64(price.price),
             "Pyth confidence too wide"
         );
 
@@ -439,34 +450,53 @@ contract PriceOracle is Ownable2Step, IPriceOracle {
     }
 
     /**
+     * @notice Internal helper to get token price via BTD with TWAP/spot deviation check
+     * @dev Calculates: token/USD = (token/BTD TWAP) x (BTD/USD)
+     * @param pool Token/BTD pool address
+     * @param base Token address
+     * @param twapSpotMaxBps Maximum allowed TWAP vs Spot deviation (basis points)
+     * @param tokenName Token name for error message
+     * @return Token price (18 decimal USD)
+     */
+    function _getTokenPriceViaBTD(
+        address pool,
+        address base,
+        uint256 twapSpotMaxBps,
+        string memory tokenName
+    ) internal view returns (uint256) {
+        address quote = core.BTD();
+
+        // Get TWAP price
+        uint256 twapPrice = _getPriceTWAP(pool, base, quote);
+
+        // Guardrail: Check TWAP vs Spot deviation
+        uint256 spotPrice = _getPriceSpot(pool, base, quote);
+        require(
+            OracleMath.deviationWithin(twapPrice, spotPrice, twapSpotMaxBps),
+            string.concat(tokenName, ": TWAP/spot deviation")
+        );
+
+        // token/USD = token/BTD * BTD/USD
+        uint256 btdUsdc = getBTDPrice();  // Already has guardrails
+        return Math.mulDiv(twapPrice, btdUsdc, 1e18);
+    }
+
+    /**
      * @notice Gets BTB/USD price with guardrails
      * @dev Calculates via BTB/BTD and BTD/USDC two pools: BTB price = (BTB/BTD price) x (BTD/USD price)
      *      Guardrail: BTB/BTD TWAP vs Spot deviation must be within 10%
      * @return BTB price (18 decimal USD)
      */
     function getBTBPrice() public view returns (uint256) {
-        address pool = core.POOL_BTB_BTD();
-        address base = core.BTB();
-        address quote = core.BTD();
-
-        // Get TWAP price for BTB/BTD
-        uint256 btbBtdTwap = _getPriceTWAP(pool, base, quote);
-
-        // Guardrail: Check TWAP vs Spot deviation
-        uint256 btbBtdSpot = _getPriceSpot(pool, base, quote);
-        require(
-            OracleMath.deviationWithin(btbBtdTwap, btbBtdSpot, BTB_TWAP_SPOT_MAX_BPS),
-            "BTB: TWAP/spot deviation"
-        );
-
-        // BTB/USD = BTB/BTD * BTD/USD
-        uint256 btdUsdc = getBTDPrice();  // Already has guardrails
-        uint256 price = Math.mulDiv(btbBtdTwap, btdUsdc, 1e18);
-
         // Return actual price (no limit)
         // Price capping is handled by Minter contract:
         // - If BTB price < minPrice, calculate BTB compensation at minPrice, difference compensated with BRS
-        return price;
+        return _getTokenPriceViaBTD(
+            core.POOL_BTB_BTD(),
+            core.BTB(),
+            BTB_TWAP_SPOT_MAX_BPS,
+            "BTB"
+        );
     }
 
     /**
@@ -476,25 +506,43 @@ contract PriceOracle is Ownable2Step, IPriceOracle {
      * @return BRS price (18 decimal USD)
      */
     function getBRSPrice() public view returns (uint256) {
-        address pool = core.POOL_BRS_BTD();
-        address base = core.BRS();
-        address quote = core.BTD();
-
-        // Get TWAP price for BRS/BTD
-        uint256 brsBtdTwap = _getPriceTWAP(pool, base, quote);
-
-        // Guardrail: Check TWAP vs Spot deviation
-        uint256 brsBtdSpot = _getPriceSpot(pool, base, quote);
-        require(
-            OracleMath.deviationWithin(brsBtdTwap, brsBtdSpot, BRS_TWAP_SPOT_MAX_BPS),
-            "BRS: TWAP/spot deviation"
+        return _getTokenPriceViaBTD(
+            core.POOL_BRS_BTD(),
+            core.BRS(),
+            BRS_TWAP_SPOT_MAX_BPS,
+            "BRS"
         );
+    }
 
-        // BRS/USD = BRS/BTD * BTD/USD
-        uint256 btdUsdc = getBTDPrice();  // Already has guardrails
-        uint256 price = Math.mulDiv(brsBtdTwap, btdUsdc, 1e18);
+    /**
+     * @notice Internal helper to calculate ERC4626 vault token price
+     * @dev Formula: (totalAssets / totalSupply) x underlying price
+     * @param vaultAddr ERC4626 vault address
+     * @param underlyingPrice Price of the underlying token (18 decimals)
+     * @param tokenName Token name for error message
+     * @return Vault token price (18 decimal USD)
+     */
+    function _getVaultTokenPrice(
+        address vaultAddr,
+        uint256 underlyingPrice,
+        string memory tokenName
+    ) internal view returns (uint256) {
+        require(vaultAddr != address(0), string.concat(tokenName, " not configured"));
 
-        return price;
+        IERC4626 vault = IERC4626(vaultAddr);
+        uint256 totalShares = vault.totalSupply();
+
+        // Initial state: no deposits yet, 1:1 pegged to underlying
+        if (totalShares == 0) {
+            return underlyingPrice;
+        }
+
+        // Assets per share (18 decimals)
+        uint256 totalAssets = vault.totalAssets();
+        uint256 assetsPerShare = Math.mulDiv(totalAssets, 1e18, totalShares);
+
+        // Vault token price = assets per share x underlying price
+        return Math.mulDiv(assetsPerShare, underlyingPrice, 1e18);
     }
 
     /**
@@ -503,27 +551,7 @@ contract PriceOracle is Ownable2Step, IPriceOracle {
      * @return stBTD price (18 decimal USD)
      */
     function getStBTDPrice() public view returns (uint256) {
-        address stBTDAddr = core.ST_BTD();
-        require(stBTDAddr != address(0), "stBTD not configured");
-
-        IERC4626 stBTDVault = IERC4626(stBTDAddr);
-        uint256 totalShares = stBTDVault.totalSupply();
-
-        // Initial state: no deposits yet, 1:1 pegged to BTD
-        if (totalShares == 0) {
-            return getBTDPrice();
-        }
-
-        // Get total underlying assets (includes accumulated interest)
-        uint256 totalAssets = stBTDVault.totalAssets();
-
-        // Assets per share (18 decimals)
-        // assetsPerShare = totalAssets / totalShares
-        uint256 assetsPerShare = Math.mulDiv(totalAssets, 1e18, totalShares);
-
-        // stBTD price = assets per share x BTD price
-        uint256 btdPrice = getBTDPrice();
-        return Math.mulDiv(assetsPerShare, btdPrice, 1e18);
+        return _getVaultTokenPrice(core.ST_BTD(), getBTDPrice(), "stBTD");
     }
 
     /**
@@ -532,27 +560,7 @@ contract PriceOracle is Ownable2Step, IPriceOracle {
      * @return stBTB price (18 decimal USD)
      */
     function getStBTBPrice() public view returns (uint256) {
-        address stBTBAddr = core.ST_BTB();
-        require(stBTBAddr != address(0), "stBTB not configured");
-
-        IERC4626 stBTBVault = IERC4626(stBTBAddr);
-        uint256 totalShares = stBTBVault.totalSupply();
-
-        // Initial state: no deposits yet, 1:1 pegged to BTB
-        if (totalShares == 0) {
-            return getBTBPrice();
-        }
-
-        // Get total underlying assets (includes accumulated interest)
-        uint256 totalAssets = stBTBVault.totalAssets();
-
-        // Assets per share (18 decimals)
-        // assetsPerShare = totalAssets / totalShares
-        uint256 assetsPerShare = Math.mulDiv(totalAssets, 1e18, totalShares);
-
-        // stBTB price = assets per share x BTB price
-        uint256 btbPrice = getBTBPrice();
-        return Math.mulDiv(assetsPerShare, btbPrice, 1e18);
+        return _getVaultTokenPrice(core.ST_BTB(), getBTBPrice(), "stBTB");
     }
 
     /**
