@@ -4,6 +4,7 @@ pragma solidity ^0.8.30;
 import "forge-std/Test.sol";
 import "../../contracts/ConfigGov.sol";
 import "../../contracts/libraries/Constants.sol";
+import "../helpers/ProxyTestHelper.sol";
 
 /// @title ConfigGov BASE_RATE_DEFAULT Unit Tests
 /// @notice Tests for the BASE_RATE_DEFAULT governance parameter
@@ -20,7 +21,7 @@ contract ConfigGovBaseRateTest is Test {
     function setUp() public {
         owner = address(this);
         user = address(0x1234);
-        gov = new ConfigGov(owner);
+        gov = ProxyTestHelper.deployConfigGov(owner);
     }
 
     // ============ Default Value Tests ============
@@ -31,7 +32,7 @@ contract ConfigGovBaseRateTest is Test {
     }
 
     function test_getParam_baseRateDefault() public view {
-        uint256 rate = gov.getParam(ConfigGov.ParamType.BASE_RATE_DEFAULT);
+        uint256 rate = gov.getParam(ConfigGov.ParamType.BaseRateDefault);
         assertEq(rate, DEFAULT_BASE_RATE, "getParam should return 500 bps");
     }
 
@@ -40,7 +41,7 @@ contract ConfigGovBaseRateTest is Test {
     function test_setParam_baseRateDefault_success() public {
         uint256 newRate = 300; // 3%
 
-        gov.setParam(ConfigGov.ParamType.BASE_RATE_DEFAULT, newRate);
+        gov.setParam(ConfigGov.ParamType.BaseRateDefault, newRate);
 
         assertEq(gov.baseRateDefault(), newRate, "Base rate should be updated");
     }
@@ -48,7 +49,7 @@ contract ConfigGovBaseRateTest is Test {
     function test_setParam_baseRateDefault_minValue() public {
         uint256 minRate = MIN_BASE_RATE; // 1%
 
-        gov.setParam(ConfigGov.ParamType.BASE_RATE_DEFAULT, minRate);
+        gov.setParam(ConfigGov.ParamType.BaseRateDefault, minRate);
 
         assertEq(gov.baseRateDefault(), minRate, "Should accept minimum rate");
     }
@@ -56,7 +57,7 @@ contract ConfigGovBaseRateTest is Test {
     function test_setParam_baseRateDefault_maxValue() public {
         uint256 maxRate = MAX_BASE_RATE; // 10%
 
-        gov.setParam(ConfigGov.ParamType.BASE_RATE_DEFAULT, maxRate);
+        gov.setParam(ConfigGov.ParamType.BaseRateDefault, maxRate);
 
         assertEq(gov.baseRateDefault(), maxRate, "Should accept maximum rate");
     }
@@ -65,19 +66,19 @@ contract ConfigGovBaseRateTest is Test {
         uint256 tooLow = MIN_BASE_RATE - 1; // 0.99%
 
         vm.expectRevert("ConfigGov: base rate too low");
-        gov.setParam(ConfigGov.ParamType.BASE_RATE_DEFAULT, tooLow);
+        gov.setParam(ConfigGov.ParamType.BaseRateDefault, tooLow);
     }
 
     function test_setParam_baseRateDefault_revertTooHigh() public {
         uint256 tooHigh = MAX_BASE_RATE + 1; // 10.01%
 
         vm.expectRevert("ConfigGov: base rate too high");
-        gov.setParam(ConfigGov.ParamType.BASE_RATE_DEFAULT, tooHigh);
+        gov.setParam(ConfigGov.ParamType.BaseRateDefault, tooHigh);
     }
 
     function test_setParam_baseRateDefault_revertZero() public {
         vm.expectRevert("ConfigGov: base rate too low");
-        gov.setParam(ConfigGov.ParamType.BASE_RATE_DEFAULT, 0);
+        gov.setParam(ConfigGov.ParamType.BaseRateDefault, 0);
     }
 
     // ============ Access Control Tests ============
@@ -85,7 +86,7 @@ contract ConfigGovBaseRateTest is Test {
     function test_setParam_onlyOwner() public {
         vm.prank(user);
         vm.expectRevert(); // OwnableUnauthorizedAccount
-        gov.setParam(ConfigGov.ParamType.BASE_RATE_DEFAULT, 300);
+        gov.setParam(ConfigGov.ParamType.BaseRateDefault, 300);
     }
 
     // ============ Batch Set Tests ============
@@ -94,10 +95,10 @@ contract ConfigGovBaseRateTest is Test {
         ConfigGov.ParamType[] memory types = new ConfigGov.ParamType[](2);
         uint256[] memory values = new uint256[](2);
 
-        types[0] = ConfigGov.ParamType.MINT_FEE_BP;
+        types[0] = ConfigGov.ParamType.MintFeeBp;
         values[0] = 100; // 1%
 
-        types[1] = ConfigGov.ParamType.BASE_RATE_DEFAULT;
+        types[1] = ConfigGov.ParamType.BaseRateDefault;
         values[1] = 400; // 4%
 
         gov.setParamsBatch(types, values);
@@ -110,10 +111,10 @@ contract ConfigGovBaseRateTest is Test {
         ConfigGov.ParamType[] memory types = new ConfigGov.ParamType[](2);
         uint256[] memory values = new uint256[](2);
 
-        types[0] = ConfigGov.ParamType.MINT_FEE_BP;
+        types[0] = ConfigGov.ParamType.MintFeeBp;
         values[0] = 100;
 
-        types[1] = ConfigGov.ParamType.BASE_RATE_DEFAULT;
+        types[1] = ConfigGov.ParamType.BaseRateDefault;
         values[1] = 2000; // Too high
 
         vm.expectRevert("ConfigGov: base rate too high");
@@ -124,9 +125,9 @@ contract ConfigGovBaseRateTest is Test {
 
     function test_setParam_emitsEvent() public {
         vm.expectEmit(true, false, false, true);
-        emit ConfigGov.ParamUpdated(ConfigGov.ParamType.BASE_RATE_DEFAULT, 300);
+        emit ConfigGov.ParamUpdated(ConfigGov.ParamType.BaseRateDefault, 300);
 
-        gov.setParam(ConfigGov.ParamType.BASE_RATE_DEFAULT, 300);
+        gov.setParam(ConfigGov.ParamType.BaseRateDefault, 300);
     }
 
     // ============ Fuzz Tests ============
@@ -134,7 +135,7 @@ contract ConfigGovBaseRateTest is Test {
     function testFuzz_baseRateDefault_validRange(uint256 rate) public {
         rate = bound(rate, MIN_BASE_RATE, MAX_BASE_RATE);
 
-        gov.setParam(ConfigGov.ParamType.BASE_RATE_DEFAULT, rate);
+        gov.setParam(ConfigGov.ParamType.BaseRateDefault, rate);
 
         assertEq(gov.baseRateDefault(), rate, "Rate should be set correctly");
     }
@@ -143,10 +144,10 @@ contract ConfigGovBaseRateTest is Test {
         // Test rates outside valid range
         if (rate < MIN_BASE_RATE) {
             vm.expectRevert("ConfigGov: base rate too low");
-            gov.setParam(ConfigGov.ParamType.BASE_RATE_DEFAULT, rate);
+            gov.setParam(ConfigGov.ParamType.BaseRateDefault, rate);
         } else if (rate > MAX_BASE_RATE) {
             vm.expectRevert("ConfigGov: base rate too high");
-            gov.setParam(ConfigGov.ParamType.BASE_RATE_DEFAULT, rate);
+            gov.setParam(ConfigGov.ParamType.BaseRateDefault, rate);
         }
         // Valid range handled by testFuzz_baseRateDefault_validRange
     }
@@ -155,19 +156,19 @@ contract ConfigGovBaseRateTest is Test {
 
     function test_baseRateDefault_independentOfOtherParams() public {
         // Change other params, verify base rate unchanged
-        gov.setParam(ConfigGov.ParamType.MINT_FEE_BP, 100);
-        gov.setParam(ConfigGov.ParamType.REDEEM_FEE_BP, 100);
-        gov.setParam(ConfigGov.ParamType.INTEREST_FEE_BP, 1000);
+        gov.setParam(ConfigGov.ParamType.MintFeeBp, 100);
+        gov.setParam(ConfigGov.ParamType.RedeemFeeBp, 100);
+        gov.setParam(ConfigGov.ParamType.InterestFeeBp, 1000);
 
         assertEq(gov.baseRateDefault(), DEFAULT_BASE_RATE, "Base rate should remain unchanged");
     }
 
     function test_allParamsIndependent() public {
         // Set all params to non-default values
-        gov.setParam(ConfigGov.ParamType.MINT_FEE_BP, 100);
-        gov.setParam(ConfigGov.ParamType.REDEEM_FEE_BP, 100);
-        gov.setParam(ConfigGov.ParamType.INTEREST_FEE_BP, 1000);
-        gov.setParam(ConfigGov.ParamType.BASE_RATE_DEFAULT, 300);
+        gov.setParam(ConfigGov.ParamType.MintFeeBp, 100);
+        gov.setParam(ConfigGov.ParamType.RedeemFeeBp, 100);
+        gov.setParam(ConfigGov.ParamType.InterestFeeBp, 1000);
+        gov.setParam(ConfigGov.ParamType.BaseRateDefault, 300);
 
         // Verify all are set correctly
         assertEq(gov.mintFeeBP(), 100);
@@ -179,32 +180,32 @@ contract ConfigGovBaseRateTest is Test {
     // ============ Edge Cases ============
 
     function test_baseRateDefault_exactMinBoundary() public {
-        gov.setParam(ConfigGov.ParamType.BASE_RATE_DEFAULT, MIN_BASE_RATE);
+        gov.setParam(ConfigGov.ParamType.BaseRateDefault, MIN_BASE_RATE);
         assertEq(gov.baseRateDefault(), MIN_BASE_RATE);
 
         // One below should fail
         vm.expectRevert("ConfigGov: base rate too low");
-        gov.setParam(ConfigGov.ParamType.BASE_RATE_DEFAULT, MIN_BASE_RATE - 1);
+        gov.setParam(ConfigGov.ParamType.BaseRateDefault, MIN_BASE_RATE - 1);
     }
 
     function test_baseRateDefault_exactMaxBoundary() public {
-        gov.setParam(ConfigGov.ParamType.BASE_RATE_DEFAULT, MAX_BASE_RATE);
+        gov.setParam(ConfigGov.ParamType.BaseRateDefault, MAX_BASE_RATE);
         assertEq(gov.baseRateDefault(), MAX_BASE_RATE);
 
         // One above should fail
         vm.expectRevert("ConfigGov: base rate too high");
-        gov.setParam(ConfigGov.ParamType.BASE_RATE_DEFAULT, MAX_BASE_RATE + 1);
+        gov.setParam(ConfigGov.ParamType.BaseRateDefault, MAX_BASE_RATE + 1);
     }
 
     function test_baseRateDefault_multipleUpdates() public {
         // Update multiple times
-        gov.setParam(ConfigGov.ParamType.BASE_RATE_DEFAULT, 200);
+        gov.setParam(ConfigGov.ParamType.BaseRateDefault, 200);
         assertEq(gov.baseRateDefault(), 200);
 
-        gov.setParam(ConfigGov.ParamType.BASE_RATE_DEFAULT, 800);
+        gov.setParam(ConfigGov.ParamType.BaseRateDefault, 800);
         assertEq(gov.baseRateDefault(), 800);
 
-        gov.setParam(ConfigGov.ParamType.BASE_RATE_DEFAULT, 500);
+        gov.setParam(ConfigGov.ParamType.BaseRateDefault, 500);
         assertEq(gov.baseRateDefault(), 500);
     }
 }

@@ -5,6 +5,8 @@ import "../../contracts/IdealUSDManager.sol";
 import "../../contracts/ConfigGov.sol";
 import "../../contracts/local/MockAggregatorV3.sol";
 import "../../contracts/libraries/Constants.sol";
+import "../helpers/ProxyTestHelper.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 contract IdealUSDManagerCoreTest {
     uint256 constant INITIAL_IUSD = 1e18;
@@ -12,12 +14,12 @@ contract IdealUSDManagerCoreTest {
     function testUpdateIUSDFlow() public {
         MockAggregatorV3 pce = new MockAggregatorV3(int256(300_00_000_000)); // 300, 8 decimals
 
-        // Deploy ConfigGov and set PCE Feed
-        ConfigGov configGov = new ConfigGov(address(this));
-        configGov.setAddressParam(ConfigGov.AddressParamType.PCE_FEED, address(pce));
+        // Deploy ConfigGov via proxy and set PCE Feed
+        ConfigGov configGov = ProxyTestHelper.deployConfigGov(address(this));
+        configGov.setAddressParam(ConfigGov.AddressParamType.PceFeed, address(pce));
 
-        // Constructor now uses ConfigGov to get PCE Feed address
-        IdealUSDManager mgr = new IdealUSDManager(
+        // Deploy IdealUSDManager via proxy
+        IdealUSDManager mgr = ProxyTestHelper.deployIdealUSDManager(
             address(this),      // owner
             address(configGov), // configGov
             INITIAL_IUSD        // initialIUSD
@@ -37,10 +39,10 @@ contract IdealUSDManagerCoreTest {
     function testInflationParametersFromConstants() public {
         MockAggregatorV3 pce = new MockAggregatorV3(int256(300_00_000_000));
 
-        ConfigGov configGov = new ConfigGov(address(this));
-        configGov.setAddressParam(ConfigGov.AddressParamType.PCE_FEED, address(pce));
+        ConfigGov configGov = ProxyTestHelper.deployConfigGov(address(this));
+        configGov.setAddressParam(ConfigGov.AddressParamType.PceFeed, address(pce));
 
-        IdealUSDManager mgr = new IdealUSDManager(
+        IdealUSDManager mgr = ProxyTestHelper.deployIdealUSDManager(
             address(this),
             address(configGov),
             INITIAL_IUSD
@@ -57,10 +59,10 @@ contract IdealUSDManagerCoreTest {
     function testPCEFeedFromConfigGov() public {
         MockAggregatorV3 pce = new MockAggregatorV3(int256(300_00_000_000));
 
-        ConfigGov configGov = new ConfigGov(address(this));
-        configGov.setAddressParam(ConfigGov.AddressParamType.PCE_FEED, address(pce));
+        ConfigGov configGov = ProxyTestHelper.deployConfigGov(address(this));
+        configGov.setAddressParam(ConfigGov.AddressParamType.PceFeed, address(pce));
 
-        IdealUSDManager mgr = new IdealUSDManager(
+        IdealUSDManager mgr = ProxyTestHelper.deployIdealUSDManager(
             address(this),
             address(configGov),
             INITIAL_IUSD
@@ -71,15 +73,15 @@ contract IdealUSDManagerCoreTest {
         require(mgr.pceFeedDecimals() == 8, "pce decimals should be 8");
     }
 
-    function testConstructorValidation() public {
+    function testInitializeValidation() public {
         MockAggregatorV3 pce = new MockAggregatorV3(int256(300_00_000_000));
+        IdealUSDManager impl = new IdealUSDManager();
 
-        // Test invalid ConfigGov
+        // Test invalid ConfigGov (zero address)
         bool reverted1;
-        try new IdealUSDManager(
-            address(this),
-            address(0),        // invalid ConfigGov
-            INITIAL_IUSD
+        try new ERC1967Proxy(
+            address(impl),
+            abi.encodeCall(IdealUSDManager.initialize, (address(this), address(0), INITIAL_IUSD))
         ) {
         } catch {
             reverted1 = true;
@@ -87,12 +89,11 @@ contract IdealUSDManagerCoreTest {
         require(reverted1, "should reject zero ConfigGov");
 
         // Test ConfigGov without PCE Feed set
-        ConfigGov emptyConfigGov = new ConfigGov(address(this));
+        ConfigGov emptyConfigGov = ProxyTestHelper.deployConfigGov(address(this));
         bool reverted2;
-        try new IdealUSDManager(
-            address(this),
-            address(emptyConfigGov),  // PCE Feed not set
-            INITIAL_IUSD
+        try new ERC1967Proxy(
+            address(impl),
+            abi.encodeCall(IdealUSDManager.initialize, (address(this), address(emptyConfigGov), INITIAL_IUSD))
         ) {
         } catch {
             reverted2 = true;
@@ -100,13 +101,12 @@ contract IdealUSDManagerCoreTest {
         require(reverted2, "should reject ConfigGov without PCE Feed");
 
         // Test zero initial IUSD
-        ConfigGov configGov = new ConfigGov(address(this));
-        configGov.setAddressParam(ConfigGov.AddressParamType.PCE_FEED, address(pce));
+        ConfigGov configGov = ProxyTestHelper.deployConfigGov(address(this));
+        configGov.setAddressParam(ConfigGov.AddressParamType.PceFeed, address(pce));
         bool reverted3;
-        try new IdealUSDManager(
-            address(this),
-            address(configGov),
-            0                  // invalid initial value
+        try new ERC1967Proxy(
+            address(impl),
+            abi.encodeCall(IdealUSDManager.initialize, (address(this), address(configGov), 0))
         ) {
         } catch {
             reverted3 = true;
@@ -117,10 +117,10 @@ contract IdealUSDManagerCoreTest {
     function testManualIUSDSetWithSafety() public {
         MockAggregatorV3 pce = new MockAggregatorV3(int256(300_00_000_000));
 
-        ConfigGov configGov = new ConfigGov(address(this));
-        configGov.setAddressParam(ConfigGov.AddressParamType.PCE_FEED, address(pce));
+        ConfigGov configGov = ProxyTestHelper.deployConfigGov(address(this));
+        configGov.setAddressParam(ConfigGov.AddressParamType.PceFeed, address(pce));
 
-        IdealUSDManager mgr = new IdealUSDManager(
+        IdealUSDManager mgr = ProxyTestHelper.deployIdealUSDManager(
             address(this),
             address(configGov),
             INITIAL_IUSD
@@ -144,10 +144,10 @@ contract IdealUSDManagerCoreTest {
     function testAuthorizerWhitelist() public {
         MockAggregatorV3 pce = new MockAggregatorV3(int256(300_00_000_000));
 
-        ConfigGov configGov = new ConfigGov(address(this));
-        configGov.setAddressParam(ConfigGov.AddressParamType.PCE_FEED, address(pce));
+        ConfigGov configGov = ProxyTestHelper.deployConfigGov(address(this));
+        configGov.setAddressParam(ConfigGov.AddressParamType.PceFeed, address(pce));
 
-        IdealUSDManager mgr = new IdealUSDManager(
+        IdealUSDManager mgr = ProxyTestHelper.deployIdealUSDManager(
             address(this),
             address(configGov),
             INITIAL_IUSD
@@ -170,13 +170,13 @@ contract IdealUSDManagerCoreTest {
     function testPCEDeviationLimit() public {
         MockAggregatorV3 pce = new MockAggregatorV3(int256(300_00_000_000)); // 300, 8 decimals
 
-        ConfigGov configGov = new ConfigGov(address(this));
-        configGov.setAddressParam(ConfigGov.AddressParamType.PCE_FEED, address(pce));
+        ConfigGov configGov = ProxyTestHelper.deployConfigGov(address(this));
+        configGov.setAddressParam(ConfigGov.AddressParamType.PceFeed, address(pce));
 
         // Set PCE max deviation to 2% (2e16)
-        configGov.setParam(ConfigGov.ParamType.PCE_MAX_DEVIATION, 2e16);
+        configGov.setParam(ConfigGov.ParamType.PceMaxDeviation, 2e16);
 
-        IdealUSDManager mgr = new IdealUSDManager(
+        IdealUSDManager mgr = ProxyTestHelper.deployIdealUSDManager(
             address(this),
             address(configGov),
             INITIAL_IUSD
@@ -200,7 +200,7 @@ contract IdealUSDManagerCoreTest {
         require(reverted, "should reject PCE change > 2%");
 
         // Set max deviation to 10% (maximum allowed by ConfigGov)
-        configGov.setParam(ConfigGov.ParamType.PCE_MAX_DEVIATION, 1e17);
+        configGov.setParam(ConfigGov.ParamType.PceMaxDeviation, 1e17);
 
         // Now larger change should succeed (within 10% limit)
         // Previous successful PCE was 304.5, so 9% increase = 331.9

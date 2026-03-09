@@ -3,8 +3,11 @@ pragma solidity ^0.8.30;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
+import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "./interfaces/IFarmingPool.sol";
 import "./interfaces/ITreasury.sol";
 import "./ConfigCore.sol";
@@ -13,13 +16,13 @@ import "./libraries/RewardMath.sol";
 import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
 
 /// @notice Minimal Farm contract for distributing pre-minted BRS rewards
-contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
+contract FarmingPool is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpgradeable, UUPSUpgradeable, IFarmingPool {
     using SafeERC20 for IERC20;
 
-    IERC20 public immutable rewardToken;
-    ConfigCore public immutable core;
+    IERC20 public rewardToken;
+    ConfigCore public core;
 
-    uint256 public immutable override startTime;
+    uint256 public override startTime;
     uint256 public override minted;
 
     IFarmingPool.PoolInfo[] private _poolInfo;
@@ -32,21 +35,38 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
 
     event RewardsFunded(address indexed from, uint256 amount);
 
-    constructor(
+    // ============ Initialization ============
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(
         address owner_,
         address rewardToken_,
         address _core,
         address[] memory initialFunds,
         uint256[] memory initialShares
-    ) Ownable(owner_) {
+    ) public initializer {
         require(owner_ != address(0), "FarmingPool: invalid owner");
         require(rewardToken_ != address(0), "FarmingPool: zero reward");
         require(_core != address(0), "FarmingPool: zero core");
+
+        __Ownable_init(owner_);
+        __Ownable2Step_init();
+        __ReentrancyGuard_init();
+        __UUPSUpgradeable_init();
+
         rewardToken = IERC20(rewardToken_);
         core = ConfigCore(_core);
         startTime = block.timestamp;
         _setFunds(initialFunds, initialShares);
     }
+
+    // ============ UUPS ============
+
+    function _authorizeUpgrade(address) internal override onlyOwner {}
 
     // ============ Fund Management ============
 
@@ -56,7 +76,6 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
     }
 
     /// @notice Injects reward tokens into the pool
-    /// @param amount Amount of BRS to inject (1e18 precision)
     function fundRewards(uint256 amount) external {
         require(amount > 0, "FarmingPool: amount zero");
         rewardToken.safeTransferFrom(msg.sender, address(this), amount);
@@ -64,8 +83,6 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
     }
 
     /// @notice Sets fund addresses and their share ratios
-    /// @param addrs Fund address array
-    /// @param shares Share ratios (base 100, total <= 100)
     function setFunds(address[] calldata addrs, uint256[] calldata shares) external onlyOwner {
         _setFunds(addrs, shares);
     }
@@ -83,12 +100,10 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
 
     // ============ Pool Management ============
 
-    /// @notice Returns total number of pools
     function poolLength() external view override returns (uint256) {
         return _poolInfo.length;
     }
 
-    /// @notice Returns pool configuration and status
     function poolInfo(uint256 pid)
         external
         view
@@ -113,12 +128,10 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
         );
     }
 
-    /// @notice Returns pool type (LP or Single)
     function poolKind(uint256 pid) external view override returns (PoolKind) {
         return _poolInfo[pid].kind;
     }
 
-    /// @notice Returns user's staked amount and reward debt
     function userInfo(uint256 pid, address user)
         external
         view
@@ -129,7 +142,6 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
         return (info.amount, info.rewardDebt);
     }
 
-    /// @notice Adds new pool with optional batch update
     function addPool(
         IERC20 token,
         uint256 allocPoint,
@@ -139,12 +151,10 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
         _addPoolInternal(allocPoint, token, kind, withUpdate);
     }
 
-    /// @notice Adds new pool without batch update
     function addPool(IERC20 token, uint256 allocPoint, PoolKind kind) external override onlyOwner {
         _addPoolInternal(allocPoint, token, kind, false);
     }
 
-    /// @notice Batch adds multiple pools
     function addPools(
         IERC20[] calldata tokens,
         uint256[] calldata allocPoints,
@@ -179,7 +189,6 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
         );
     }
 
-    /// @notice Updates pool allocation points
     function setPool(uint256 pid, uint256 allocPoint, bool withUpdate) external override onlyOwner {
         if (withUpdate) {
             massUpdatePools();
@@ -191,7 +200,6 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
 
     // ============ Reward Calculation ============
 
-    /// @notice Returns current reward rate per second (halves each epoch)
     function currentRewardPerSecond() external view override returns (uint256) {
         return _currentRewardPerSec();
     }
@@ -203,7 +211,6 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
         return initialRate >> era;
     }
 
-    /// @notice Updates all pools' accumulated rewards
     function massUpdatePools() public {
         uint256 length = _poolInfo.length;
         for (uint256 pid = 0; pid < length; pid++) {
@@ -211,7 +218,6 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
         }
     }
 
-    /// @notice Updates a pool's accumulated rewards and distributes fund shares
     function updatePool(uint256 pid) public {
         IFarmingPool.PoolInfo storage pool = _poolInfo[pid];
         if (block.timestamp <= pool.lastRewardTime) return;
@@ -273,7 +279,6 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
         pool.lastRewardTime = block.timestamp;
     }
 
-    /// @notice Returns user's pending BRS rewards
     function pendingReward(uint256 pid, address account) external view override returns (uint256) {
         IFarmingPool.PoolInfo storage pool = _poolInfo[pid];
         IFarmingPool.UserInfo storage user = _userInfo[pid][account];
@@ -297,7 +302,6 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
 
     // ============ User Operations ============
 
-    /// @notice Stakes tokens to earn BRS rewards, auto-claims pending rewards
     function deposit(uint256 pid, uint256 amount) external override nonReentrant {
         _deposit(pid, amount, msg.sender);
     }
@@ -329,7 +333,6 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
         emit Deposit(account, pid, amount);
     }
 
-    /// @notice Withdraws staked tokens, auto-claims pending rewards
     function withdraw(uint256 pid, uint256 amount) external override nonReentrant {
         _withdraw(pid, amount, msg.sender);
     }
@@ -365,7 +368,6 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
         emit Withdraw(account, pid, amount);
     }
 
-    /// @notice Claims pending rewards without affecting staked amount
     function claim(uint256 pid) external override nonReentrant {
         _claim(pid, msg.sender);
     }
@@ -385,7 +387,6 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
         }
     }
 
-    /// @notice Emergency withdrawal forfeiting all pending rewards
     function emergencyWithdraw(uint256 pid) external override nonReentrant {
         IFarmingPool.PoolInfo storage pool = _poolInfo[pid];
         IFarmingPool.UserInfo storage user = _userInfo[pid][msg.sender];
@@ -448,11 +449,14 @@ contract FarmingPool is Ownable2Step, ReentrancyGuard, IFarmingPool {
 
     // ============ Lazy BRS Buyback ============
 
-    /// @notice Triggers lazy BRS buyback via Treasury (gas compensated)
     function _tryLazyBuyback() internal {
         address treasury = core.TREASURY();
         if (treasury != address(0)) {
             try ITreasury(treasury).tryLazyBuyback() {} catch {}
         }
     }
+
+    // ============ Storage Gap ============
+
+    uint256[50] private __gap;
 }

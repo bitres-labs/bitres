@@ -25,6 +25,8 @@ describe("Config Architecture (ConfigCore + ConfigGov - Viem)", function () {
   let tokens: any;
   let oracles: any;
   let pools: any;
+  let minter: any;
+  let treasury: any;
 
   // Setup fixture for efficient testing
   async function deployConfigFixture() {
@@ -64,7 +66,9 @@ describe("Config Architecture (ConfigCore + ConfigGov - Viem)", function () {
         mockPoolBtdUsdc: system.mockPoolBtdUsdc,
         mockPoolBtbBtd: system.mockPoolBtbBtd,
         mockPoolBrsBtd: system.mockPoolBrsBtd
-      }
+      },
+      minter: system.minter,
+      treasury: system.treasury
     };
   }
 
@@ -80,6 +84,8 @@ describe("Config Architecture (ConfigCore + ConfigGov - Viem)", function () {
     tokens = fixture.tokens;
     oracles = fixture.oracles;
     pools = fixture.pools;
+    minter = fixture.minter;
+    treasury = fixture.treasury;
   });
 
   describe("Deployment & Immutable Addresses", function () {
@@ -126,7 +132,7 @@ describe("Config Architecture (ConfigCore + ConfigGov - Viem)", function () {
       expect(await configGov.read.mintFeeBP()).to.equal(50n);       // 0.5% default
       expect(await configGov.read.redeemFeeBP()).to.equal(50n);     // 0.5% default
       expect(await configGov.read.interestFeeBP()).to.equal(500n);  // 5% default
-      expect(await configGov.read.minBTBPrice()).to.equal(0n);      // Not initialized
+      expect(await configGov.read.minBTBPrice()).to.equal(500000000000000000n); // 0.5 BTD default per whitepaper
       expect(await configGov.read.maxBTBRate()).to.equal(0n);       // Not initialized
     });
 
@@ -238,33 +244,24 @@ describe("Config Architecture (ConfigCore + ConfigGov - Viem)", function () {
 
   describe("Integration with System", function () {
     it("should allow deployed contracts to read configuration", async function () {
-      // Deploy a Minter that reads from ConfigCore
-      const minter = await viem.deployContract("Minter", [
-        owner.account.address,
-        config.address,        // ConfigCore
-        configGov.address      // ConfigGov
-      ]);
-
-      // Minter should be able to read WBTC address from Config
+      // Use the already-deployed minter from fixture (UUPS proxy)
+      // Minter reads from ConfigCore via its core reference
       expect((await config.read.WBTC()).toLowerCase()).to.equal(tokens.wbtc.address.toLowerCase());
+
+      // Verify minter has correct configCore reference
+      const minterCore = await minter.read.configCore();
+      expect(minterCore.toLowerCase()).to.equal(config.address.toLowerCase());
     });
 
     it("should support multiple contracts reading same config", async function () {
-      const configAddr = config.address;
+      // Use already-deployed contracts from fixture (both are UUPS proxies)
+      // Both minter and treasury should reference the same ConfigCore
 
-      // Deploy Minter (needs both core + gov)
-      const minter = await viem.deployContract("Minter", [
-        owner.account.address,
-        configAddr,           // ConfigCore
-        configGov.address     // ConfigGov
-      ]);
+      const minterCore = await minter.read.configCore();
+      const treasuryCore = await treasury.read.configCore();
 
-      // Deploy Treasury (only needs core)
-      const treasury = await viem.deployContract("Treasury", [
-        owner.account.address,
-        configAddr,
-        owner.account.address
-      ]);
+      expect(minterCore.toLowerCase()).to.equal(config.address.toLowerCase());
+      expect(treasuryCore.toLowerCase()).to.equal(config.address.toLowerCase());
 
       // Both should access the same immutable values
       expect((await config.read.WBTC()).toLowerCase()).to.equal(tokens.wbtc.address.toLowerCase());

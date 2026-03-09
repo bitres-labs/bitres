@@ -3,13 +3,13 @@
  *
  * Architecture:
  * - ConfigCore: immutable addresses (tokens, pools, stTokens) + storage addresses (core contracts)
- * - ConfigGov: governable parameters (mintFeeBP, interestFeeBP, minBTBPrice, maxBTBRate)
- * - Minter: uses both ConfigCore and ConfigGov
- * - PriceOracle, Treasury, FarmingPool: use ConfigCore only
+ * - ConfigGov: governable parameters (mintFeeBP, interestFeeBP, minBTBPrice, maxBTBRate) - UUPS Proxy
+ * - Minter: uses both ConfigCore and ConfigGov - UUPS Proxy
+ * - PriceOracle, Treasury, FarmingPool, InterestPool, IdealUSDManager: UUPS Proxies
  */
 
 import hre from "hardhat";
-import { keccak256, toHex } from "viem";
+import { keccak256, toHex, encodeFunctionData, encodeAbiParameters } from "viem";
 
 // Hardhat 3.0: Get viem and networkHelpers from network connection
 const { viem, networkHelpers } = await hre.network.connect();
@@ -31,23 +31,36 @@ export interface SystemContracts {
 
   // Config
   configCore: any;      // ConfigCore (immutable + storage addresses)
-  configGov: any;       // ConfigGov (governable parameters)
+  configGov: any;       // ConfigGov (governable parameters) - Proxy
   config: any;          // Alias for configCore (backward compatibility)
 
-  // Core contracts
+  // Core contracts (all proxies)
   minter: any;
   treasury: any;
   priceOracle: any;
   idealUSDManager: any;
+  interestPool: any;
 
   // Pools
   farmingPool: any;
+
+  // Staking tokens
+  stBTD: any;
+  stBTB: any;
+
+  // TWAP Oracle
+  twapOracle: any;
 
   // Mock oracles
   mockBtcUsd: any;
   mockWbtcBtc: any;
   mockPce: any;
   mockPyth: any;
+  mockUsdcUsd: any;
+  mockUsdtUsd: any;
+
+  // Oracle IDs
+  pythId: `0x${string}`;
 
   // Mock pools
   mockPoolWbtcUsdc: any;
@@ -61,6 +74,59 @@ export interface SystemContracts {
  */
 export async function getWallets() {
   return await viem.getWalletClients();
+}
+
+/**
+ * Deploy a UUPS upgradeable contract with proxy
+ * Uses ProxyHelper to deploy ERC1967Proxy
+ * @param contractName Full contract path (e.g., "contracts/Minter.sol:Minter")
+ * @param initArgs Arguments for initialize() function
+ * @returns Contract instance at proxy address
+ */
+async function deployProxy(contractName: string, initArgs: any[]) {
+  const [owner] = await getWallets();
+
+  // Deploy implementation (no constructor args for UUPS)
+  const impl = await viem.deployContract(contractName, []);
+
+  // Get ABI for encoding initialize call
+  const artifact = await hre.artifacts.readArtifact(contractName.split(":")[1] || contractName);
+  const initializeAbi = artifact.abi.find((item: any) => item.name === "initialize" && item.type === "function");
+
+  if (!initializeAbi) {
+    throw new Error(`No initialize function found in ${contractName}`);
+  }
+
+  // Encode initialize call
+  const initData = encodeFunctionData({
+    abi: [initializeAbi],
+    functionName: "initialize",
+    args: initArgs,
+  });
+
+  // Deploy proxy using ProxyHelper
+  const proxyHelper = await viem.deployContract(
+    "contracts/test/ProxyImport.sol:ProxyHelper",
+    []
+  );
+
+  const publicClient = await viem.getPublicClient();
+
+  // Use simulateContract to get the return value
+  const { result: proxyAddress } = await publicClient.simulateContract({
+    address: proxyHelper.address,
+    abi: proxyHelper.abi,
+    functionName: 'deploy',
+    args: [impl.address, initData],
+    account: owner.account,
+  });
+
+  // Actually execute the deploy
+  const tx = await proxyHelper.write.deploy([impl.address, initData]);
+  await publicClient.waitForTransactionReceipt({ hash: tx });
+
+  // Return contract instance at proxy address
+  return await viem.getContractAt(contractName, proxyAddress);
 }
 
 /**
@@ -182,42 +248,7 @@ export async function deployPools() {
 }
 
 /**
- * Deploy IdealUSDManager
- *
- * @param configGovAddress ConfigGov contract address
- * @returns IdealUSDManager instance
- * @dev Inflation parameters use Constants library defaults (2% annual inflation)
- * @dev PCE feed address is pulled from ConfigGov
- * @dev PCE_FEED must be set in ConfigGov before deployment
- */
-export async function deployIdealUSDManager(configGovAddress: `0x${string}`) {
-  const [owner] = await getWallets();
-
-  const idealUSDManager = await viem.deployContract(
-    "contracts/IdealUSDManager.sol:IdealUSDManager",
-    [
-      owner.account.address,           // _owner
-      configGovAddress,                // _configGov
-      10n ** 18n                      // _initialIUSD (1.0)
-    ]
-  );
-
-  return idealUSDManager;
-}
-
-/**
- * Deploy ConfigCore and ConfigGov
- *
- * @param tokens Token contracts
- * @param pools Pool contracts
- * @param stBTD stBTD contract address
- * @param stBTB stBTB contract address
- * @returns {core: ConfigCore, gov: ConfigGov}
- * @dev ConfigCore constructor needs 13 params (7 tokens + 4 pools + 2 stTokens)
- * @dev Oracle addresses are now stored in ConfigGov
- * @dev The 6 core contracts (Treasury, Minter, PriceOracle, IdealUSDManager, InterestPool, FarmingPool)
- *      are set later via setCoreContracts()
- * @dev Governor address is set separately via ConfigGov.setGovernor() for upgradability
+ * Deploy ConfigCore (not upgradeable) and ConfigGov (UUPS proxy)
  */
 export async function deployConfig(
   tokens: Awaited<ReturnType<typeof deployTokens>>,
@@ -228,6 +259,7 @@ export async function deployConfig(
   const [owner] = await getWallets();
 
   // Deploy ConfigCore (13 constructor params: 7 tokens + 4 pools + 2 stTokens)
+  // ConfigCore is NOT upgradeable - immutable addresses
   const configCore = await viem.deployContract(
     "contracts/ConfigCore.sol:ConfigCore",
     [
@@ -250,83 +282,13 @@ export async function deployConfig(
     ]
   );
 
-  // Deploy ConfigGov (governance parameters)
-  const configGov = await viem.deployContract(
+  // Deploy ConfigGov via UUPS proxy
+  const configGov = await deployProxy(
     "contracts/ConfigGov.sol:ConfigGov",
-    [
-      owner.account.address                                 // initialOwner (only 1 param!)
-    ]
+    [owner.account.address]  // initialize(address initialOwner)
   );
 
   return { core: configCore, gov: configGov };
-}
-
-/**
- * Deploy PriceOracle
- * Note: Redstone removed - using dual-source validation (Chainlink + Pyth)
- */
-export async function deployPriceOracle(
-  configCoreAddress: `0x${string}`,
-  configGovAddress: `0x${string}`,
-  pythId: `0x${string}`,
-  twapOracleAddress: `0x${string}` = "0x0000000000000000000000000000000000000000" as `0x${string}`
-) {
-  const [owner] = await getWallets();
-
-  const priceOracle = await viem.deployContract(
-    "contracts/PriceOracle.sol:PriceOracle",
-    [
-      owner.account.address,          // owner
-      configCoreAddress,              // _core (ConfigCore)
-      configGovAddress,               // _gov (ConfigGov)
-      twapOracleAddress,              // twapOracle
-      pythId,                         // pythWbtcPriceId (immutable)
-    ]
-  );
-
-  return priceOracle;
-}
-
-/**
- * Deploy Treasury
- */
-export async function deployTreasury(
-  configCoreAddress: `0x${string}`,
-  routerAddr: `0x${string}`
-) {
-  const [owner] = await getWallets();
-
-  const treasury = await viem.deployContract(
-    "contracts/Treasury.sol:Treasury",
-    [
-      owner.account.address,          // owner
-      configCoreAddress,              // _core (ConfigCore)
-      routerAddr                      // routerAddr (Uniswap router)
-    ]
-  );
-
-  return treasury;
-}
-
-/**
- * Deploy Minter
- */
-export async function deployMinter(
-  configCoreAddress: `0x${string}`,
-  configGovAddress: `0x${string}`
-) {
-  const [owner] = await getWallets();
-
-  const minter = await viem.deployContract(
-    "contracts/Minter.sol:Minter",
-    [
-      owner.account.address,          // owner
-      configCoreAddress,              // _core (ConfigCore)
-      configGovAddress                // _gov (ConfigGov)
-    ]
-  );
-
-  return minter;
 }
 
 /**
@@ -348,8 +310,8 @@ export function toBytes32(str: string): `0x${string}` {
  * 2. stBTD, stBTB (depend on BTD, BTB)
  * 3. LP Pools (no dependencies)
  * 4. ConfigCore (needs tokens, pools, stTokens)
- * 5. ConfigGov
- * 6. Other contracts (Treasury, Minter, etc.)
+ * 5. ConfigGov (UUPS proxy)
+ * 6. Other contracts via UUPS proxies
  * 7. setCoreContracts() to fill circular dependencies
  *
  * @returns SystemContracts containing all deployed contracts
@@ -374,81 +336,69 @@ export async function deployFullSystem(): Promise<SystemContracts> {
   // Step 4: Deploy oracles
   const oracles = await deployOracles();
 
-  // Step 5: Deploy ConfigCore (needs tokens, pools, stTokens)
+  // Step 5: Deploy ConfigCore and ConfigGov
   const config = await deployConfig(tokens, pools, stBTD, stBTB);
 
-  // Step 6: Deploy ConfigGov and set parameters
-  // ConfigGov is created in deployConfig, so we use config.gov
+  // Step 6: Set ConfigGov parameters
   await config.gov.write.setAddressParam([0n, oracles.mockPce.address]); // PCE_FEED
   await config.gov.write.setParam([4n, 2n * 10n ** 16n]); // PCE_MAX_DEVIATION = 2%
 
   // Set oracle addresses in ConfigGov
-  // AddressParamType: 1=CHAINLINK_BTC_USD, 2=CHAINLINK_WBTC_BTC, 3=PYTH_WBTC, 4=CHAINLINK_USDC_USD, 5=CHAINLINK_USDT_USD
   await config.gov.write.setAddressParam([1n, oracles.mockBtcUsd.address]);   // CHAINLINK_BTC_USD
   await config.gov.write.setAddressParam([2n, oracles.mockWbtcBtc.address]);  // CHAINLINK_WBTC_BTC
   await config.gov.write.setAddressParam([3n, oracles.mockPyth.address]);     // PYTH_WBTC
   await config.gov.write.setAddressParam([4n, oracles.mockUsdcUsd.address]);  // CHAINLINK_USDC_USD
   await config.gov.write.setAddressParam([5n, oracles.mockUsdtUsd.address]);  // CHAINLINK_USDT_USD
 
-  // Step 7: Deploy IdealUSDManager (needs ConfigGov)
-  const idealUSDManager = await deployIdealUSDManager(config.gov.address);
+  // Step 7: Deploy IdealUSDManager (UUPS proxy)
+  const idealUSDManager = await deployProxy(
+    "contracts/IdealUSDManager.sol:IdealUSDManager",
+    [owner.account.address, config.gov.address, 10n ** 18n]  // owner, configGov, initialIUSD
+  );
 
-  // Step 8: Governor placeholder
-  const governor = owner.account.address;
-
-  // Step 9: Deploy TWAP Oracle
+  // Step 8: Deploy TWAP Oracle (not upgradeable)
   const twapOracle = await viem.deployContract(
     "contracts/UniswapV2TWAPOracle.sol:UniswapV2TWAPOracle",
     []
   );
 
-  // Step 10: Deploy FarmingPool
-  const farmingPool = await viem.deployContract(
-    "contracts/FarmingPool.sol:FarmingPool",
-    [
-      owner.account.address,
-      tokens.brs.address,
-      config.core.address,
-      [],
-      []
-    ]
+  // Step 9: Deploy Treasury (UUPS proxy)
+  const treasury = await deployProxy(
+    "contracts/Treasury.sol:Treasury",
+    [owner.account.address, config.core.address, owner.account.address]  // owner, core, router
   );
 
-  // Step 11: Deploy Treasury
-  const treasury = await deployTreasury(
-    config.core.address,
-    owner.account.address  // router address (using owner as placeholder)
-  );
-
-  // Step 12: Deploy PriceOracle
+  // Step 10: Deploy PriceOracle (UUPS proxy)
   const pythId = toBytes32("PYTH_WBTC");
   await oracles.mockPyth.write.setPrice([pythId, 5_000_000_000_000n, -8]);
 
-  const priceOracle = await deployPriceOracle(
-    config.core.address,
-    config.gov.address,
-    pythId,
-    twapOracle.address
+  const priceOracle = await deployProxy(
+    "contracts/PriceOracle.sol:PriceOracle",
+    [owner.account.address, config.core.address, config.gov.address, twapOracle.address, pythId]
   );
 
   // Disable TWAP for testing (TWAP requires 30 min observation period)
   await priceOracle.write.setUseTWAP([false], { account: owner.account });
 
-  // Step 13: Deploy InterestPool
-  const interestPool = await viem.deployContract(
+  // Step 11: Deploy InterestPool (UUPS proxy)
+  const interestPool = await deployProxy(
     "contracts/InterestPool.sol:InterestPool",
-    [
-      owner.account.address,
-      config.core.address,
-      config.gov.address,
-      owner.account.address  // _rateOracle (placeholder)
-    ]
+    [owner.account.address, config.core.address, config.gov.address, owner.account.address]
   );
 
-  // Step 14: Deploy Minter
-  const minter = await deployMinter(config.core.address, config.gov.address);
+  // Step 12: Deploy Minter (UUPS proxy)
+  const minter = await deployProxy(
+    "contracts/Minter.sol:Minter",
+    [owner.account.address, config.core.address, config.gov.address]
+  );
 
-  // Step 15: Set the 6 core contract addresses in ConfigCore
+  // Step 13: Deploy FarmingPool (UUPS proxy)
+  const farmingPool = await deployProxy(
+    "contracts/FarmingPool.sol:FarmingPool",
+    [owner.account.address, tokens.brs.address, config.core.address, [], []]
+  );
+
+  // Step 14: Set the 6 core contract addresses in ConfigCore
   await config.core.write.setCoreContracts([
     treasury.address,
     minter.address,
@@ -458,10 +408,13 @@ export async function deployFullSystem(): Promise<SystemContracts> {
     farmingPool.address
   ]);
 
-  // Step 15b: Set Governor in ConfigGov (upgradable)
-  await config.gov.write.setGovernor([governor]);
+  // Step 15: Set Governor in ConfigGov
+  await config.gov.write.setGovernor([owner.account.address]);
 
-  // Step 16: Grant MINTER_ROLE to Minter and InterestPool
+  // Step 16: Initialize InterestPool pools (after ConfigCore has BTD/BTB)
+  await interestPool.write.initializePools([]);
+
+  // Step 17: Grant MINTER_ROLE to Minter and InterestPool
   const MINTER_ROLE = keccak256(toHex("MINTER_ROLE"));
   const DEFAULT_ADMIN_ROLE = '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`;
 
@@ -474,7 +427,7 @@ export async function deployFullSystem(): Promise<SystemContracts> {
   await tokens.btd.write.renounceRole([DEFAULT_ADMIN_ROLE, owner.account.address], { account: owner.account });
   await tokens.btb.write.renounceRole([DEFAULT_ADMIN_ROLE, owner.account.address], { account: owner.account });
 
-  // Step 17: Initialize pools (CRITICAL for PriceOracle to work!)
+  // Step 18: Initialize pools (CRITICAL for PriceOracle to work!)
   await pools.mockPoolWbtcUsdc.write.initialize([
     tokens.wbtc.address,
     tokens.usdc.address
@@ -499,7 +452,7 @@ export async function deployFullSystem(): Promise<SystemContracts> {
     configGov: config.gov,
     config: config.core,  // Alias for backward compatibility
 
-    // Core contracts
+    // Core contracts (all proxies)
     minter,
     treasury,
     priceOracle,

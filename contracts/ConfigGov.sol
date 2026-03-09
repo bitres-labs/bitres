@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "./libraries/Constants.sol";
 
 /// @title ConfigGov - Governable Parameter Configuration Contract
 /// @notice Manages runtime-adjustable system parameters (fees, limits, oracle addresses)
-contract ConfigGov is Ownable2Step {
+contract ConfigGov is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
 
     /// @notice Parameter type enum for uint256 values
     enum ParamType {
@@ -44,14 +46,27 @@ contract ConfigGov is Ownable2Step {
 
     // ============ Initialization ============
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     /// @notice Initializes governance parameters with defaults (0.5% mint/redeem fee, 5% interest fee)
-    constructor(address initialOwner) Ownable(initialOwner) {
+    function initialize(address initialOwner) public initializer {
         require(initialOwner != address(0), "ConfigGov: zero owner");
+        __Ownable_init(initialOwner);
+        __Ownable2Step_init();
+        __UUPSUpgradeable_init();
         _params[ParamType.MintFeeBp] = 50;
         _params[ParamType.RedeemFeeBp] = 50;
         _params[ParamType.InterestFeeBp] = 500;
         _params[ParamType.BaseRateDefault] = 500;
+        _params[ParamType.MinBtbPrice] = 5e17; // 0.5 BTD per whitepaper
     }
+
+    // ============ UUPS ============
+
+    function _authorizeUpgrade(address) internal override onlyOwner {}
 
     // ============ Parameter Management ============
 
@@ -160,4 +175,8 @@ contract ConfigGov is Ownable2Step {
     }
 
     function governor() external view returns (address) { return _governor; }
+
+    // ============ Storage Gap ============
+
+    uint256[50] private __gap;
 }

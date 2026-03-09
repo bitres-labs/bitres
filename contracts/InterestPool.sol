@@ -2,8 +2,10 @@
 // Compatible with OpenZeppelin Contracts ^5.4.0
 pragma solidity ^0.8.30;
 
-import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
@@ -21,13 +23,13 @@ import "./libraries/SigmoidRate.sol";
 /// @notice Manages interest accrual for BTD/BTB via stBTD/stBTB vaults.
 /// @dev Users interact via vault contracts, not directly. Rate calculation uses
 ///      Sigmoid functions per whitepaper Section 7.1.3.
-contract InterestPool is Ownable2Step, ReentrancyGuard, IInterestPool {
+contract InterestPool is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpgradeable, UUPSUpgradeable, IInterestPool {
     using SafeERC20 for IMintableERC20;
 
     uint256 private constant FALLBACK_DEFAULT_RATE_BPS = 500; // 5%
-    uint256 private constant TREASURY_FEE_BPS = 1000; // 10%
+    uint256 private constant TREASURY_FEE_BPS = 500; // 5% per whitepaper
 
-    ConfigCore public immutable core;
+    ConfigCore public core;
     ConfigGov public gov;
     address public rateOracle;
 
@@ -65,23 +67,43 @@ contract InterestPool is Ownable2Step, ReentrancyGuard, IInterestPool {
         _;
     }
 
-    constructor(
+    // ============ Initialization ============
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(
         address initialOwner,
         address _core,
         address _gov,
         address _rateOracle
-    ) Ownable(initialOwner) {
+    ) public initializer {
         require(initialOwner != address(0), "InterestPool: invalid owner");
         require(_core != address(0), "InterestPool: core zero");
         require(_gov != address(0), "InterestPool: gov zero");
         require(_rateOracle != address(0), "InterestPool: rate oracle zero");
+
+        __Ownable_init(initialOwner);
+        __Ownable2Step_init();
+        __ReentrancyGuard_init();
+        __UUPSUpgradeable_init();
+
         core = ConfigCore(_core);
         gov = ConfigGov(_gov);
         rateOracle = _rateOracle;
     }
 
+    // ============ UUPS ============
+
+    function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    // ============ Pool Initialization ============
+
     /// @notice Initialize pools after ConfigCore has BTD/BTB addresses set
-    function initialize() external onlyOwner {
+    /// @dev Renamed from initialize() to avoid conflict with UUPS initializer
+    function initializePools() external onlyOwner {
         require(!initialized, "InterestPool: already initialized");
 
         address btdAddress = core.BTD();
@@ -110,13 +132,15 @@ contract InterestPool is Ownable2Step, ReentrancyGuard, IInterestPool {
     }
 
     function totalStaked(address token) external view returns (uint256) {
-        (Pool storage pool,) = _getPoolAndUsers(token);
-        return address(pool.token) != address(0) ? pool.totalStaked : 0;
+        if (token == address(btdPool.token) && token != address(0)) return btdPool.totalStaked;
+        if (token == address(btbPool.token) && token != address(0)) return btbPool.totalStaked;
+        return 0;
     }
 
     function userStaked(address token, address user) external view returns (uint256) {
-        (, mapping(address => UserInfo) storage users) = _getPoolAndUsers(token);
-        return users[user].amount;
+        if (token == address(btdPool.token) && token != address(0)) return btdUsers[user].amount;
+        if (token == address(btbPool.token) && token != address(0)) return btbUsers[user].amount;
+        return 0;
     }
 
     // --- Admin Functions ---
@@ -314,7 +338,7 @@ contract InterestPool is Ownable2Step, ReentrancyGuard, IInterestPool {
         } else if (token == address(btbPool.token)) {
             return (btbPool, btbUsers);
         }
-        return (btdPool, btdUsers); // Default fallback
+        revert("InterestPool: unknown token");
     }
 
     function _pendingCurrent(Pool storage pool, UserInfo storage user) internal view returns (uint256) {
@@ -342,7 +366,7 @@ contract InterestPool is Ownable2Step, ReentrancyGuard, IInterestPool {
     function _payout(Pool storage pool, address recipient, uint256 amount) internal {
         pool.token.mint(recipient, amount);
 
-        // BTD pool: mint 10% treasury fee
+        // BTD pool: mint treasury fee
         if (address(pool.token) == address(btdPool.token)) {
             address treasury = core.TREASURY();
             require(treasury != address(0), "Treasury not set");
@@ -386,4 +410,8 @@ contract InterestPool is Ownable2Step, ReentrancyGuard, IInterestPool {
             return Constants.PRECISION_18;
         }
     }
+
+    // ============ Storage Gap ============
+
+    uint256[50] private __gap;
 }

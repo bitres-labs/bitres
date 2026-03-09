@@ -5,6 +5,7 @@ import "forge-std/Test.sol";
 import "../../contracts/libraries/SigmoidRate.sol";
 import "../../contracts/libraries/Constants.sol";
 import "../../contracts/ConfigGov.sol";
+import "../helpers/ProxyTestHelper.sol";
 
 /// @title InterestPool Rate Integration Tests
 /// @notice Tests the integration of SigmoidRate calculations with ConfigGov parameters
@@ -22,7 +23,7 @@ contract InterestPoolRateIntegrationTest is Test {
     uint256 constant PRICE_AT_PEG = 1e18;
 
     function setUp() public {
-        gov = new ConfigGov(address(this));
+        gov = ProxyTestHelper.deployConfigGov(address(this));
     }
 
     // ============ Base Rate from Governance Tests ============
@@ -43,7 +44,7 @@ contract InterestPoolRateIntegrationTest is Test {
 
     function test_rateCalculation_respondsToGovernanceChange() public {
         // Change governance default rate
-        gov.setParam(ConfigGov.ParamType.BASE_RATE_DEFAULT, 300); // 3%
+        gov.setParam(ConfigGov.ParamType.BaseRateDefault, 300); // 3%
 
         uint256 newDefault = gov.baseRateDefault();
         assertEq(newDefault, 300, "Gov should return new rate");
@@ -234,7 +235,7 @@ contract InterestPoolRateIntegrationTest is Test {
 
     function test_governanceSensitivity_lowDefault() public {
         // Set low default rate (1%)
-        gov.setParam(ConfigGov.ParamType.BASE_RATE_DEFAULT, 100);
+        gov.setParam(ConfigGov.ParamType.BaseRateDefault, 100);
         uint256 defaultRate = gov.baseRateDefault();
 
         uint256 btdRate = SigmoidRate.calculateBTDRate(PRICE_AT_PEG, CR_100_PERCENT, defaultRate);
@@ -246,7 +247,7 @@ contract InterestPoolRateIntegrationTest is Test {
 
     function test_governanceSensitivity_highDefault() public {
         // Set high default rate (10%)
-        gov.setParam(ConfigGov.ParamType.BASE_RATE_DEFAULT, 1000);
+        gov.setParam(ConfigGov.ParamType.BaseRateDefault, 1000);
         uint256 defaultRate = gov.baseRateDefault();
 
         uint256 btdRate = SigmoidRate.calculateBTDRate(PRICE_AT_PEG, CR_100_PERCENT, defaultRate);

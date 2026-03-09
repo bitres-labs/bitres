@@ -77,41 +77,46 @@ export default buildModule("FullSystemLocal", (m) => {
   );
   const mockPyth = m.contract("contracts/local/MockPyth.sol:MockPyth", [], { id: "MockPyth" });
 
-  // ===== Phase 6: ConfigGov =====
-  const configGov = m.contract("ConfigGov", [deployer], { id: "ConfigGov" });
+  // ===== Phase 6: ConfigGov (Proxy) =====
+  const configGovImpl = m.contract("ConfigGov", [], { id: "ConfigGovImpl" });
+  const configGovInitData = m.encodeFunctionCall(configGovImpl, "initialize", [deployer], { id: "ConfigGovInitData" });
+  const configGovProxy = m.contract("ERC1967Proxy", [configGovImpl, configGovInitData], { id: "ConfigGovProxy" });
+  const configGov = m.contractAt("ConfigGov", configGovProxy, { id: "ConfigGov" });
 
-  // ===== Phase 7: IdealUSDManager =====
-  const idealUSDManager = m.contract("IdealUSDManager", [deployer, configGov, DEFAULTS.iusdInitial], {
-    id: "IdealUSDManager",
-    after: [m.call(configGov, "setAddressParam", [0, DEFAULTS.initialPceFeed], { id: "SetPceFeed" })],
-  });
+  // ===== Phase 7: IdealUSDManager (Proxy) =====
+  const setPceFeed = m.call(configGov, "setAddressParam", [0, DEFAULTS.initialPceFeed], { id: "SetPceFeed" });
+  const idealUSDManagerImpl = m.contract("IdealUSDManager", [], { id: "IdealUSDManagerImpl" });
+  const idealUSDManagerInitData = m.encodeFunctionCall(idealUSDManagerImpl, "initialize", [deployer, configGov, DEFAULTS.iusdInitial], { id: "IdealUSDManagerInitData" });
+  const idealUSDManagerProxy = m.contract("ERC1967Proxy", [idealUSDManagerImpl, idealUSDManagerInitData], { id: "IdealUSDManagerProxy", after: [setPceFeed] });
+  const idealUSDManager = m.contractAt("IdealUSDManager", idealUSDManagerProxy, { id: "IdealUSDManager" });
 
-  // ===== Phase 8: PriceOracle + TWAP =====
+  // ===== Phase 8: PriceOracle + TWAP (Proxy) =====
   const twapOracle = m.contract("UniswapV2TWAPOracle", [], { id: "TWAPOracle" });
-  const priceOracle = m.contract(
-    "PriceOracle",
-    [deployer, configCore, configGov, twapOracle, DEFAULTS.pythPriceId],
-    { after: [configCore, configGov] }
-  );
+  const priceOracleImpl = m.contract("PriceOracle", [], { id: "PriceOracleImpl" });
+  const priceOracleInitData = m.encodeFunctionCall(priceOracleImpl, "initialize", [deployer, configCore, configGov, twapOracle, DEFAULTS.pythPriceId], { id: "PriceOracleInitData" });
+  const priceOracleProxy = m.contract("ERC1967Proxy", [priceOracleImpl, priceOracleInitData], { id: "PriceOracleProxy", after: [configCore, configGov] });
+  const priceOracle = m.contractAt("PriceOracle", priceOracleProxy, { id: "PriceOracle" });
 
-  // ===== Phase 9: Treasury / Minter / InterestPool =====
-  const treasury = m.contract("Treasury", [deployer, configCore, deployer], {
-    after: [configCore],
-    id: "Treasury",
-  });
-  const minter = m.contract("Minter", [deployer, configCore, configGov], {
-    after: [configCore, configGov],
-    id: "Minter",
-  });
-  const interestPool = m.contract("InterestPool", [deployer, configCore, configGov, deployer], {
-    after: [configCore, configGov],
-    id: "InterestPool",
-  });
+  // ===== Phase 9: Treasury / Minter / InterestPool (Proxy) =====
+  const treasuryImpl = m.contract("Treasury", [], { id: "TreasuryImpl" });
+  const treasuryInitData = m.encodeFunctionCall(treasuryImpl, "initialize", [deployer, configCore, deployer], { id: "TreasuryInitData" });
+  const treasuryProxy = m.contract("ERC1967Proxy", [treasuryImpl, treasuryInitData], { id: "TreasuryProxy", after: [configCore] });
+  const treasury = m.contractAt("Treasury", treasuryProxy, { id: "Treasury" });
 
-  // Initialize InterestPool (reads BTD/BTB from ConfigCore)
-  m.call(interestPool, "initialize", [], {
+  const minterImpl = m.contract("Minter", [], { id: "MinterImpl" });
+  const minterInitData = m.encodeFunctionCall(minterImpl, "initialize", [deployer, configCore, configGov], { id: "MinterInitData" });
+  const minterProxy = m.contract("ERC1967Proxy", [minterImpl, minterInitData], { id: "MinterProxy", after: [configCore, configGov] });
+  const minter = m.contractAt("Minter", minterProxy, { id: "Minter" });
+
+  const interestPoolImpl = m.contract("InterestPool", [], { id: "InterestPoolImpl" });
+  const interestPoolInitData = m.encodeFunctionCall(interestPoolImpl, "initialize", [deployer, configCore, configGov, deployer], { id: "InterestPoolInitData" });
+  const interestPoolProxy = m.contract("ERC1967Proxy", [interestPoolImpl, interestPoolInitData], { id: "InterestPoolProxy", after: [configCore, configGov] });
+  const interestPool = m.contractAt("InterestPool", interestPoolProxy, { id: "InterestPool" });
+
+  // Initialize InterestPool pools (reads BTD/BTB from ConfigCore)
+  m.call(interestPool, "initializePools", [], {
     id: "InterestPoolInitialize",
-    after: [interestPool, configCore],
+    after: [interestPoolProxy, configCore],
   });
 
   // ===== Phase 10: Grant MINTER_ROLE to Minter and InterestPool =====
@@ -133,13 +138,13 @@ export default buildModule("FullSystemLocal", (m) => {
     after: [btbGrantMinter, btbGrantInterest],
   });
 
-  // ===== Phase 11: FarmingPool =====
+  // ===== Phase 11: FarmingPool (Proxy) =====
   const foundation = m.getAccount(1);
   const team = m.getAccount(2);
-  const farmingPool = m.contract("FarmingPool", [deployer, brs, configCore, [treasury, foundation, team], [20, 10, 10]], {
-    after: [configCore, brs, treasury],
-    id: "FarmingPool",
-  });
+  const farmingPoolImpl = m.contract("FarmingPool", [], { id: "FarmingPoolImpl" });
+  const farmingPoolInitData = m.encodeFunctionCall(farmingPoolImpl, "initialize", [deployer, brs, configCore, [treasury, foundation, team], [20, 10, 10]], { id: "FarmingPoolInitData" });
+  const farmingPoolProxy = m.contract("ERC1967Proxy", [farmingPoolImpl, farmingPoolInitData], { id: "FarmingPoolProxy", after: [configCore, brs, treasuryProxy] });
+  const farmingPool = m.contractAt("FarmingPool", farmingPoolProxy, { id: "FarmingPool" });
 
   // ===== Phase 12: BRS Distribution =====
   const totalSupply = 2100000000n * 10n ** 18n;

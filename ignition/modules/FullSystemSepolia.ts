@@ -12,12 +12,15 @@ import { keccak256, toHex } from "viem";
  *   - WETH: Uses official Uniswap WETH9 (users can wrap ETH directly)
  *   - WBTC/USDC/USDT: Deploys our own mock tokens (official faucets give too little)
  *
+ * All 7 upgradeable contracts use UUPS proxy pattern:
+ *   ConfigGov, IdealUSDManager, PriceOracle, Treasury, Minter, InterestPool, FarmingPool
+ *
  * Deployment order:
  * 1. Deploy tokens (WBTC, BTD, BTB, BRS, USDC, USDT) + use official WETH9
  * 2. Deploy stTokens (stBTD, stBTB)
  * 3. Deploy LP Pairs (using our MockUniswapV2Pair)
  * 4. Deploy ConfigCore (with all immutable addresses)
- * 5. Deploy other contracts (ConfigGov, Treasury, Minter, etc.)
+ * 5. Deploy other contracts via proxy (impl + ERC1967Proxy)
  * 6. Call setCoreContracts() to set circular dependency addresses
  */
 
@@ -96,9 +99,13 @@ export default buildModule("FullSystemSepolia", (m) => {
     { id: "ConfigCore", after: [btd, btb, stBTD, stBTB, pairWbtcUsdc, pairBtdUsdc, pairBtbBtd, pairBrsBtd] }
   );
 
-  const configGov = m.contract("ConfigGov", [deployer], { id: "ConfigGov" });
+  // ===== Phase 5: ConfigGov (Proxy) =====
+  const configGovImpl = m.contract("ConfigGov", [], { id: "ConfigGovImpl" });
+  const configGovInitData = m.encodeFunctionCall(configGovImpl, "initialize", [deployer], { id: "ConfigGovInitData" });
+  const configGovProxy = m.contract("ERC1967Proxy", [configGovImpl, configGovInitData], { id: "ConfigGovProxy" });
+  const configGov = m.contractAt("ConfigGov", configGovProxy, { id: "ConfigGov" });
 
-  // ===== Phase 5: Oracles =====
+  // ===== Phase 6: Oracles =====
   // Use REAL Chainlink BTC/USD on Sepolia
   const chainlinkBtcUsd = m.contractAt(
     "contracts/interfaces/IAggregatorV3.sol:IAggregatorV3",
@@ -128,55 +135,50 @@ export default buildModule("FullSystemSepolia", (m) => {
     { id: "ChainlinkUSDTUSD" }
   );
 
-  // ===== Phase 6: IdealUSDManager (uses ConfigGov) =====
-  const idealUSDManager = m.contract("IdealUSDManager", [deployer, configGov, DEFAULTS.iusdInitial], {
-    id: "IdealUSDManager",
-    after: [m.call(configGov, "setAddressParam", [0, DEFAULTS.initialPceFeed], { id: "SetPceFeed" })],
-  });
+  // ===== Phase 7: IdealUSDManager (Proxy) =====
+  const setPceFeed = m.call(configGov, "setAddressParam", [0, DEFAULTS.initialPceFeed], { id: "SetPceFeed" });
+  const idealUSDManagerImpl = m.contract("IdealUSDManager", [], { id: "IdealUSDManagerImpl" });
+  const idealUSDManagerInitData = m.encodeFunctionCall(idealUSDManagerImpl, "initialize", [deployer, configGov, DEFAULTS.iusdInitial], { id: "IdealUSDManagerInitData" });
+  const idealUSDManagerProxy = m.contract("ERC1967Proxy", [idealUSDManagerImpl, idealUSDManagerInitData], { id: "IdealUSDManagerProxy", after: [setPceFeed] });
+  const idealUSDManager = m.contractAt("IdealUSDManager", idealUSDManagerProxy, { id: "IdealUSDManager" });
 
-  // ===== Phase 7: PriceOracle + TWAP =====
+  // ===== Phase 8: PriceOracle + TWAP (Proxy) =====
   const twapOracle = m.contract("UniswapV2TWAPOracle", [], { id: "TWAPOracle" });
-  const priceOracle = m.contract(
-    "PriceOracle",
-    [
-      deployer,
-      configCore,
-      configGov,
-      twapOracle,
-      DEFAULTS.pythPriceId,
-    ],
-    { after: [configCore, configGov] }
-  );
+  const priceOracleImpl = m.contract("PriceOracle", [], { id: "PriceOracleImpl" });
+  const priceOracleInitData = m.encodeFunctionCall(priceOracleImpl, "initialize", [deployer, configCore, configGov, twapOracle, DEFAULTS.pythPriceId], { id: "PriceOracleInitData" });
+  const priceOracleProxy = m.contract("ERC1967Proxy", [priceOracleImpl, priceOracleInitData], { id: "PriceOracleProxy", after: [configCore, configGov] });
+  const priceOracle = m.contractAt("PriceOracle", priceOracleProxy, { id: "PriceOracle" });
 
-  // ===== Phase 8: Treasury / Minter / InterestPool =====
-  const treasury = m.contract("Treasury", [deployer, configCore, deployer], {
-    after: [configCore],
-    id: "Treasury",
-  });
-  const minter = m.contract("Minter", [deployer, configCore, configGov], {
-    after: [configCore, configGov],
-    id: "Minter",
-  });
+  // ===== Phase 9: Treasury / Minter / InterestPool (Proxy) =====
+  const treasuryImpl = m.contract("Treasury", [], { id: "TreasuryImpl" });
+  const treasuryInitData = m.encodeFunctionCall(treasuryImpl, "initialize", [deployer, configCore, deployer], { id: "TreasuryInitData" });
+  const treasuryProxy = m.contract("ERC1967Proxy", [treasuryImpl, treasuryInitData], { id: "TreasuryProxy", after: [configCore] });
+  const treasury = m.contractAt("Treasury", treasuryProxy, { id: "Treasury" });
 
-  const interestPool = m.contract("InterestPool", [deployer, configCore, configGov, deployer], {
-    after: [configCore, configGov],
-    id: "InterestPool",
-  });
+  const minterImpl = m.contract("Minter", [], { id: "MinterImpl" });
+  const minterInitData = m.encodeFunctionCall(minterImpl, "initialize", [deployer, configCore, configGov], { id: "MinterInitData" });
+  const minterProxy = m.contract("ERC1967Proxy", [minterImpl, minterInitData], { id: "MinterProxy", after: [configCore, configGov] });
+  const minter = m.contractAt("Minter", minterProxy, { id: "Minter" });
 
-  // Initialize InterestPool after deployment (reads BTD/BTB from ConfigCore)
-  m.call(interestPool, "initialize", [], {
+  const interestPoolImpl = m.contract("InterestPool", [], { id: "InterestPoolImpl" });
+  const interestPoolInitData = m.encodeFunctionCall(interestPoolImpl, "initialize", [deployer, configCore, configGov, deployer], { id: "InterestPoolInitData" });
+  const interestPoolProxy = m.contract("ERC1967Proxy", [interestPoolImpl, interestPoolInitData], { id: "InterestPoolProxy", after: [configCore, configGov] });
+  const interestPool = m.contractAt("InterestPool", interestPoolProxy, { id: "InterestPool" });
+
+  // Initialize InterestPool pools (reads BTD/BTB from ConfigCore)
+  m.call(interestPool, "initializePools", [], {
     id: "InterestPoolInitialize",
-    after: [interestPool, configCore],
+    after: [interestPoolProxy, configCore],
   });
 
-  // ===== Phase 9: FarmingPool =====
+  // ===== Phase 10: FarmingPool (Proxy) =====
   // FarmingPool fund split: Treasury 20%, Foundation 10%, Team 10%
-  const farmingPool = m.contract("FarmingPool", [deployer, brs, configCore, [treasury, FUND_ADDRESSES.foundation, FUND_ADDRESSES.team], [20, 10, 10]], {
-    after: [configCore, brs, treasury],
-    id: "FarmingPool",
-  });
+  const farmingPoolImpl = m.contract("FarmingPool", [], { id: "FarmingPoolImpl" });
+  const farmingPoolInitData = m.encodeFunctionCall(farmingPoolImpl, "initialize", [deployer, brs, configCore, [treasury, FUND_ADDRESSES.foundation, FUND_ADDRESSES.team], [20, 10, 10]], { id: "FarmingPoolInitData" });
+  const farmingPoolProxy = m.contract("ERC1967Proxy", [farmingPoolImpl, farmingPoolInitData], { id: "FarmingPoolProxy", after: [configCore, brs, treasuryProxy] });
+  const farmingPool = m.contractAt("FarmingPool", farmingPoolProxy, { id: "FarmingPool" });
 
-  // ===== Phase 10: BRS Distribution =====
+  // ===== Phase 11: BRS Distribution =====
   // Reserve some BRS for LP initialization
   const totalSupply = 2100000000n * 10n ** 18n;
   const reservedForInit = 2n * 10n ** 18n; // 2 BRS reserved for LP + pool seed
@@ -189,7 +191,7 @@ export default buildModule("FullSystemSepolia", (m) => {
 
   const governor = deployer;
 
-  // ===== Phase 11: Set ConfigCore core contracts (6 addresses with circular dependencies) =====
+  // ===== Phase 12: Set ConfigCore core contracts (6 addresses with circular dependencies) =====
   const setCoreContracts = m.call(
     configCore,
     "setCoreContracts",
@@ -207,7 +209,7 @@ export default buildModule("FullSystemSepolia", (m) => {
     after: [setCoreContracts],
   });
 
-  // ===== Phase 12: Grant MINTER_ROLE =====
+  // ===== Phase 13: Grant MINTER_ROLE =====
   const MINTER_ROLE = keccak256(toHex("MINTER_ROLE"));
   const DEFAULT_ADMIN_ROLE = "0x0000000000000000000000000000000000000000000000000000000000000000";
 
@@ -226,7 +228,7 @@ export default buildModule("FullSystemSepolia", (m) => {
     after: [btbGrantMinter, btbGrantInterest],
   });
 
-  // ===== Phase 13: ConfigGov params =====
+  // ===== Phase 14: ConfigGov params =====
   // ParamType enum: 0=MINT_FEE_BP, 1=INTEREST_FEE_BP, 2=MIN_BTB_PRICE, 3=MAX_BTB_RATE,
   //                 4=PCE_MAX_DEVIATION, 5=REDEEM_FEE_BP, 6=MAX_BTD_RATE
   m.call(
@@ -255,7 +257,7 @@ export default buildModule("FullSystemSepolia", (m) => {
   m.call(configGov, "setAddressParam", [4, chainlinkUsdcUsd], { id: "SetChainlinkUsdcUsd" });
   m.call(configGov, "setAddressParam", [5, chainlinkUsdtUsd], { id: "SetChainlinkUsdtUsd" });
 
-  // ===== Phase 14: Faucet (test token distribution) =====
+  // ===== Phase 15: Faucet (test token distribution) =====
   const faucet = m.contract("contracts/local/Faucet.sol:Faucet", [wbtc, usdc, usdt, deployer], {
     id: "Faucet",
     after: [wbtc, usdc, usdt],

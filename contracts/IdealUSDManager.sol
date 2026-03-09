@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {IIdealUSDManager} from "./interfaces/IIdealUSDManager.sol";
 import {IAggregatorV3} from "./interfaces/IAggregatorV3.sol";
 import {ConfigGov} from "./ConfigGov.sol";
@@ -15,14 +17,12 @@ import "./libraries/FeedValidation.sol";
  * @notice Manages IUSD with 2% annual inflation rate adjustment based on PCE data
  * @dev IUSD = IUSD x (currentPCE / previousPCE) / monthlyGrowthFactor
  */
-contract IdealUSDManager is Ownable2Step, IIdealUSDManager {
+contract IdealUSDManager is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable, IIdealUSDManager {
 
-    // ============ Immutable State ============
+    // ============ State ============
 
     /// @notice ConfigGov contract for retrieving PCE Feed address
-    ConfigGov public immutable configGov;
-
-    // ============ Mutable State ============
+    ConfigGov public configGov;
 
     /// @notice Current IUSD value (18 decimals)
     uint256 public iusdValue;
@@ -77,14 +77,26 @@ contract IdealUSDManager is Ownable2Step, IIdealUSDManager {
         string reason
     );
 
+    // ============ Initialization ============
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     /// @notice Initialize IUSD manager with ConfigGov and initial value
-    constructor(
+    function initialize(
         address _owner,
         address _configGov,
         uint256 _initialIUSD
-    ) Ownable(_owner) {
+    ) public initializer {
+        require(_owner != address(0), "Invalid owner");
         require(_configGov != address(0), "Invalid ConfigGov");
         require(_initialIUSD > 0, "Invalid initial value");
+
+        __Ownable_init(_owner);
+        __Ownable2Step_init();
+        __UUPSUpgradeable_init();
 
         configGov = ConfigGov(_configGov);
         require(configGov.pceFeed() != address(0), "PCE Feed not set in ConfigGov");
@@ -94,6 +106,12 @@ contract IdealUSDManager is Ownable2Step, IIdealUSDManager {
         lastPCEUpdateTime = uint64(block.timestamp);
         authorizedUpdaters[_owner] = true;
     }
+
+    // ============ UUPS ============
+
+    function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    // ============ Core Functions ============
 
     /// @notice Update IUSD based on PCE data (authorized callers only)
     function updateIUSD() external {
@@ -349,4 +367,8 @@ contract IdealUSDManager is Ownable2Step, IIdealUSDManager {
 
         return string(buffer);
     }
+
+    // ============ Storage Gap ============
+
+    uint256[50] private __gap;
 }

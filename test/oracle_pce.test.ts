@@ -4,94 +4,69 @@
  * IdealUSDManager now fetches the PCE feed address from ConfigGov.
  */
 
-import { describe, it } from "node:test";
+import { describe, it, beforeEach } from "node:test";
 import { expect } from "chai";
-import { deployFullSystem, viem, getWallets } from "./helpers/setup-viem.js";
+import { deployFullSystem, viem, getWallets, networkHelpers } from "./helpers/setup-viem.js";
 
 describe("IdealUSDManager + PCE Oracle (viem)", function () {
+  let owner: any;
+  let configGov: any;
+  let idealUSDManager: any;
+  let mockPce: any;
+
+  async function deployFixture() {
+    const wallets = await getWallets();
+    const system = await deployFullSystem();
+
+    return {
+      owner: wallets[0],
+      configGov: system.configGov,
+      idealUSDManager: system.idealUSDManager,
+      mockPce: system.mockPce,
+    };
+  }
+
+  beforeEach(async function () {
+    const fixture = await networkHelpers.loadFixture(deployFixture);
+    owner = fixture.owner;
+    configGov = fixture.configGov;
+    idealUSDManager = fixture.idealUSDManager;
+    mockPce = fixture.mockPce;
+  });
+
   it("should deploy IdealUSDManager with ConfigGov", async function () {
-    const [owner] = await getWallets();
+    // IdealUSDManager should be deployed with valid address
+    expect(idealUSDManager.address).to.not.equal("0x0000000000000000000000000000000000000000");
 
-    // Deploy PCE oracle
-    const mockPce = await viem.deployContract(
-      "contracts/local/MockAggregatorV3.sol:MockAggregatorV3",
-      [300_00_000_000n] // 300.0, 8 decimals
-    );
-
-    // Deploy ConfigGov
-    const configGov = await viem.deployContract(
-      "contracts/ConfigGov.sol:ConfigGov",
-      [owner.account.address]
-    );
-
-    // Set PCE Feed in ConfigGov
-    await configGov.write.setAddressParam([0n, mockPce.address]); // AddressParamType.PCE_FEED = 0
-
-    // Deploy IdealUSDManager with ConfigGov address
-    const INITIAL_IUSD = 1_000000000000000000n; // 1.0 * 10^18
-
-    const manager = await viem.deployContract(
-      "contracts/IdealUSDManager.sol:IdealUSDManager",
-      [
-        owner.account.address,
-        configGov.address,        // ConfigGov address instead of PCE feed
-        INITIAL_IUSD
-      ]
-    );
-
-    const currentIUSD = await manager.read.getCurrentIUSD();
-    expect(currentIUSD).to.equal(INITIAL_IUSD);
+    // Should have initial IUSD value
+    const currentIUSD = await idealUSDManager.read.getCurrentIUSD();
+    expect(currentIUSD > 0n).to.be.true;
+    expect(currentIUSD).to.equal(1_000000000000000000n); // 1.0
   });
 
   it("should update IUSD based on PCE changes via ConfigGov", async function () {
-    const [owner] = await getWallets();
-
-    // Deploy PCE oracle
-    const mockPce = await viem.deployContract(
-      "contracts/local/MockAggregatorV3.sol:MockAggregatorV3",
-      [300_00_000_000n] // 300.0
-    );
-
-    // Deploy ConfigGov and set PCE Feed
-    const configGov = await viem.deployContract(
-      "contracts/ConfigGov.sol:ConfigGov",
-      [owner.account.address]
-    );
-    await configGov.write.setAddressParam([0n, mockPce.address]);
-
     const INITIAL_IUSD = 1_000000000000000000n;
 
-    const manager = await viem.deployContract(
-      "contracts/IdealUSDManager.sol:IdealUSDManager",
-      [
-        owner.account.address,
-        configGov.address,
-        INITIAL_IUSD
-      ]
-    );
-
     // Update IUSD - should drop vs target after first update
-    await manager.write.updateIUSD({ account: owner.account });
-    const afterFirst = await manager.read.getCurrentIUSD();
+    await idealUSDManager.write.updateIUSD({ account: owner.account });
+    const afterFirst = await idealUSDManager.read.getCurrentIUSD();
     expect(afterFirst < INITIAL_IUSD).to.be.true;
 
     // Increase PCE by 1%
     await mockPce.write.setAnswer([303_00_000_000n]);
-    await manager.write.updateIUSD({ account: owner.account });
-    const afterSecond = await manager.read.getCurrentIUSD();
+    await idealUSDManager.write.updateIUSD({ account: owner.account });
+    const afterSecond = await idealUSDManager.read.getCurrentIUSD();
 
     // IUSD should rise when PCE increases
     expect(afterSecond > afterFirst).to.be.true;
   });
 
   it("should integrate with full system", async function () {
-    const system = await deployFullSystem();
-
     // IdealUSDManager should be deployed
-    expect(system.idealUSDManager.address).to.not.equal("0x0000000000000000000000000000000000000000");
+    expect(idealUSDManager.address).to.not.equal("0x0000000000000000000000000000000000000000");
 
     // Should have initial IUSD value
-    const iusd = await system.idealUSDManager.read.getCurrentIUSD();
+    const iusd = await idealUSDManager.read.getCurrentIUSD();
     expect(iusd > 0n).to.be.true;
   });
 });

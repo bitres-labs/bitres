@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./ConfigCore.sol";
@@ -27,48 +29,79 @@ interface IPriceOracleForTreasury {
 /// @title Treasury - Bitres System Treasury Contract
 /// @notice Manages WBTC/BTD/BRS assets, provides liquidity support for Minter
 /// @dev Core functions: WBTC deposit/withdraw, BRS compensation, BTD buyback BRS
-contract Treasury is Ownable2Step, ReentrancyGuard, ITreasury {
+contract Treasury is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpgradeable, UUPSUpgradeable, ITreasury {
     using SafeERC20 for IERC20;
 
-    ConfigCore public immutable core;
+    ConfigCore public core;
     address public override router;
 
     // ============ Lazy Buyback Parameters ============
 
-    uint256 public minBuybackAmount = 10_000e18;    // Min BTD balance to trigger buyback
-    uint256 public maxBuybackAmount = 50_000e18;    // Max BTD per buyback
-    uint256 public buybackCooldown = 24 hours;      // Cooldown between buybacks
-    uint256 public buybackProbability = 10;         // Trigger probability (10%)
-    uint256 public maxSlippageBps = 200;            // Max slippage (2%)
-    uint256 public minEthReserve = 0.5 ether;       // Min ETH reserve for gas
-    uint256 public ethTopupAmount = 0.5 ether;      // ETH to buy when reserve low
+    uint256 public minBuybackAmount;
+    uint256 public maxBuybackAmount;
+    uint256 public buybackCooldown;
+    uint256 public buybackProbability;
+    uint256 public maxSlippageBps;
+    uint256 public minEthReserve;
+    uint256 public ethTopupAmount;
     uint256 public lastBuybackTime;
 
     // ============ Events ============
 
     event RouterUpdated(address indexed oldRouter, address indexed newRouter);
+    event BRSCompensationShortfall(address indexed to, uint256 requested, uint256 actual);
     event LazyBuybackExecuted(address indexed triggeredBy, uint256 btdSpent, uint256 brsReceived, uint256 gasCompensation);
     event EthReserveToppedUp(uint256 btdSpent, uint256 ethReceived);
     event BuybackParamsUpdated(uint256 minBuybackAmount, uint256 maxBuybackAmount, uint256 buybackCooldown, uint256 buybackProbability, uint256 maxSlippageBps);
     event EthReserveParamsUpdated(uint256 minEthReserve, uint256 ethTopupAmount);
 
-    constructor(
+    // ============ Initialization ============
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(
         address initialOwner,
         address _core,
         address routerAddr
-    ) Ownable(initialOwner) {
+    ) public initializer {
         require(initialOwner != address(0), "Treasury: invalid owner");
         require(_core != address(0), "Treasury: invalid core");
         require(routerAddr != address(0), "Treasury: invalid router");
+
+        __Ownable_init(initialOwner);
+        __Ownable2Step_init();
+        __ReentrancyGuard_init();
+        __UUPSUpgradeable_init();
+
         core = ConfigCore(_core);
         router = routerAddr;
+
+        // Set buyback defaults
+        minBuybackAmount = 10_000e18;
+        maxBuybackAmount = 50_000e18;
+        buybackCooldown = 24 hours;
+        buybackProbability = 10;
+        maxSlippageBps = 200;
+        minEthReserve = 0.5 ether;
+        ethTopupAmount = 0.5 ether;
     }
+
+    // ============ UUPS ============
+
+    function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    // ============ Modifiers ============
 
     /// @notice Only Minter contract can call
     modifier onlyMint() {
         require(msg.sender == core.MINTER(), "Treasury: only Minter");
         _;
     }
+
+    // ============ View Functions ============
 
     /// @notice Get ConfigCore contract address
     function configCore() public view override returns (address) {
@@ -118,6 +151,9 @@ contract Treasury is Ownable2Step, ReentrancyGuard, ITreasury {
         if (payout > 0) {
             BRS().safeTransfer(to, payout);
             emit ITreasury.BRSCompensated(to, payout);
+            if (payout < amt) {
+                emit BRSCompensationShortfall(to, amt, payout);
+            }
         }
     }
 
@@ -158,9 +194,6 @@ contract Treasury is Ownable2Step, ReentrancyGuard, ITreasury {
     }
 
     /// @notice Query all token balances in treasury
-    /// @return wbtcBalance WBTC balance (8 decimals)
-    /// @return brsBalance BRS balance (18 decimals)
-    /// @return btdBalance BTD balance (18 decimals)
     function getBalances()
         external
         view
@@ -174,10 +207,18 @@ contract Treasury is Ownable2Step, ReentrancyGuard, ITreasury {
 
     // ============ Lazy Buyback Functions ============
 
-    /// @notice Attempts lazy buyback of BRS using BTD (called by Minter)
+    /// @notice Attempts lazy buyback of BRS using BTD (called by system contracts)
     /// @dev Executes if: BTD >= min, cooldown passed, random trigger (10%)
+    /// @dev Access: only Minter, FarmingPool, InterestPool, or owner can trigger
     /// @return executed True if buyback was executed
     function tryLazyBuyback() external nonReentrant returns (bool executed) {
+        require(
+            msg.sender == core.MINTER() ||
+            msg.sender == core.FARMING_POOL() ||
+            msg.sender == core.INTEREST_POOL() ||
+            msg.sender == owner(),
+            "Treasury: unauthorized buyback caller"
+        );
         uint256 startGas = gasleft();
 
         if (block.timestamp < lastBuybackTime + buybackCooldown) {
@@ -223,7 +264,6 @@ contract Treasury is Ownable2Step, ReentrancyGuard, ITreasury {
         address priceOracle = core.PRICE_ORACLE();
         uint256 brsPrice = IPriceOracleForTreasury(priceOracle).getBRSPrice();
 
-        // btdAmount / brsPrice (both 18 decimals)
         uint256 expectedBRS = (btdAmount * Constants.PRECISION_18) / brsPrice;
         uint256 minBRSOut = (expectedBRS * (10000 - maxSlippageBps)) / 10000;
 
@@ -260,7 +300,6 @@ contract Treasury is Ownable2Step, ReentrancyGuard, ITreasury {
             return;
         }
 
-        // Assume max $3000/ETH for safety
         uint256 btdForEth = ethTopupAmount * 3000;
         if (btdForEth > btdBalance) {
             btdForEth = btdBalance;
@@ -274,9 +313,10 @@ contract Treasury is Ownable2Step, ReentrancyGuard, ITreasury {
 
         uint256 beforeBal = address(this).balance;
 
+        uint256 minEthOut = (ethTopupAmount * 9) / 10;
         try IUniswapV2Router(router).swapExactTokensForTokens(
             btdForEth,
-            0,
+            minEthOut,
             path,
             address(this),
             block.timestamp + 600
@@ -338,4 +378,8 @@ contract Treasury is Ownable2Step, ReentrancyGuard, ITreasury {
         (bool success, ) = to.call{value: amount}("");
         require(success, "ETH transfer failed");
     }
+
+    // ============ Storage Gap ============
+
+    uint256[50] private __gap;
 }
