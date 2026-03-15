@@ -1,7 +1,6 @@
 /**
  * Initialize Sepolia testnet system after deployment:
  * - Read real BTC price from Chainlink
- * - Set mock Pyth prices to match Chainlink
  * - Add liquidity to LP pairs (deployed via Ignition)
  * - Configure farming pools
  * - Initialize staking vaults
@@ -23,10 +22,6 @@ const ADDR_FILE = path.join(
   process.cwd(),
   `ignition/deployments/chain-${CHAIN_ID}/deployed_addresses.json`
 );
-
-const DEFAULTS = {
-  pythPriceId: "0x505954485f575442430000000000000000000000000000000000000000000000",
-};
 
 const ERC20_ABI = [
   {
@@ -146,7 +141,6 @@ async function main() {
   const farming = await get("FarmingPool", "contracts/FarmingPool.sol:FarmingPool");
   const priceOracle = await get("PriceOracle", "contracts/PriceOracle.sol:PriceOracle");
   const twapOracle = await get("TWAPOracle", "contracts/UniswapV2TWAPOracle.sol:UniswapV2TWAPOracle");
-  const mockPyth = await get("MockPyth", "contracts/local/MockPyth.sol:MockPyth");
 
   // LP Pairs (deployed via Ignition)
   const pairWBTCUSDC = addresses.PairWBTCUSDC;
@@ -224,13 +218,6 @@ async function main() {
   // =========================================================================
   console.log("\n=> Setting mock oracle prices...");
   console.log("   -> WBTC/BTC: 1:1 (already set)");
-
-  const pythPrice = btcPrice;
-  const pythExpo = -8n;
-  await mockPyth.write.setPrice([DEFAULTS.pythPriceId, pythPrice, pythExpo], {
-    account: owner.account,
-  });
-  console.log(`   -> Pyth BTC price: ${Number(pythPrice) / 1e8}`);
 
   // =========================================================================
   // 4) Mint BTD/BTB for LP initialization

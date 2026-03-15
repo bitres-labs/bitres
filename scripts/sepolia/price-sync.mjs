@@ -38,9 +38,6 @@ const UNISWAP_V2 = {
   ROUTER: "0xeE567Fe1712Faf6149d80dA1E6934E354124CfE3",
 };
 
-// Pyth price ID for WBTC (same as in init-sepolia.mjs)
-const PYTH_WBTC_PRICE_ID = "0x505954485f575442430000000000000000000000000000000000000000000000";
-
 // Configuration (can be overridden by environment variables)
 const CONFIG = {
   SYNC_INTERVAL: parseInt(process.env.SYNC_INTERVAL || "300", 10), // 5 minutes
@@ -175,20 +172,6 @@ const CONFIG_CORE_ABI = [
   { inputs: [], name: "USDC", outputs: [{ type: "address" }], stateMutability: "view", type: "function" },
 ];
 
-const MOCK_PYTH_ABI = [
-  {
-    inputs: [
-      { name: "id", type: "bytes32" },
-      { name: "price", type: "int64" },
-      { name: "expo", type: "int32" },
-    ],
-    name: "setPrice",
-    outputs: [],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-];
-
 function loadAddresses() {
   if (!fs.existsSync(ADDR_FILE)) {
     throw new Error(`deployed_addresses.json not found at ${ADDR_FILE}`);
@@ -215,7 +198,7 @@ let isRunning = true;
 let currentTimeout = null;
 
 async function checkAndSync(context) {
-  const { publicClient, owner, addresses, twapOracle, mockPythAddress, allPools } = context;
+  const { publicClient, owner, addresses, twapOracle, allPools } = context;
   const { pairAddress, wbtcAddress, usdcAddress, isWbtcToken0 } = context.pool;
 
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
@@ -228,23 +211,6 @@ async function checkAndSync(context) {
       functionName: "latestRoundData",
     });
     const btcPriceUsd = Number(btcPrice) / 1e8;
-
-    // 1.1) Sync MockPyth price with Chainlink
-    if (mockPythAddress) {
-      try {
-        const setPriceTx = await owner.writeContract({
-          address: mockPythAddress,
-          abi: MOCK_PYTH_ABI,
-          functionName: "setPrice",
-          args: [PYTH_WBTC_PRICE_ID, btcPrice, -8],
-          account: owner.account,
-        });
-        await publicClient.waitForTransactionReceipt({ hash: setPriceTx });
-        log(`✓ MockPyth synced: $${btcPriceUsd.toLocaleString()}`);
-      } catch (err) {
-        log(`⚠ MockPyth sync failed: ${err.message?.slice(0, 60) || err}`);
-      }
-    }
 
     // 2) Read current pool reserves
     const [reserve0, reserve1] = await publicClient.readContract({
@@ -492,20 +458,11 @@ async function main() {
   });
   const isWbtcToken0 = token0.toLowerCase() === wbtcAddress.toLowerCase();
 
-  // Get MockPyth address
-  const mockPythAddress = addresses.MockPyth;
-  if (!mockPythAddress) {
-    log("⚠ MockPyth address not found - Pyth sync disabled");
-  } else {
-    log(`MockPyth: ${mockPythAddress}`);
-  }
-
   const context = {
     publicClient,
     owner,
     addresses,
     twapOracle,
-    mockPythAddress,
     allPools,
     pool: {
       pairAddress,
