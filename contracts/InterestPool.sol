@@ -150,6 +150,19 @@ contract InterestPool is Initializable, Ownable2StepUpgradeable, ReentrancyGuard
         gov = ConfigGov(newGov);
     }
 
+    event ConfigCoreUpdated(address indexed oldCore, address indexed newCore);
+
+    /**
+     * @notice Upgrade core configuration contract
+     * @param newCore New ConfigCore contract address
+     */
+    function upgradeCore(address newCore) external onlyOwner {
+        require(newCore != address(0), "Invalid core");
+        address oldCore = address(core);
+        core = ConfigCore(newCore);
+        emit ConfigCoreUpdated(oldCore, newCore);
+    }
+
     function setRateOracle(address newOracle) external onlyOwner {
         require(newOracle != address(0), "InterestPool: zero oracle");
         rateOracle = newOracle;

@@ -1,20 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
+import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "./interfaces/IUniswapV2TWAPOracle.sol";
-
-interface IUniswapV2Pair {
-    function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast);
-    function price0CumulativeLast() external view returns (uint256);
-    function price1CumulativeLast() external view returns (uint256);
-    function token0() external view returns (address);
-    function token1() external view returns (address);
-}
+import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
 
 /// @title UniswapV2TWAPOracle
 /// @notice Time-Weighted Average Price (TWAP) oracle for Uniswap V2
-/// @dev Based on Uniswap's ExampleOracleSimple - reads cumulative prices directly from pair
-contract UniswapV2TWAPOracle is IUniswapV2TWAPOracle {
+/// @dev UUPS upgradeable. Based on Uniswap's ExampleOracleSimple.
+contract UniswapV2TWAPOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable, IUniswapV2TWAPOracle {
     // TWAP observation period (30 minutes for flash loan protection)
     uint256 public constant PERIOD = 30 minutes;
 
@@ -29,6 +25,31 @@ contract UniswapV2TWAPOracle is IUniswapV2TWAPOracle {
 
     // Events
     event ObservationUpdated(address indexed pair, uint256 price0Cumulative, uint256 price1Cumulative, uint32 timestamp);
+
+    // ============ Initialization ============
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    /**
+     * @notice Initialize TWAP Oracle
+     * @param initialOwner Owner address for upgrade authorization
+     */
+    function initialize(address initialOwner) public initializer {
+        require(initialOwner != address(0), "Invalid owner");
+
+        __Ownable_init(initialOwner);
+        __Ownable2Step_init();
+        __UUPSUpgradeable_init();
+    }
+
+    // ============ UUPS ============
+
+    function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    // ============ Core Logic ============
 
     /// @notice Get current cumulative prices from pair (handles time elapsed since last trade)
     /// @dev Based on UniswapV2OracleLibrary.currentCumulativePrices
@@ -133,32 +154,13 @@ contract UniswapV2TWAPOracle is IUniswapV2TWAPOracle {
     ) external view returns (uint256) {
         uint256 twapQ112 = getTWAP(pair);
 
-        // Convert from Q112 to 18 decimals
-        // twapQ112 is in Q112 format: (reserve1_raw / reserve0_raw) * 2^112
-        // This represents "raw units of token1 per raw unit of token0"
-        //
-        // To get price in 18 decimals (whole token1 per whole token0):
-        // price = (twapQ112 / 2^112) * 10^(token0Decimals - token1Decimals) * 10^18
-        //
-        // IMPORTANT: Multiply BEFORE shifting to preserve precision for small prices
-        // e.g., BTD(18)/USDC(6): twapQ112 < 2^112, so shift first would give 0
-        //
-        // For WBTC(8)/USDC(6): price = (twapQ112 * 100 * 1e18) >> 112
-        // For BTD(18)/USDC(6): price = (twapQ112 * 1e12 * 1e18) >> 112
-
         uint256 price;
 
         if (token0Decimals >= token1Decimals) {
-            // token0 has more decimals - multiply to scale up
-            // e.g., BTD(18)/USDC(6): multiply by 1e12
             uint256 decimalAdjust = 10 ** (token0Decimals - token1Decimals);
-            // Multiply first, then shift to preserve precision
             price = (twapQ112 * decimalAdjust * 1e18) >> 112;
         } else {
-            // token1 has more decimals - divide to scale down
-            // e.g., USDC(6)/ETH(18): divide by 1e12
             uint256 decimalAdjust = 10 ** (token1Decimals - token0Decimals);
-            // Multiply by 1e18 first, then shift, then divide
             price = ((twapQ112 * 1e18) >> 112) / decimalAdjust;
         }
 
@@ -224,4 +226,8 @@ contract UniswapV2TWAPOracle is IUniswapV2TWAPOracle {
         }
         return false;
     }
+
+    // ============ Storage Gap ============
+
+    uint256[50] private __gap;
 }

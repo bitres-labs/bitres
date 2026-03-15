@@ -19,6 +19,13 @@ interface IUniswapV2Router {
         address to,
         uint deadline
     ) external returns (uint[] memory amounts);
+    function swapExactTokensForETH(
+        uint amountIn,
+        uint amountOutMin,
+        address[] calldata path,
+        address to,
+        uint deadline
+    ) external returns (uint[] memory amounts);
     function WETH() external pure returns (address);
 }
 
@@ -92,6 +99,21 @@ contract Treasury is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpgr
     // ============ UUPS ============
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    // ============ Admin: upgradeCore ============
+
+    event ConfigCoreUpdated(address indexed oldCore, address indexed newCore);
+
+    /**
+     * @notice Upgrade core configuration contract
+     * @param newCore New ConfigCore contract address
+     */
+    function upgradeCore(address newCore) external onlyOwner {
+        require(newCore != address(0), "Invalid core");
+        address oldCore = address(core);
+        core = ConfigCore(newCore);
+        emit ConfigCoreUpdated(oldCore, newCore);
+    }
 
     // ============ Modifiers ============
 
@@ -314,7 +336,7 @@ contract Treasury is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpgr
         uint256 beforeBal = address(this).balance;
 
         uint256 minEthOut = (ethTopupAmount * 9) / 10;
-        try IUniswapV2Router(router).swapExactTokensForTokens(
+        try IUniswapV2Router(router).swapExactTokensForETH(
             btdForEth,
             minEthOut,
             path,

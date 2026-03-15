@@ -1,44 +1,59 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+import {ERC4626Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
+import {ERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
+import {ERC20PermitUpgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
+import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 
 /**
  * @title stBTD - BTD Staking Receipt (Pure ERC4626 Implementation)
- * @notice Standard ERC4626 vault, holding BTD as underlying asset
+ * @notice UUPS upgradeable standard ERC4626 vault, holding BTD as underlying asset
  * @dev Contains no business logic, serves only as share token
  *      - Users deposit BTD, receive stBTD shares
  *      - stBTD can be transferred, traded, used in DeFi composables
  *      - Redeeming stBTD returns BTD
  *      - Interest logic is managed by external contracts (e.g., InterestPool)
  *      - Supports EIP-2612 permit for gasless approvals via depositWithPermit
- *
- * Architecture Design Principles:
- *      - Single responsibility: only manages BTD share accounting
- *      - No external dependencies: does not depend on any business contracts
- *      - Composability: can be used by any contract or user
  */
-contract stBTD is ERC4626, ERC20Permit {
+contract stBTD is Initializable, ERC4626Upgradeable, ERC20PermitUpgradeable, Ownable2StepUpgradeable, UUPSUpgradeable {
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     /**
-     * @notice Constructor
+     * @notice Initialize stBTD vault
      * @param btd BTD token address
+     * @param initialOwner Owner address for upgrade authorization
      */
-    constructor(IERC20 btd)
-        ERC20("Staked Bitcoin Dollar", "stBTD")
-        ERC20Permit("Staked Bitcoin Dollar")
-        ERC4626(btd)
-    {}
+    function initialize(IERC20 btd, address initialOwner) public initializer {
+        require(address(btd) != address(0), "stBTD: zero asset");
+        require(initialOwner != address(0), "stBTD: zero owner");
+
+        __ERC20_init("Staked Bitcoin Dollar", "stBTD");
+        __ERC4626_init(btd);
+        __ERC20Permit_init("Staked Bitcoin Dollar");
+        __Ownable_init(initialOwner);
+        __Ownable2Step_init();
+        __UUPSUpgradeable_init();
+    }
+
+    // ============ UUPS ============
+
+    function _authorizeUpgrade(address) internal override onlyOwner {}
 
     /**
      * @notice Gets token decimals (18 digits)
-     * @dev Overrides decimals function from ERC20 and ERC4626
+     * @dev Overrides decimals function from ERC20Upgradeable and ERC4626Upgradeable
      * @return Decimal places
      */
-    function decimals() public view override(ERC20, ERC4626) returns (uint8) {
+    function decimals() public view override(ERC20Upgradeable, ERC4626Upgradeable) returns (uint8) {
         return super.decimals();
     }
 
@@ -93,4 +108,8 @@ contract stBTD is ERC4626, ERC20Permit {
         // Mint shares
         return mint(shares, receiver);
     }
+
+    // ============ Storage Gap ============
+
+    uint256[50] private __gap;
 }

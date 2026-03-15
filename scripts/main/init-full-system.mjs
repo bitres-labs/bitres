@@ -26,11 +26,8 @@ const DEFAULTS = {
   btcPriceChainlink: 102_000n * 10n ** 8n, // Chainlink 8 decimals
   pythPrice: 102_000n * 10n ** 8n,
   pythExpo: -8n,
-  redstonePrice: 102_000n * 10n ** 18n,
   pythPriceId:
     "0x505954485f575442430000000000000000000000000000000000000000000000", // "PYTH_WTBC"
-  redstoneFeedId:
-    "0x52454453544f4e455f5754424300000000000000000000000000000000000000", // "REDSTONE_WTBC"
 };
 
 function loadAddresses() {
@@ -96,7 +93,6 @@ async function main() {
     "contracts/local/MockAggregatorV3.sol:MockAggregatorV3"
   );
   const mockPyth = await get("MockPyth", "contracts/local/MockPyth.sol:MockPyth");
-  const mockRedstone = await get("MockRedstone", "contracts/local/MockRedstone.sol:MockRedstone");
 
   const pairWBTCUSDC = await get("PairWBTCUSDC", "contracts/local/UniswapV2Pair.sol:UniswapV2Pair");
   const pairBTDUSDC = await get("PairBTDUSDC", "contracts/local/UniswapV2Pair.sol:UniswapV2Pair");
@@ -159,9 +155,6 @@ async function main() {
   await chainlinkBtcUsd.write.setAnswer([DEFAULTS.btcPriceChainlink], { account: owner.account });
   await chainlinkWbtcBtc.write.setAnswer([1n * 10n ** 8n], { account: owner.account });
   await mockPyth.write.setPrice([DEFAULTS.pythPriceId, DEFAULTS.pythPrice, DEFAULTS.pythExpo], {
-    account: owner.account,
-  });
-  await mockRedstone.write.setValue([DEFAULTS.redstoneFeedId, DEFAULTS.redstonePrice], {
     account: owner.account,
   });
 

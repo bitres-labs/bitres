@@ -121,6 +121,33 @@ contract PriceOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable,
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
+    // ============ Admin: upgradeCore / upgradeGov ============
+
+    event ConfigCoreUpdated(address indexed oldCore, address indexed newCore);
+    event ConfigGovUpdated(address indexed oldGov, address indexed newGov);
+
+    /**
+     * @notice Upgrade core configuration contract
+     * @param newCore New ConfigCore contract address
+     */
+    function upgradeCore(address newCore) external onlyOwner {
+        require(newCore != address(0), "Invalid core");
+        address oldCore = address(core);
+        core = ConfigCore(newCore);
+        emit ConfigCoreUpdated(oldCore, newCore);
+    }
+
+    /**
+     * @notice Upgrade governance configuration contract
+     * @param newGov New ConfigGov contract address
+     */
+    function upgradeGov(address newGov) external onlyOwner {
+        require(newGov != address(0), "Invalid gov");
+        address oldGov = address(gov);
+        gov = ConfigGov(newGov);
+        emit ConfigGovUpdated(oldGov, newGov);
+    }
+
     // ============ TWAP Management ============
 
     /**

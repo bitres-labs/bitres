@@ -114,8 +114,13 @@ contract IdealUSDManager is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     // ============ Core Functions ============
 
     /// @notice Update IUSD based on PCE data (authorized callers only)
+    /// @dev Enforces MIN_LAZY_UPDATE_INTERVAL cooldown to prevent repeated compounding
     function updateIUSD() external {
         require(isUpdaterAuthorized(msg.sender), "Not authorized");
+        require(
+            block.timestamp >= lastUpdateTime + MIN_LAZY_UPDATE_INTERVAL,
+            "Update too soon"
+        );
 
         (uint256 currentPCE, uint256 previousPCE) = _pullPCEData();
         uint256 oldIUSD = iusdValue;

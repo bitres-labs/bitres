@@ -68,6 +68,21 @@ contract FarmingPool is Initializable, Ownable2StepUpgradeable, ReentrancyGuardU
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
+    // ============ Admin: upgradeCore ============
+
+    event ConfigCoreUpdated(address indexed oldCore, address indexed newCore);
+
+    /**
+     * @notice Upgrade core configuration contract
+     * @param newCore New ConfigCore contract address
+     */
+    function upgradeCore(address newCore) external onlyOwner {
+        require(newCore != address(0), "Invalid core");
+        address oldCore = address(core);
+        core = ConfigCore(newCore);
+        emit ConfigCoreUpdated(oldCore, newCore);
+    }
+
     // ============ Fund Management ============
 
     /// @notice Returns BRS token address
@@ -294,6 +309,12 @@ contract FarmingPool is Initializable, Ownable2StepUpgradeable, ReentrancyGuardU
                 totalAllocPoint
             );
             reward = RewardMath.clampToMax(minted, reward, Constants.BRS_MAX_SUPPLY);
+            // Subtract fund shares to match updatePool() logic
+            uint256 fundShareSum = _totalFundShareSum();
+            if (fundShareSum > 0) {
+                uint256 fundPortion = Math.mulDiv(reward, fundShareSum, SHARE_BASE);
+                reward = reward - fundPortion;
+            }
             accReward = RewardMath.accRewardPerShare(accReward, reward, totalStaked);
         }
 
@@ -448,6 +469,15 @@ contract FarmingPool is Initializable, Ownable2StepUpgradeable, ReentrancyGuardU
     }
 
     // ============ Lazy BRS Buyback ============
+
+    /// @notice Calculate total fund share sum for reward distribution
+    function _totalFundShareSum() internal view returns (uint256 shareSum) {
+        for (uint256 i = 0; i < fundAddrs.length; i++) {
+            if (fundAddrs[i] != address(0) && fundShares.length > i && fundShares[i] > 0) {
+                shareSum += fundShares[i];
+            }
+        }
+    }
 
     function _tryLazyBuyback() internal {
         address treasury = core.TREASURY();

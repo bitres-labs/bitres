@@ -62,6 +62,9 @@ contract ConfigGov is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         _params[ParamType.InterestFeeBp] = 500;
         _params[ParamType.BaseRateDefault] = 500;
         _params[ParamType.MinBtbPrice] = 5e17; // 0.5 BTD per whitepaper
+        _params[ParamType.MaxBtbRate] = 2000;   // 20% max BTB interest rate
+        _params[ParamType.MaxBtdRate] = 2000;   // 20% max BTD interest rate
+        _params[ParamType.PceMaxDeviation] = 5e16; // 5% max PCE deviation
     }
 
     // ============ UUPS ============

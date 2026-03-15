@@ -23,31 +23,55 @@ const config: HardhatUserConfig = defineConfig({
     artifacts: "./artifacts"
   },
   solidity: {
-    compilers: [
-      {
-        version: "0.8.30",
-        settings: {
-          optimizer: {
-            enabled: true,
-            runs: 200
-          },
-          viaIR: true,
-          evmVersion: "prague"
+    profiles: {
+      default: {
+        compilers: [
+          {
+            version: "0.8.30",
+            settings: {
+              optimizer: { enabled: true, runs: 200 },
+              viaIR: true,
+              evmVersion: "prague"
+            }
+          }
+        ],
+        overrides: {
+          "contracts/libraries/CollateralMath.sol": {
+            version: "0.8.30",
+            settings: {
+              optimizer: { enabled: true, runs: 200 },
+              viaIR: true,
+              evmVersion: "prague"
+            }
+          }
+        }
+      },
+      production: {
+        compilers: [
+          {
+            version: "0.8.30",
+            settings: {
+              optimizer: { enabled: true, runs: 200 },
+              viaIR: true,
+              evmVersion: "prague"
+            }
+          }
+        ],
+        overrides: {
+          "contracts/libraries/CollateralMath.sol": {
+            version: "0.8.30",
+            settings: {
+              optimizer: { enabled: true, runs: 200 },
+              viaIR: true,
+              evmVersion: "prague"
+            }
+          }
         }
       }
-    ],
-    overrides: {
-      // SMTChecker configuration for formal verification
-      // Run with: npx hardhat compile --config hardhat.smt.config.ts
-      "contracts/libraries/CollateralMath.sol": {
-        version: "0.8.30",
-        settings: {
-          optimizer: { enabled: true, runs: 200 },
-          viaIR: true,
-          evmVersion: "prague"
-        }
-      }
-    }
+    },
+    npmFilesToBuild: [
+      "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol"
+    ]
   },
   networks: {
     hardhat: {

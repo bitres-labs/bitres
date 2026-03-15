@@ -12,8 +12,9 @@ import { keccak256, toHex } from "viem";
  *   - WETH: Uses official Uniswap WETH9 (users can wrap ETH directly)
  *   - WBTC/USDC/USDT: Deploys our own mock tokens (official faucets give too little)
  *
- * All 7 upgradeable contracts use UUPS proxy pattern:
- *   ConfigGov, IdealUSDManager, PriceOracle, Treasury, Minter, InterestPool, FarmingPool
+ * All upgradeable contracts use UUPS proxy pattern:
+ *   ConfigGov, IdealUSDManager, PriceOracle, Treasury, Minter, InterestPool, FarmingPool,
+ *   BTD, BTB, stBTD, stBTB, UniswapV2TWAPOracle
  *
  * Deployment order:
  * 1. Deploy tokens (WBTC, BTD, BTB, BRS, USDC, USDT) + use official WETH9
@@ -61,29 +62,43 @@ export default buildModule("FullSystemSepolia", (m) => {
   const usdt = m.contract("contracts/local/MockUSDT.sol:MockUSDT", [deployer], { id: "USDT" });
 
   // Use official WETH9 (same as Uniswap V2 Router uses)
-  // Users can wrap ETH directly via deposit() function
   const weth = m.contractAt("contracts/interfaces/IWETH9.sol:IWETH9", UNISWAP_V2_SEPOLIA.WETH9, { id: "WETH" });
 
-  // 1.2 Core tokens
+  // 1.2 Core tokens (BRS is non-upgradeable governance token)
   const brs = m.contract("BRS", [deployer], { id: "BRS" });
-  const btd = m.contract("BTD", [deployer], { id: "BTD" });
-  const btb = m.contract("BTB", [deployer], { id: "BTB" });
 
-  // ===== Phase 2: Staking tokens (depend on BTD/BTB) =====
-  const stBTD = m.contract("stBTD", [btd], { id: "stBTD", after: [btd] });
-  const stBTB = m.contract("stBTB", [btb], { id: "stBTB", after: [btb] });
+  // 1.3 BTD/BTB as UUPS proxies
+  const btdImpl = m.contract("BTD", [], { id: "BTDImpl" });
+  const btdInitData = m.encodeFunctionCall(btdImpl, "initialize", [deployer], { id: "BTDInitData" });
+  const btdProxy = m.contract("ERC1967Proxy", [btdImpl, btdInitData], { id: "BTDProxy" });
+  const btd = m.contractAt("BTD", btdProxy, { id: "BTD" });
+
+  const btbImpl = m.contract("BTB", [], { id: "BTBImpl" });
+  const btbInitData = m.encodeFunctionCall(btbImpl, "initialize", [deployer], { id: "BTBInitData" });
+  const btbProxy = m.contract("ERC1967Proxy", [btbImpl, btbInitData], { id: "BTBProxy" });
+  const btb = m.contractAt("BTB", btbProxy, { id: "BTB" });
+
+  // ===== Phase 2: Staking tokens as UUPS proxies (depend on BTD/BTB) =====
+  const stBTDImpl = m.contract("stBTD", [], { id: "stBTDImpl" });
+  const stBTDInitData = m.encodeFunctionCall(stBTDImpl, "initialize", [btd, deployer], { id: "stBTDInitData" });
+  const stBTDProxy = m.contract("ERC1967Proxy", [stBTDImpl, stBTDInitData], { id: "stBTDProxy", after: [btdProxy] });
+  const stBTD = m.contractAt("stBTD", stBTDProxy, { id: "stBTD" });
+
+  const stBTBImpl = m.contract("stBTB", [], { id: "stBTBImpl" });
+  const stBTBInitData = m.encodeFunctionCall(stBTBImpl, "initialize", [btb, deployer], { id: "stBTBInitData" });
+  const stBTBProxy = m.contract("ERC1967Proxy", [stBTBImpl, stBTBInitData], { id: "stBTBProxy", after: [btbProxy] });
+  const stBTB = m.contractAt("stBTB", stBTBProxy, { id: "stBTB" });
 
   // ===== Phase 3: LP Pairs (created before ConfigCore) =====
-  // Using our own UniswapV2Pair contracts for simplicity
   const pairWbtcUsdc = m.contract("contracts/local/UniswapV2Pair.sol:UniswapV2Pair", [], { id: "PairWBTCUSDC" });
-  const pairBtdUsdc = m.contract("contracts/local/UniswapV2Pair.sol:UniswapV2Pair", [], { id: "PairBTDUSDC", after: [btd] });
-  const pairBtbBtd = m.contract("contracts/local/UniswapV2Pair.sol:UniswapV2Pair", [], { id: "PairBTBBTD", after: [btd, btb] });
-  const pairBrsBtd = m.contract("contracts/local/UniswapV2Pair.sol:UniswapV2Pair", [], { id: "PairBRSBTD", after: [btd] });
+  const pairBtdUsdc = m.contract("contracts/local/UniswapV2Pair.sol:UniswapV2Pair", [], { id: "PairBTDUSDC", after: [btdProxy] });
+  const pairBtbBtd = m.contract("contracts/local/UniswapV2Pair.sol:UniswapV2Pair", [], { id: "PairBTBBTD", after: [btdProxy, btbProxy] });
+  const pairBrsBtd = m.contract("contracts/local/UniswapV2Pair.sol:UniswapV2Pair", [], { id: "PairBRSBTD", after: [btdProxy] });
 
   m.call(pairWbtcUsdc, "initialize", [wbtc, usdc], { id: "InitPairWBTCUSDC" });
-  m.call(pairBtdUsdc, "initialize", [btd, usdc], { id: "InitPairBTDUSDC", after: [btd] });
-  m.call(pairBtbBtd, "initialize", [btb, btd], { id: "InitPairBTBBTD", after: [btd, btb] });
-  m.call(pairBrsBtd, "initialize", [brs, btd], { id: "InitPairBRSBTD", after: [btd] });
+  m.call(pairBtdUsdc, "initialize", [btd, usdc], { id: "InitPairBTDUSDC", after: [btdProxy] });
+  m.call(pairBtbBtd, "initialize", [btb, btd], { id: "InitPairBTBBTD", after: [btdProxy, btbProxy] });
+  m.call(pairBrsBtd, "initialize", [brs, btd], { id: "InitPairBRSBTD", after: [btdProxy] });
 
   // ===== Phase 4: ConfigCore (with all immutable addresses) =====
   const configCore = m.contract(
@@ -96,7 +111,7 @@ export default buildModule("FullSystemSepolia", (m) => {
       // Staking tokens (2)
       stBTD, stBTB,
     ],
-    { id: "ConfigCore", after: [btd, btb, stBTD, stBTB, pairWbtcUsdc, pairBtdUsdc, pairBtbBtd, pairBrsBtd] }
+    { id: "ConfigCore", after: [btdProxy, btbProxy, stBTDProxy, stBTBProxy, pairWbtcUsdc, pairBtdUsdc, pairBtbBtd, pairBrsBtd] }
   );
 
   // ===== Phase 5: ConfigGov (Proxy) =====
@@ -143,10 +158,14 @@ export default buildModule("FullSystemSepolia", (m) => {
   const idealUSDManager = m.contractAt("IdealUSDManager", idealUSDManagerProxy, { id: "IdealUSDManager" });
 
   // ===== Phase 8: PriceOracle + TWAP (Proxy) =====
-  const twapOracle = m.contract("UniswapV2TWAPOracle", [], { id: "TWAPOracle" });
+  const twapOracleImpl = m.contract("UniswapV2TWAPOracle", [], { id: "TWAPOracleImpl" });
+  const twapOracleInitData = m.encodeFunctionCall(twapOracleImpl, "initialize", [deployer], { id: "TWAPOracleInitData" });
+  const twapOracleProxy = m.contract("ERC1967Proxy", [twapOracleImpl, twapOracleInitData], { id: "TWAPOracleProxy" });
+  const twapOracle = m.contractAt("UniswapV2TWAPOracle", twapOracleProxy, { id: "TWAPOracle" });
+
   const priceOracleImpl = m.contract("PriceOracle", [], { id: "PriceOracleImpl" });
   const priceOracleInitData = m.encodeFunctionCall(priceOracleImpl, "initialize", [deployer, configCore, configGov, twapOracle, DEFAULTS.pythPriceId], { id: "PriceOracleInitData" });
-  const priceOracleProxy = m.contract("ERC1967Proxy", [priceOracleImpl, priceOracleInitData], { id: "PriceOracleProxy", after: [configCore, configGov] });
+  const priceOracleProxy = m.contract("ERC1967Proxy", [priceOracleImpl, priceOracleInitData], { id: "PriceOracleProxy", after: [configCore, configGov, twapOracleProxy] });
   const priceOracle = m.contractAt("PriceOracle", priceOracleProxy, { id: "PriceOracle" });
 
   // ===== Phase 9: Treasury / Minter / InterestPool (Proxy) =====
@@ -211,26 +230,15 @@ export default buildModule("FullSystemSepolia", (m) => {
 
   // ===== Phase 13: Grant MINTER_ROLE =====
   const MINTER_ROLE = keccak256(toHex("MINTER_ROLE"));
-  const DEFAULT_ADMIN_ROLE = "0x0000000000000000000000000000000000000000000000000000000000000000";
 
-  const btdGrantMinter = m.call(btd, "grantRole", [MINTER_ROLE, minter], { id: "BTDGrantMinterRoleMinter" });
-  const btdGrantInterest = m.call(btd, "grantRole", [MINTER_ROLE, interestPool], { id: "BTDGrantMinterRoleInterestPool" });
-  const btbGrantMinter = m.call(btb, "grantRole", [MINTER_ROLE, minter], { id: "BTBGrantMinterRoleMinter" });
-  const btbGrantInterest = m.call(btb, "grantRole", [MINTER_ROLE, interestPool], { id: "BTBGrantMinterRoleInterestPool" });
+  m.call(btd, "grantRole", [MINTER_ROLE, minter], { id: "BTDGrantMinterRoleMinter" });
+  m.call(btd, "grantRole", [MINTER_ROLE, interestPool], { id: "BTDGrantMinterRoleInterestPool" });
+  m.call(btb, "grantRole", [MINTER_ROLE, minter], { id: "BTBGrantMinterRoleMinter" });
+  m.call(btb, "grantRole", [MINTER_ROLE, interestPool], { id: "BTBGrantMinterRoleInterestPool" });
 
-  // Renounce admin roles to permanently lock permissions
-  m.call(btd, "renounceRole", [DEFAULT_ADMIN_ROLE, deployer], {
-    id: "BTDRenounceAdmin",
-    after: [btdGrantMinter, btdGrantInterest],
-  });
-  m.call(btb, "renounceRole", [DEFAULT_ADMIN_ROLE, deployer], {
-    id: "BTBRenounceAdmin",
-    after: [btbGrantMinter, btbGrantInterest],
-  });
+  // NOTE: Do NOT renounce DEFAULT_ADMIN_ROLE — needed for UUPS upgrade authorization
 
   // ===== Phase 14: ConfigGov params =====
-  // ParamType enum: 0=MINT_FEE_BP, 1=INTEREST_FEE_BP, 2=MIN_BTB_PRICE, 3=MAX_BTB_RATE,
-  //                 4=PCE_MAX_DEVIATION, 5=REDEEM_FEE_BP, 6=MAX_BTD_RATE
   m.call(
     configGov,
     "setParamsBatch",
@@ -250,7 +258,6 @@ export default buildModule("FullSystemSepolia", (m) => {
   );
 
   // Set oracle addresses on ConfigGov
-  // AddressParamType: 1=CHAINLINK_BTC_USD, 2=CHAINLINK_WBTC_BTC, 3=PYTH_WBTC, 4=CHAINLINK_USDC_USD, 5=CHAINLINK_USDT_USD
   m.call(configGov, "setAddressParam", [1, chainlinkBtcUsd], { id: "SetChainlinkBtcUsd" });
   m.call(configGov, "setAddressParam", [2, chainlinkWbtcBtc], { id: "SetChainlinkWbtcBtc" });
   m.call(configGov, "setAddressParam", [3, mockPyth], { id: "SetPythWbtc" });
@@ -264,9 +271,9 @@ export default buildModule("FullSystemSepolia", (m) => {
   });
 
   // Transfer tokens to Faucet: 10M WBTC, 500M USDC, 500M USDT
-  const FAUCET_WBTC = 10_000_000n * 10n ** 8n;  // 10 million WBTC (8 decimals)
-  const FAUCET_USDC = 500_000_000n * 10n ** 6n; // 500 million USDC (6 decimals)
-  const FAUCET_USDT = 500_000_000n * 10n ** 6n; // 500 million USDT (6 decimals)
+  const FAUCET_WBTC = 10_000_000n * 10n ** 8n;
+  const FAUCET_USDC = 500_000_000n * 10n ** 6n;
+  const FAUCET_USDT = 500_000_000n * 10n ** 6n;
 
   m.call(wbtc, "transfer", [faucet, FAUCET_WBTC], {
     from: deployer,

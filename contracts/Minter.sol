@@ -109,6 +109,20 @@ contract Minter is Initializable, Ownable2StepUpgradeable, PausableUpgradeable, 
         emit ConfigGovUpdated(oldGov, newGov);
     }
 
+    /// @notice ConfigCore address update event
+    event ConfigCoreUpdated(address indexed oldCore, address indexed newCore);
+
+    /**
+     * @notice Upgrade core configuration contract
+     * @param newCore New ConfigCore contract address
+     */
+    function upgradeCore(address newCore) external onlyOwner {
+        require(newCore != address(0), "Invalid core");
+        address oldCore = address(core);
+        core = ConfigCore(newCore);
+        emit ConfigCoreUpdated(oldCore, newCore);
+    }
+
     // ============ Precision Conversion Helpers ============
 
     function _wbtcToNormalized(uint256 wbtcAmount) internal pure returns (uint256) {
