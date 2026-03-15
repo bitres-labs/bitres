@@ -56,5 +56,5 @@
   "deployedLinkReferences": {},
   "immutableReferences": {},
   "inputSourceName": "project/contracts/interfaces/IAggregatorV3.sol",
-  "buildInfoId": "solc-0_8_30-46b5820f3a820058dffd6c2f450ecc0e4509b7ce"
+  "buildInfoId": "solc-0_8_30-66d0c2a4846dba62496d4826a2e12832f06d80eb"
 }
