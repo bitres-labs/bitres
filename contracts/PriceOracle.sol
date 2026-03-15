@@ -16,18 +16,6 @@ import "./interfaces/IMinter.sol";
 import "./libraries/OracleMath.sol";
 import "./libraries/FeedValidation.sol";
 
-/// @notice Pyth Price Feed Interface
-interface IPyth {
-    struct Price {
-        int64 price;
-        uint64 conf;
-        int32 expo;
-        uint256 publishTime;
-    }
-
-    function getPriceUnsafe(bytes32 id) external view returns (Price memory price);
-}
-
 import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
 
 /**
@@ -41,7 +29,7 @@ contract PriceOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable,
     // Core configuration (set in initialize, was immutable)
     ConfigCore public core;
     ConfigGov public gov;
-    bytes32 public pythWbtcPriceId;
+    bytes32 public pythWbtcPriceId; // DEPRECATED: kept for storage layout compatibility
     bool public useTWAPDefault;
 
     // Mutable configuration (whitelist restricted)
@@ -56,10 +44,6 @@ contract PriceOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable,
     uint256 public constant MAX_DEVIATION_CEILING = 500;  // Cannot exceed 5%
     uint256 public constant MIN_DEVIATION_FLOOR = 50;     // Cannot be below 0.5%
     uint256 public constant DEVIATION_UPDATE_COOLDOWN = 1 days;
-
-    // Pyth price safety parameters
-    uint256 public constant PYTH_MAX_STALENESS = 60;      // Maximum staleness: 60 seconds
-    uint64 public constant PYTH_MAX_CONF_RATIO = 100;     // Maximum confidence ratio: 1% (conf/price < 1%)
 
     // Stablecoin depeg threshold (1% = 100 basis points)
     uint256 public constant STABLECOIN_MAX_DEVIATION_BPS = 100;
@@ -93,13 +77,11 @@ contract PriceOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable,
         address initialOwner,
         address _core,
         address _gov,
-        address _twapOracle,
-        bytes32 _pythWbtcPriceId
+        address _twapOracle
     ) public initializer {
         require(initialOwner != address(0), "Invalid owner");
         require(_core != address(0), "Invalid core address");
         require(_gov != address(0), "Invalid gov address");
-        require(_pythWbtcPriceId != bytes32(0), "Invalid Pyth price id");
 
         __Ownable_init(initialOwner);
         __Ownable2Step_init();
@@ -107,7 +89,6 @@ contract PriceOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable,
 
         core = ConfigCore(_core);
         gov = ConfigGov(_gov);
-        pythWbtcPriceId = _pythWbtcPriceId;
         useTWAPDefault = true;
         useTWAP = true;
         maxDeviationBps = 100; // Default 1%
@@ -277,41 +258,6 @@ contract PriceOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable,
         return Math.mulDiv(wbtcToBtc, btcToUsd, 1e18);
     }
 
-    function _getPythWBTCUSD() internal view returns (uint256) {
-        address pythFeed = gov.pythWbtc();
-        require(pythFeed != address(0), "Pyth feed not set");
-        require(pythWbtcPriceId != bytes32(0), "Pyth price id not set");
-
-        IPyth.Price memory price = IPyth(pythFeed).getPriceUnsafe(pythWbtcPriceId);
-        require(price.price > 0, "Invalid Pyth price");
-
-        require(
-            block.timestamp - price.publishTime <= PYTH_MAX_STALENESS,
-            "Pyth price stale"
-        );
-
-        require(
-            price.conf * PYTH_MAX_CONF_RATIO <= uint64(price.price),
-            "Pyth confidence too wide"
-        );
-
-        return _scalePythPrice(price.price, price.expo);
-    }
-
-    function _scalePythPrice(int64 price, int32 expo) internal pure returns (uint256) {
-        require(price > 0, "Invalid Pyth value");
-        int32 exponent = expo + 18;
-        require(exponent > -80 && exponent < 80, "Pyth exponent out of bounds");
-        uint256 base = uint256(uint64(price));
-
-        if (exponent >= 0) {
-            return base * (10 ** uint32(uint32(exponent)));
-        }
-
-        uint32 absExp = uint32(uint32(-exponent));
-        return base / (10 ** absExp);
-    }
-
     // ============ Core Price Queries ============
 
     function getPrice(address pool, address base, address quote)
@@ -324,14 +270,6 @@ contract PriceOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable,
 
     function getWBTCPrice() public view returns (uint256) {
         uint256 chainlinkPrice = _getChainlinkWBTCUSD();
-        uint256 pythPrice = _getPythWBTCUSD();
-
-        require(
-            OracleMath.deviationWithin(chainlinkPrice, pythPrice, maxDeviationBps),
-            "Chainlink/Pyth price mismatch"
-        );
-
-        uint256 referencePrice = (chainlinkPrice + pythPrice) / 2;
 
         uint256 uniPrice = getPrice(
             core.POOL_WBTC_USDC(),
@@ -340,8 +278,8 @@ contract PriceOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable,
         );
 
         require(
-            OracleMath.deviationWithin(uniPrice, referencePrice, maxDeviationBps),
-            "Uniswap/Oracle price mismatch"
+            OracleMath.deviationWithin(uniPrice, chainlinkPrice, maxDeviationBps),
+            "Uniswap/Chainlink price mismatch"
         );
 
         return uniPrice;

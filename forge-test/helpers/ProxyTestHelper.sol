@@ -46,13 +46,12 @@ library ProxyTestHelper {
         address owner,
         address core,
         address gov,
-        address twapOracle,
-        bytes32 pythPriceId
+        address twapOracle
     ) internal returns (PriceOracle) {
         PriceOracle impl = new PriceOracle();
         ERC1967Proxy proxy = new ERC1967Proxy(
             address(impl),
-            abi.encodeCall(PriceOracle.initialize, (owner, core, gov, twapOracle, pythPriceId))
+            abi.encodeCall(PriceOracle.initialize, (owner, core, gov, twapOracle))
         );
         return PriceOracle(address(proxy));
     }

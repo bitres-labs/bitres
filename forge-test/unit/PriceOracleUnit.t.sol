@@ -16,62 +16,10 @@ import "../../contracts/local/MockUSDC.sol";
 import "../../contracts/local/MockUSDT.sol";
 import "../../contracts/local/MockWETH.sol";
 import "../../contracts/local/MockAggregatorV3.sol";
-import "../../contracts/local/MockPyth.sol";
 import "../../contracts/local/MockIUSDManager.sol";
 import "../../contracts/local/UniswapV2Pair.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../helpers/ProxyTestHelper.sol";
-
-/// @notice Enhanced MockPyth that allows setting confidence and custom publishTime
-contract EnhancedMockPyth {
-    struct Price {
-        int64 price;
-        uint64 conf;
-        int32 expo;
-        uint256 publishTime;
-    }
-
-    mapping(bytes32 => Price) private prices;
-
-    function setPrice(bytes32 id, int64 _price, int32 _expo) external {
-        prices[id] = Price({
-            price: _price,
-            conf: 0,
-            expo: _expo,
-            publishTime: block.timestamp
-        });
-    }
-
-    function setPriceWithConf(bytes32 id, int64 _price, uint64 _conf, int32 _expo) external {
-        prices[id] = Price({
-            price: _price,
-            conf: _conf,
-            expo: _expo,
-            publishTime: block.timestamp
-        });
-    }
-
-    function setPriceWithTimestamp(
-        bytes32 id,
-        int64 _price,
-        uint64 _conf,
-        int32 _expo,
-        uint256 _publishTime
-    ) external {
-        prices[id] = Price({
-            price: _price,
-            conf: _conf,
-            expo: _expo,
-            publishTime: _publishTime
-        });
-    }
-
-    function getPriceUnsafe(bytes32 id) external view returns (Price memory) {
-        Price memory p = prices[id];
-        require(p.price != 0, "Price not set");
-        return p;
-    }
-}
 
 /// @notice Minimal mock Minter that returns a fixed collateral ratio
 contract MockMinterCR {
@@ -121,20 +69,16 @@ contract PriceOracleUnitTest is Test {
     MockAggregatorV3 public chainlinkWbtcBtc;
     MockAggregatorV3 public chainlinkUsdcUsd;
     MockAggregatorV3 public chainlinkUsdtUsd;
-    EnhancedMockPyth public pyth;
     MockMinterCR public mockMinter;
 
     // ============ Constants ============
 
     address public deployer = address(this);
     address public nonOwner = address(0xBEEF);
-    bytes32 public constant PYTH_PRICE_ID = bytes32(uint256(1));
 
     // BTC price = $102,000
     int256 constant CL_BTC_USD = 10_200_000_000_000;  // 102000 * 1e8
     int256 constant CL_WBTC_BTC = 100_000_000;        // 1.0 * 1e8
-    int64 constant PYTH_WBTC_PRICE = 10_200_000;       // 102000 with expo=-2
-    int32 constant PYTH_WBTC_EXPO = -2;
 
     // Stablecoin prices = $1.00
     int256 constant CL_USDC_USD = 100_000_000;         // 1.0 * 1e8
@@ -205,11 +149,6 @@ contract PriceOracleUnitTest is Test {
         gov.setAddressParam(ConfigGov.AddressParamType.ChainlinkUsdcUsd, address(chainlinkUsdcUsd));
         gov.setAddressParam(ConfigGov.AddressParamType.ChainlinkUsdtUsd, address(chainlinkUsdtUsd));
 
-        // --- Deploy Enhanced Pyth mock ---
-        pyth = new EnhancedMockPyth();
-        pyth.setPrice(PYTH_PRICE_ID, PYTH_WBTC_PRICE, PYTH_WBTC_EXPO);
-        gov.setAddressParam(ConfigGov.AddressParamType.PythWbtc, address(pyth));
-
         // --- Deploy IUSD Manager ---
         iusdManager = new MockIUSDManager(1e18);
 
@@ -224,8 +163,7 @@ contract PriceOracleUnitTest is Test {
             deployer,
             address(core),
             address(gov),
-            address(twapOracle),
-            PYTH_PRICE_ID
+            address(twapOracle)
         );
 
         // --- Set core contracts ---
@@ -299,7 +237,6 @@ contract PriceOracleUnitTest is Test {
         assertEq(oracle.owner(), deployer);
         assertEq(address(oracle.core()), address(core));
         assertEq(address(oracle.gov()), address(gov));
-        assertEq(oracle.pythWbtcPriceId(), PYTH_PRICE_ID);
         assertEq(oracle.maxDeviationBps(), 100);
         assertTrue(oracle.useTWAP());
         assertEq(address(oracle.twapOracle()), address(twapOracle));
@@ -311,7 +248,7 @@ contract PriceOracleUnitTest is Test {
         new ERC1967Proxy(
             address(impl),
             abi.encodeCall(PriceOracle.initialize, (
-                address(0), address(core), address(gov), address(twapOracle), PYTH_PRICE_ID
+                address(0), address(core), address(gov), address(twapOracle)
             ))
         );
     }
@@ -322,7 +259,7 @@ contract PriceOracleUnitTest is Test {
         new ERC1967Proxy(
             address(impl),
             abi.encodeCall(PriceOracle.initialize, (
-                deployer, address(0), address(gov), address(twapOracle), PYTH_PRICE_ID
+                deployer, address(0), address(gov), address(twapOracle)
             ))
         );
     }
@@ -333,18 +270,7 @@ contract PriceOracleUnitTest is Test {
         new ERC1967Proxy(
             address(impl),
             abi.encodeCall(PriceOracle.initialize, (
-                deployer, address(core), address(0), address(twapOracle), PYTH_PRICE_ID
-            ))
-        );
-    }
-
-    function test_initialize_zeroPythId_reverts() public {
-        PriceOracle impl = new PriceOracle();
-        vm.expectRevert("Invalid Pyth price id");
-        new ERC1967Proxy(
-            address(impl),
-            abi.encodeCall(PriceOracle.initialize, (
-                deployer, address(core), address(gov), address(twapOracle), bytes32(0)
+                deployer, address(core), address(0), address(twapOracle)
             ))
         );
     }
@@ -475,28 +401,13 @@ contract PriceOracleUnitTest is Test {
     // ============ 5. getWBTCPrice Tests ============
 
     function test_getWBTCPrice_normal() public {
-        // Refresh pyth price at current timestamp
-        pyth.setPrice(PYTH_PRICE_ID, PYTH_WBTC_PRICE, PYTH_WBTC_EXPO);
-
         uint256 price = oracle.getWBTCPrice();
         // Price should be approximately 102,000e18
         // Allow small tolerance due to TWAP/AMM rounding
         assertApproxEqRel(price, 102_000e18, 0.01e18); // 1% tolerance
     }
 
-    function test_getWBTCPrice_chainlinkPythMismatch_reverts() public {
-        // Set Pyth price 5% higher than Chainlink
-        // Chainlink: 102000, Pyth: 107100
-        pyth.setPrice(PYTH_PRICE_ID, 10_710_000, PYTH_WBTC_EXPO);
-
-        vm.expectRevert("Chainlink/Pyth price mismatch");
-        oracle.getWBTCPrice();
-    }
-
     function test_getWBTCPrice_uniswapMismatch_reverts() public {
-        // Refresh pyth
-        pyth.setPrice(PYTH_PRICE_ID, PYTH_WBTC_PRICE, PYTH_WBTC_EXPO);
-
         // Disable TWAP to use spot price, then manipulate pool reserves
         oracle.setUseTWAP(false);
 
@@ -506,7 +417,7 @@ contract PriceOracleUnitTest is Test {
         usdc.transfer(address(poolWbtcUsdc), 102_000e6);
         poolWbtcUsdc.sync();
 
-        vm.expectRevert("Uniswap/Oracle price mismatch");
+        vm.expectRevert("Uniswap/Chainlink price mismatch");
         oracle.getWBTCPrice();
     }
 
@@ -547,9 +458,6 @@ contract PriceOracleUnitTest is Test {
         twapOracle.updateIfNeeded(address(poolBtdUsdc));
         vm.warp(block.timestamp + 31 minutes);
 
-        // Refresh Pyth timestamp so it doesn't go stale
-        pyth.setPrice(PYTH_PRICE_ID, PYTH_WBTC_PRICE, PYTH_WBTC_EXPO);
-
         // Now TWAP should reflect the low price
         // The BTD price from TWAP should be ~0.33 which is < floor 0.9
         vm.expectRevert("BTD: price below floor");
@@ -559,18 +467,12 @@ contract PriceOracleUnitTest is Test {
     // ============ 7. getBTBPrice / getBRSPrice Tests ============
 
     function test_getBTBPrice_normal() public {
-        // Refresh Pyth
-        pyth.setPrice(PYTH_PRICE_ID, PYTH_WBTC_PRICE, PYTH_WBTC_EXPO);
-
         uint256 price = oracle.getBTBPrice();
         // BTB/BTD = 1:1, BTD/USDC = 1:1, so BTB price ~1.0
         assertApproxEqRel(price, 1e18, 0.01e18);
     }
 
     function test_getBRSPrice_normal() public {
-        // Refresh Pyth
-        pyth.setPrice(PYTH_PRICE_ID, PYTH_WBTC_PRICE, PYTH_WBTC_EXPO);
-
         uint256 price = oracle.getBRSPrice();
         // BRS/BTD = 1:1, BTD/USDC = 1:1, so BRS price ~1.0
         assertApproxEqRel(price, 1e18, 0.01e18);
@@ -609,9 +511,6 @@ contract PriceOracleUnitTest is Test {
     }
 
     function test_getStBTBPrice_noShares() public {
-        // Refresh Pyth for BTB pricing chain
-        pyth.setPrice(PYTH_PRICE_ID, PYTH_WBTC_PRICE, PYTH_WBTC_EXPO);
-
         uint256 stPrice = oracle.getStBTBPrice();
         uint256 btbPrice = oracle.getBTBPrice();
         assertEq(stPrice, btbPrice);
@@ -646,9 +545,6 @@ contract PriceOracleUnitTest is Test {
     // ============ 10. getPrice(address token) Routing Tests ============
 
     function test_getPrice_routing() public {
-        // Refresh Pyth for all pricing chains
-        pyth.setPrice(PYTH_PRICE_ID, PYTH_WBTC_PRICE, PYTH_WBTC_EXPO);
-
         // WBTC
         uint256 wbtcPrice = oracle.getPrice(address(wbtc));
         assertApproxEqRel(wbtcPrice, 102_000e18, 0.01e18);
@@ -687,68 +583,7 @@ contract PriceOracleUnitTest is Test {
         oracle.getPrice(address(0xDEAD));
     }
 
-    // ============ 11. Pyth Internal Tests (via getWBTCPrice) ============
-
-    function test_getPythPrice_stale_reverts() public {
-        // Set Pyth price with a publishTime that is old
-        pyth.setPriceWithTimestamp(
-            PYTH_PRICE_ID,
-            PYTH_WBTC_PRICE,
-            0,
-            PYTH_WBTC_EXPO,
-            block.timestamp - 61 // 61 seconds ago, exceeds PYTH_MAX_STALENESS=60
-        );
-
-        vm.expectRevert("Pyth price stale");
-        oracle.getWBTCPrice();
-    }
-
-    function test_getPythPrice_wideConfidence_reverts() public {
-        // Confidence ratio must satisfy: conf * 100 <= price
-        // price = 10,200,000, so max conf = 102,000
-        // Set conf > 102,000 to trigger wide confidence
-        pyth.setPriceWithConf(
-            PYTH_PRICE_ID,
-            PYTH_WBTC_PRICE,
-            102_001, // conf > price/100
-            PYTH_WBTC_EXPO
-        );
-
-        vm.expectRevert("Pyth confidence too wide");
-        oracle.getWBTCPrice();
-    }
-
-    function test_getPythPrice_atMaxConfidence() public {
-        // Exactly at the boundary: conf * 100 = price -> should pass
-        // price = 10,200,000, conf = 102,000
-        pyth.setPriceWithConf(
-            PYTH_PRICE_ID,
-            PYTH_WBTC_PRICE,
-            102_000, // conf * 100 == price, boundary passes
-            PYTH_WBTC_EXPO
-        );
-
-        // Should not revert (boundary is <=)
-        uint256 price = oracle.getWBTCPrice();
-        assertGt(price, 0);
-    }
-
-    function test_getPythPrice_exactlyStaleness() public {
-        // publishTime exactly 60 seconds ago should pass (<=)
-        pyth.setPriceWithTimestamp(
-            PYTH_PRICE_ID,
-            PYTH_WBTC_PRICE,
-            0,
-            PYTH_WBTC_EXPO,
-            block.timestamp - 60
-        );
-
-        // Should not revert
-        uint256 price = oracle.getWBTCPrice();
-        assertGt(price, 0);
-    }
-
-    // ============ 12. isTWAPEnabled / getTWAPOracle Tests ============
+    // ============ 11. isTWAPEnabled / getTWAPOracle Tests ============
 
     function test_isTWAPEnabled() public {
         // Both useTWAP=true and oracle is set
@@ -773,7 +608,6 @@ contract PriceOracleUnitTest is Test {
     function test_getWBTCPrice_spotMode() public {
         // Disable TWAP, should use spot price
         oracle.setUseTWAP(false);
-        pyth.setPrice(PYTH_PRICE_ID, PYTH_WBTC_PRICE, PYTH_WBTC_EXPO);
 
         uint256 price = oracle.getWBTCPrice();
         assertApproxEqRel(price, 102_000e18, 0.01e18);
@@ -795,8 +629,7 @@ contract PriceOracleUnitTest is Test {
             deployer,
             address(core),
             address(gov),
-            address(0), // no TWAP oracle
-            PYTH_PRICE_ID
+            address(0) // no TWAP oracle
         );
         assertEq(oracleNoTwap.getTWAPOracle(), address(0));
         assertFalse(oracleNoTwap.isTWAPEnabled());

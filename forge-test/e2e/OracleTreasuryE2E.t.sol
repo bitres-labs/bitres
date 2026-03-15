@@ -17,7 +17,6 @@ import "../../contracts/local/MockUSDC.sol";
 import "../../contracts/local/MockUSDT.sol";
 import "../../contracts/local/MockWETH.sol";
 import "../../contracts/local/MockAggregatorV3.sol";
-import "../../contracts/local/MockPyth.sol";
 import "../../contracts/local/MockIUSDManager.sol";
 import "../../contracts/local/UniswapV2Pair.sol";
 import "../../contracts/libraries/Constants.sol";
@@ -77,10 +76,6 @@ contract OracleTreasuryE2ETest is Test {
     MockAggregatorV3 public chainlinkWbtcBtc;
     MockAggregatorV3 public chainlinkUsdcUsd;
     MockAggregatorV3 public chainlinkUsdtUsd;
-
-    // Pyth mock
-    MockPyth public pyth;
-    bytes32 public constant PYTH_PRICE_ID = bytes32(uint256(1));
 
     // ============ Actors ============
 
@@ -163,14 +158,9 @@ contract OracleTreasuryE2ETest is Test {
         chainlinkUsdcUsd = new MockAggregatorV3(1e8);            // $1.00
         chainlinkUsdtUsd = new MockAggregatorV3(1e8);            // $1.00
 
-        // --- Phase 8: Deploy Pyth mock ---
-        pyth = new MockPyth();
-        pyth.setPrice(PYTH_PRICE_ID, 10_000_000, -2); // price=10000000, expo=-2 => $100,000
-
         // --- Phase 9: Set oracle addresses in ConfigGov ---
         gov.setAddressParam(ConfigGov.AddressParamType.ChainlinkBtcUsd, address(chainlinkBtcUsd));
         gov.setAddressParam(ConfigGov.AddressParamType.ChainlinkWbtcBtc, address(chainlinkWbtcBtc));
-        gov.setAddressParam(ConfigGov.AddressParamType.PythWbtc, address(pyth));
         gov.setAddressParam(ConfigGov.AddressParamType.ChainlinkUsdcUsd, address(chainlinkUsdcUsd));
         gov.setAddressParam(ConfigGov.AddressParamType.ChainlinkUsdtUsd, address(chainlinkUsdtUsd));
 
@@ -182,8 +172,7 @@ contract OracleTreasuryE2ETest is Test {
             deployer,
             address(core),
             address(gov),
-            address(twapOracle),
-            PYTH_PRICE_ID
+            address(twapOracle)
         );
 
         // --- Phase 12: Deploy Treasury ---
@@ -263,7 +252,7 @@ contract OracleTreasuryE2ETest is Test {
     //           Scenario 1: WBTC price query (all sources agree)
     // ============================================================
 
-    /// @notice When Chainlink, Pyth, and TWAP all agree on ~$100k, getWBTCPrice succeeds
+    /// @notice When Chainlink and TWAP agree on ~$100k, getWBTCPrice succeeds
     function test_scenario1_wbtcPriceNormal() public view {
         uint256 price = oracle.getWBTCPrice();
         // Should return TWAP price close to $100,000
@@ -335,14 +324,14 @@ contract OracleTreasuryE2ETest is Test {
     //           Scenario 4: Oracle price deviation blocks query
     // ============================================================
 
-    /// @notice When Chainlink and Pyth prices diverge beyond maxDeviationBps, getWBTCPrice reverts
+    /// @notice When Chainlink and Uniswap prices diverge beyond maxDeviationBps, getWBTCPrice reverts
     function test_scenario4_deviationBlocks() public {
         // Change Chainlink BTC/USD to $105,000 (+5%)
         chainlinkBtcUsd.setAnswer(105_000 * 1e8);
-        // Pyth stays at $100,000
+        // Uniswap pool stays at $100,000
         // Default maxDeviationBps is 100 (1%), so 5% deviation should revert
 
-        vm.expectRevert("Chainlink/Pyth price mismatch");
+        vm.expectRevert("Uniswap/Chainlink price mismatch");
         oracle.getWBTCPrice();
     }
 

@@ -16,9 +16,9 @@ interface IPriceOracle {
     // ============ Core Price Query Interface ============
 
     /**
-     * @notice Get WBTC/USD price (multi-oracle verification)
-     * @dev Aggregates Chainlink (WBTC/BTC & BTC/USD), Pyth, Redstone as reference,
-     *      Uniswap TWAP/spot as final price, requires deviation <1% from reference median
+     * @notice Get WBTC/USD price (dual-source verification)
+     * @dev Validates Chainlink (WBTC/BTC & BTC/USD) against Uniswap TWAP/spot,
+     *      requires deviation within maxDeviationBps, returns Uniswap price
      * @return price WBTC price, 18 decimal precision (e.g., $50,000 = 50000e18)
      */
     function getWBTCPrice() external view returns (uint256 price);

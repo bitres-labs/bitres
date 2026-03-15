@@ -502,7 +502,7 @@ contract UpgradeabilityUnitTest is Test {
     function test_priceOracle_upgradeCore() public {
         (ConfigCore core,,) = _deployMinimalCore();
         ConfigGov gov = ProxyTestHelper.deployConfigGov(deployer);
-        PriceOracle oracle = ProxyTestHelper.deployPriceOracle(deployer, address(core), address(gov), address(0), bytes32(uint256(1)));
+        PriceOracle oracle = ProxyTestHelper.deployPriceOracle(deployer, address(core), address(gov), address(0));
 
         (ConfigCore newCore,,) = _deployMinimalCore();
         oracle.upgradeCore(address(newCore));
@@ -512,7 +512,7 @@ contract UpgradeabilityUnitTest is Test {
     function test_priceOracle_upgradeCore_zeroReverts() public {
         (ConfigCore core,,) = _deployMinimalCore();
         ConfigGov gov = ProxyTestHelper.deployConfigGov(deployer);
-        PriceOracle oracle = ProxyTestHelper.deployPriceOracle(deployer, address(core), address(gov), address(0), bytes32(uint256(1)));
+        PriceOracle oracle = ProxyTestHelper.deployPriceOracle(deployer, address(core), address(gov), address(0));
 
         vm.expectRevert("Invalid core");
         oracle.upgradeCore(address(0));
@@ -565,7 +565,7 @@ contract UpgradeabilityUnitTest is Test {
     function test_priceOracle_upgradeGov() public {
         (ConfigCore core,,) = _deployMinimalCore();
         ConfigGov gov = ProxyTestHelper.deployConfigGov(deployer);
-        PriceOracle oracle = ProxyTestHelper.deployPriceOracle(deployer, address(core), address(gov), address(0), bytes32(uint256(1)));
+        PriceOracle oracle = ProxyTestHelper.deployPriceOracle(deployer, address(core), address(gov), address(0));
 
         ConfigGov newGov = ProxyTestHelper.deployConfigGov(deployer);
         oracle.upgradeGov(address(newGov));
@@ -575,7 +575,7 @@ contract UpgradeabilityUnitTest is Test {
     function test_priceOracle_upgradeGov_zeroReverts() public {
         (ConfigCore core,,) = _deployMinimalCore();
         ConfigGov gov = ProxyTestHelper.deployConfigGov(deployer);
-        PriceOracle oracle = ProxyTestHelper.deployPriceOracle(deployer, address(core), address(gov), address(0), bytes32(uint256(1)));
+        PriceOracle oracle = ProxyTestHelper.deployPriceOracle(deployer, address(core), address(gov), address(0));
 
         vm.expectRevert("Invalid gov");
         oracle.upgradeGov(address(0));
@@ -584,7 +584,7 @@ contract UpgradeabilityUnitTest is Test {
     function test_priceOracle_upgradeGov_nonOwnerReverts() public {
         (ConfigCore core,,) = _deployMinimalCore();
         ConfigGov gov = ProxyTestHelper.deployConfigGov(deployer);
-        PriceOracle oracle = ProxyTestHelper.deployPriceOracle(deployer, address(core), address(gov), address(0), bytes32(uint256(1)));
+        PriceOracle oracle = ProxyTestHelper.deployPriceOracle(deployer, address(core), address(gov), address(0));
 
         vm.prank(alice);
         vm.expectRevert();

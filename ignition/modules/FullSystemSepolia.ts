@@ -47,7 +47,6 @@ const FUND_ADDRESSES = {
 // Default parameters
 const DEFAULTS = {
   initialPceFeed: "0x0000000000000000000000000000000000000001", // placeholder, set via ConfigGov
-  pythPriceId: "0x505954485f575442430000000000000000000000000000000000000000000000",
   iusdInitial: 10n ** 18n,
 };
 
@@ -135,9 +134,6 @@ export default buildModule("FullSystemSepolia", (m) => {
     { id: "ChainlinkWBTCBTC" }
   );
 
-  // Mock Pyth (no testnet support, use mock)
-  const mockPyth = m.contract("contracts/local/MockPyth.sol:MockPyth", [], { id: "MockPyth" });
-
   // Mock stablecoin oracles
   const chainlinkUsdcUsd = m.contract(
     "contracts/local/MockAggregatorV3.sol:MockAggregatorV3",
@@ -164,7 +160,7 @@ export default buildModule("FullSystemSepolia", (m) => {
   const twapOracle = m.contractAt("UniswapV2TWAPOracle", twapOracleProxy, { id: "TWAPOracle" });
 
   const priceOracleImpl = m.contract("PriceOracle", [], { id: "PriceOracleImpl" });
-  const priceOracleInitData = m.encodeFunctionCall(priceOracleImpl, "initialize", [deployer, configCore, configGov, twapOracle, DEFAULTS.pythPriceId], { id: "PriceOracleInitData" });
+  const priceOracleInitData = m.encodeFunctionCall(priceOracleImpl, "initialize", [deployer, configCore, configGov, twapOracle], { id: "PriceOracleInitData" });
   const priceOracleProxy = m.contract("ERC1967Proxy", [priceOracleImpl, priceOracleInitData], { id: "PriceOracleProxy", after: [configCore, configGov, twapOracleProxy] });
   const priceOracle = m.contractAt("PriceOracle", priceOracleProxy, { id: "PriceOracle" });
 
@@ -260,7 +256,6 @@ export default buildModule("FullSystemSepolia", (m) => {
   // Set oracle addresses on ConfigGov
   m.call(configGov, "setAddressParam", [1, chainlinkBtcUsd], { id: "SetChainlinkBtcUsd" });
   m.call(configGov, "setAddressParam", [2, chainlinkWbtcBtc], { id: "SetChainlinkWbtcBtc" });
-  m.call(configGov, "setAddressParam", [3, mockPyth], { id: "SetPythWbtc" });
   m.call(configGov, "setAddressParam", [4, chainlinkUsdcUsd], { id: "SetChainlinkUsdcUsd" });
   m.call(configGov, "setAddressParam", [5, chainlinkUsdtUsd], { id: "SetChainlinkUsdtUsd" });
 
@@ -294,7 +289,7 @@ export default buildModule("FullSystemSepolia", (m) => {
   // Output
   return {
     tokens: { wbtc, usdc, usdt, weth, brs, btd, btb, stBTD, stBTB },
-    oracles: { chainlinkBtcUsd, chainlinkWbtcBtc, mockPyth, chainlinkUsdcUsd, chainlinkUsdtUsd },
+    oracles: { chainlinkBtcUsd, chainlinkWbtcBtc, chainlinkUsdcUsd, chainlinkUsdtUsd },
     pairs: { pairWbtcUsdc, pairBtdUsdc, pairBtbBtd, pairBrsBtd },
     configCore,
     configGov,

@@ -5,7 +5,6 @@ import { keccak256, toHex } from "viem";
 const DEFAULTS = {
   initialBtcPrice: BigInt(102_000 * 1e8), // Chainlink 8 decimals
   initialPceFeed: "0x0000000000000000000000000000000000000001", // placeholder, will be set via ConfigGov
-  pythPriceId: "0x505954485f575442430000000000000000000000000000000000000000000000", // "PYTH_WTBC"
   iusdInitial: 10n ** 18n,
 };
 
@@ -91,7 +90,6 @@ export default buildModule("FullSystemLocal", (m) => {
     [BigInt(1e8)], // $1.00
     { id: "ChainlinkUSDTUSD" }
   );
-  const mockPyth = m.contract("contracts/local/MockPyth.sol:MockPyth", [], { id: "MockPyth" });
 
   // ===== Phase 6: ConfigGov (Proxy) =====
   const configGovImpl = m.contract("ConfigGov", [], { id: "ConfigGovImpl" });
@@ -113,7 +111,7 @@ export default buildModule("FullSystemLocal", (m) => {
   const twapOracle = m.contractAt("UniswapV2TWAPOracle", twapOracleProxy, { id: "TWAPOracle" });
 
   const priceOracleImpl = m.contract("PriceOracle", [], { id: "PriceOracleImpl" });
-  const priceOracleInitData = m.encodeFunctionCall(priceOracleImpl, "initialize", [deployer, configCore, configGov, twapOracle, DEFAULTS.pythPriceId], { id: "PriceOracleInitData" });
+  const priceOracleInitData = m.encodeFunctionCall(priceOracleImpl, "initialize", [deployer, configCore, configGov, twapOracle], { id: "PriceOracleInitData" });
   const priceOracleProxy = m.contract("ERC1967Proxy", [priceOracleImpl, priceOracleInitData], { id: "PriceOracleProxy", after: [configCore, configGov, twapOracleProxy] });
   const priceOracle = m.contractAt("PriceOracle", priceOracleProxy, { id: "PriceOracle" });
 
@@ -210,7 +208,6 @@ export default buildModule("FullSystemLocal", (m) => {
   // AddressParamType: 1=CHAINLINK_BTC_USD, 2=CHAINLINK_WBTC_BTC, 3=PYTH_WBTC, 4=CHAINLINK_USDC_USD, 5=CHAINLINK_USDT_USD
   m.call(configGov, "setAddressParam", [1, chainlinkBtcUsd], { id: "SetChainlinkBtcUsd" });
   m.call(configGov, "setAddressParam", [2, chainlinkWbtcBtc], { id: "SetChainlinkWbtcBtc" });
-  m.call(configGov, "setAddressParam", [3, mockPyth], { id: "SetPythWbtc" });
   m.call(configGov, "setAddressParam", [4, chainlinkUsdcUsd], { id: "SetChainlinkUsdcUsd" });
   m.call(configGov, "setAddressParam", [5, chainlinkUsdtUsd], { id: "SetChainlinkUsdtUsd" });
 
@@ -230,7 +227,7 @@ export default buildModule("FullSystemLocal", (m) => {
 
   return {
     tokens: { wbtc, usdc, usdt, weth, brs, btd, btb, stBTD, stBTB },
-    mocks: { chainlinkBtcUsd, chainlinkWbtcBtc, chainlinkUsdcUsd, chainlinkUsdtUsd, mockPyth },
+    mocks: { chainlinkBtcUsd, chainlinkWbtcBtc, chainlinkUsdcUsd, chainlinkUsdtUsd },
     pairs: { pairWbtcUsdc, pairBtdUsdc, pairBtbBtd, pairBrsBtd },
     configCore,
     configGov,
