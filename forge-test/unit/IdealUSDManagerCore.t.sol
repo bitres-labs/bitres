@@ -8,8 +8,13 @@ import "../../contracts/libraries/Constants.sol";
 import "../helpers/ProxyTestHelper.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
+interface Vm {
+    function warp(uint256 newTimestamp) external;
+}
+
 contract IdealUSDManagerCoreTest {
     uint256 constant INITIAL_IUSD = 1e18;
+    Vm constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
 
     function testUpdateIUSDFlow() public {
         MockAggregatorV3 pce = new MockAggregatorV3(int256(300_00_000_000)); // 300, 8 decimals
@@ -25,11 +30,15 @@ contract IdealUSDManagerCoreTest {
             INITIAL_IUSD        // initialIUSD
         );
 
-        // only owner authorized by default
+        // Advance time past cooldown before first update
+        vm.warp(30 days);
+        pce.setAnswer(int256(300_00_000_000));
         mgr.updateIUSD();
         uint256 afterFirst = mgr.getCurrentIUSD();
         require(afterFirst < INITIAL_IUSD, "should decrease when PCE lower");
 
+        // Advance time past cooldown before second update
+        vm.warp(60 days);
         pce.setAnswer(int256(303_00_000_000)); // +1%
         mgr.updateIUSD();
         uint256 afterSecond = mgr.getCurrentIUSD();
@@ -183,14 +192,18 @@ contract IdealUSDManagerCoreTest {
         );
 
         // First update establishes baseline
+        vm.warp(30 days);
+        pce.setAnswer(int256(300_00_000_000));
         mgr.updateIUSD();
 
         // Change PCE by 1.5% (within 2% limit) - should succeed
+        vm.warp(60 days);
         pce.setAnswer(int256(304_50_000_000)); // 300 * 1.015 = 304.5
         mgr.updateIUSD();
         require(mgr.getCurrentIUSD() > 0, "should update successfully");
 
         // Change PCE by 3% (exceeds 2% limit) - should fail
+        vm.warp(90 days);
         pce.setAnswer(int256(313_64_000_000)); // 304.5 * 1.03 = 313.64
         bool reverted;
         try mgr.updateIUSD() {

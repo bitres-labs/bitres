@@ -62,8 +62,8 @@ contract FullSystemAttackTest is Test {
         address usdt = address(new MockUSDC(deployer));
 
         // Deploy core tokens
-        btd = new BTD(deployer);
-        btb = new BTB(deployer);
+        btd = ProxyTestHelper.deployBTD(deployer);
+        btb = ProxyTestHelper.deployBTB(deployer);
         brs = new BRS(deployer);
 
         // Deploy staking tokens (use dummy addresses for non-critical tests)

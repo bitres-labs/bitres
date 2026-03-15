@@ -86,12 +86,12 @@ contract SystemE2ETest is Test {
 
         // --- Phase 2: Core tokens ---
         brs = new BRS(deployer);
-        btd = new BTD(deployer);
-        btb = new BTB(deployer);
+        btd = ProxyTestHelper.deployBTD(deployer);
+        btb = ProxyTestHelper.deployBTB(deployer);
 
         // --- Phase 2.5: Staking tokens ---
-        stbtd = new stBTD(IERC20(address(btd)));
-        stbtb = new stBTB(IERC20(address(btb)));
+        stbtd = ProxyTestHelper.deployStBTD(IERC20(address(btd)), deployer);
+        stbtb = ProxyTestHelper.deployStBTB(IERC20(address(btb)), deployer);
 
         // --- Phase 3: Uniswap V2 pairs ---
         poolWbtcUsdc = new UniswapV2Pair();

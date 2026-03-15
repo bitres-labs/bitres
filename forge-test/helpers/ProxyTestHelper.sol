@@ -9,6 +9,12 @@ import "../../contracts/Treasury.sol";
 import "../../contracts/Minter.sol";
 import "../../contracts/InterestPool.sol";
 import "../../contracts/FarmingPool.sol";
+import "../../contracts/BTD.sol";
+import "../../contracts/BTB.sol";
+import "../../contracts/UniswapV2TWAPOracle.sol";
+import "../../contracts/stBTD.sol";
+import "../../contracts/stBTB.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @title ProxyTestHelper - Deploy upgradeable contracts behind ERC1967 proxies
 /// @notice Used in tests to deploy UUPS-upgradeable contracts via proxy
@@ -104,5 +110,50 @@ library ProxyTestHelper {
             abi.encodeCall(FarmingPool.initialize, (owner, rewardToken, core, funds, shares))
         );
         return FarmingPool(address(proxy));
+    }
+
+    function deployBTD(address admin) internal returns (BTD) {
+        BTD impl = new BTD();
+        ERC1967Proxy proxy = new ERC1967Proxy(
+            address(impl),
+            abi.encodeCall(BTD.initialize, (admin))
+        );
+        return BTD(address(proxy));
+    }
+
+    function deployBTB(address admin) internal returns (BTB) {
+        BTB impl = new BTB();
+        ERC1967Proxy proxy = new ERC1967Proxy(
+            address(impl),
+            abi.encodeCall(BTB.initialize, (admin))
+        );
+        return BTB(address(proxy));
+    }
+
+    function deployTWAPOracle(address owner) internal returns (UniswapV2TWAPOracle) {
+        UniswapV2TWAPOracle impl = new UniswapV2TWAPOracle();
+        ERC1967Proxy proxy = new ERC1967Proxy(
+            address(impl),
+            abi.encodeCall(UniswapV2TWAPOracle.initialize, (owner))
+        );
+        return UniswapV2TWAPOracle(address(proxy));
+    }
+
+    function deployStBTD(IERC20 btd, address owner) internal returns (stBTD) {
+        stBTD impl = new stBTD();
+        ERC1967Proxy proxy = new ERC1967Proxy(
+            address(impl),
+            abi.encodeCall(stBTD.initialize, (btd, owner))
+        );
+        return stBTD(address(proxy));
+    }
+
+    function deployStBTB(IERC20 btb, address owner) internal returns (stBTB) {
+        stBTB impl = new stBTB();
+        ERC1967Proxy proxy = new ERC1967Proxy(
+            address(impl),
+            abi.encodeCall(stBTB.initialize, (btb, owner))
+        );
+        return stBTB(address(proxy));
     }
 }
