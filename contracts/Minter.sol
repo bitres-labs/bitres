@@ -11,7 +11,6 @@ import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
-import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import "./ConfigCore.sol";
 import "./ConfigGov.sol";
 import "./interfaces/ITreasury.sol";
@@ -57,6 +56,7 @@ contract Minter is Initializable, Ownable2StepUpgradeable, PausableUpgradeable, 
 
     /// @notice ConfigGov address update event
     event ConfigGovUpdated(address indexed oldConfigGov, address indexed newConfigGov);
+    event IUSDUpdateAttempted(bool updated);
 
     // ============ Initialization ============
 
@@ -164,7 +164,11 @@ contract Minter is Initializable, Ownable2StepUpgradeable, PausableUpgradeable, 
     function _tryUpdateIUSD() internal {
         address manager = core.IDEAL_USD_MANAGER();
         if (manager != address(0)) {
-            try IIdealUSDManager(manager).tryUpdateIUSD() {} catch {}
+            try IIdealUSDManager(manager).tryUpdateIUSD() returns (bool updated) {
+                emit IUSDUpdateAttempted(updated);
+            } catch {
+                emit IUSDUpdateAttempted(false);
+            }
         }
     }
 
@@ -191,7 +195,9 @@ contract Minter is Initializable, Ownable2StepUpgradeable, PausableUpgradeable, 
     // ============ Collateral and Liabilities ============
 
     function totalWBTC() public view returns (uint256) {
-        (uint256 wbtcBalance, , ) = ITreasury(core.TREASURY()).getBalances();
+        (uint256 wbtcBalance, uint256 brsBalance, uint256 btdBalance) = ITreasury(core.TREASURY()).getBalances();
+        brsBalance;
+        btdBalance;
         return wbtcBalance;
     }
 
@@ -199,9 +205,8 @@ contract Minter is Initializable, Ownable2StepUpgradeable, PausableUpgradeable, 
         return IMintableERC20(core.BTD()).totalSupply();
     }
 
-    function totalStBTDEquivalent() public view returns (uint256) {
-        address stBTD = core.ST_BTD();
-        return stBTD == address(0) ? 0 : IERC4626(stBTD).totalAssets();
+    function totalStBTDEquivalent() public pure returns (uint256) {
+        return 0;
     }
 
     function getCollateralRatio() public view override returns (uint256) {

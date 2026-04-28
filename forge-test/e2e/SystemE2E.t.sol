@@ -627,6 +627,8 @@ contract SystemE2ETest is Test {
         vm.stopPrank();
 
         uint256 btbAfter = btb.balanceOf(alice);
+        assertGe(btbAfter, btbBefore, "BTB balance should not decrease after unstake");
+
         // The actual interest was minted internally. Let's verify via
         // checking BTB totalSupply increased (interest was minted)
         uint256 totalBTBSupply = btb.totalSupply();

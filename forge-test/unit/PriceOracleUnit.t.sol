@@ -400,7 +400,7 @@ contract PriceOracleUnitTest is Test {
 
     // ============ 5. getWBTCPrice Tests ============
 
-    function test_getWBTCPrice_normal() public {
+    function test_getWBTCPrice_normal() public view {
         uint256 price = oracle.getWBTCPrice();
         // Price should be approximately 102,000e18
         // Allow small tolerance due to TWAP/AMM rounding
@@ -423,7 +423,7 @@ contract PriceOracleUnitTest is Test {
 
     // ============ 6. getBTDPrice Tests ============
 
-    function test_getBTDPrice_normal() public {
+    function test_getBTDPrice_normal() public view {
         uint256 price = oracle.getBTDPrice();
         // BTD/USDC pool is 1:1, so price should be ~1e18
         assertApproxEqRel(price, 1e18, 0.01e18);
@@ -466,13 +466,13 @@ contract PriceOracleUnitTest is Test {
 
     // ============ 7. getBTBPrice / getBRSPrice Tests ============
 
-    function test_getBTBPrice_normal() public {
+    function test_getBTBPrice_normal() public view {
         uint256 price = oracle.getBTBPrice();
         // BTB/BTD = 1:1, BTD/USDC = 1:1, so BTB price ~1.0
         assertApproxEqRel(price, 1e18, 0.01e18);
     }
 
-    function test_getBRSPrice_normal() public {
+    function test_getBRSPrice_normal() public view {
         uint256 price = oracle.getBRSPrice();
         // BRS/BTD = 1:1, BTD/USDC = 1:1, so BRS price ~1.0
         assertApproxEqRel(price, 1e18, 0.01e18);
@@ -510,7 +510,7 @@ contract PriceOracleUnitTest is Test {
         assertTrue(stPrice > btdPrice);
     }
 
-    function test_getStBTBPrice_noShares() public {
+    function test_getStBTBPrice_noShares() public view {
         uint256 stPrice = oracle.getStBTBPrice();
         uint256 btbPrice = oracle.getBTBPrice();
         assertEq(stPrice, btbPrice);
@@ -544,7 +544,7 @@ contract PriceOracleUnitTest is Test {
 
     // ============ 10. getPrice(address token) Routing Tests ============
 
-    function test_getPrice_routing() public {
+    function test_getPrice_routing() public view {
         // WBTC
         uint256 wbtcPrice = oracle.getPrice(address(wbtc));
         assertApproxEqRel(wbtcPrice, 102_000e18, 0.01e18);
@@ -635,13 +635,13 @@ contract PriceOracleUnitTest is Test {
         assertFalse(oracleNoTwap.isTWAPEnabled());
     }
 
-    function test_getBTDPrice_twapOracleNotSet_reverts() public {
+    function test_getBTDPrice_twapOracleNotSet_usesSpotFallback() public {
         // Remove TWAP oracle
         oracle.setTWAPOracle(address(0));
 
-        // getBTDPrice always uses TWAP internally, so should revert
-        vm.expectRevert("TWAP oracle not set");
-        oracle.getBTDPrice();
+        // Without a TWAP oracle, BTD pricing follows the same spot fallback as getPrice().
+        uint256 price = oracle.getBTDPrice();
+        assertApproxEqRel(price, 1e18, 0.01e18);
     }
 
     function test_getUSDCPrice_slightDeviation() public view {

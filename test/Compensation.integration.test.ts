@@ -92,8 +92,7 @@ describe("Compensation Mechanisms (Integration)", function () {
   });
 
   describe("BTB Compensation on BTD Redemption", function () {
-    // SKIPPED: Requires TWAP oracle with 30min observation period
-    it.skip("should mint BTB when CR < 100% during BTD redemption", async function () {
+    it("should mint BTB when CR < 100% during BTD redemption", async function () {
       const { owner, user1, system, tokens, minter, treasury, priceOracle, configGov } = fixture;
 
       // Step 1: User1 mint BTD with WBTC
@@ -183,8 +182,7 @@ describe("Compensation Mechanisms (Integration)", function () {
   });
 
   describe("BRS Compensation on Low BTB Price", function () {
-    // SKIPPED: Requires TWAP oracle with 30min observation period
-    it.skip("should mint BRS when BTB price < minBTBPrice during redemption", async function () {
+    it("should mint BRS when BTB price < minBTBPrice during redemption", async function () {
       const { owner, user1, system, tokens, minter, configGov } = fixture;
 
       // Step 1: Set BTB minimum price (e.g., $0.98)
@@ -254,8 +252,7 @@ describe("Compensation Mechanisms (Integration)", function () {
   });
 
   describe("Combined Compensation Scenario", function () {
-    // SKIPPED: Requires TWAP oracle with 30min observation period
-    it.skip("should mint both BTB and BRS in extreme market conditions", async function () {
+    it("should mint both BTB and BRS in extreme market conditions", async function () {
       const { owner, user1, system, tokens, minter, configGov } = fixture;
 
       // Step 1: Set BTB minimum price
@@ -315,8 +312,7 @@ describe("Compensation Mechanisms (Integration)", function () {
   });
 
   describe("BTB Redemption for BTD", function () {
-    // SKIPPED: Requires TWAP oracle with 30min observation period
-    it.skip("should allow redeeming BTB for BTD when CR >= 100%", async function () {
+    it("should allow redeeming BTB for BTD when CR >= 100%", async function () {
       const { owner, user1, system, tokens, minter } = fixture;
 
       // Step 1: Create a low-CR scenario to obtain BTB

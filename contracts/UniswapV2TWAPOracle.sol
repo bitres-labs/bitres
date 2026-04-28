@@ -4,8 +4,9 @@ pragma solidity ^0.8.30;
 import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import "./interfaces/IUniswapV2TWAPOracle.sol";
-import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {IUniswapV2TWAPOracle} from "./interfaces/IUniswapV2TWAPOracle.sol";
+import {IUniswapV2Pair as IBitresUniswapV2Pair} from "./interfaces/IUniswapV2Pair.sol";
 
 /// @title UniswapV2TWAPOracle
 /// @notice Time-Weighted Average Price (TWAP) oracle for Uniswap V2
@@ -59,11 +60,11 @@ contract UniswapV2TWAPOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgr
         uint32 blockTimestamp
     ) {
         blockTimestamp = uint32(block.timestamp);
-        price0Cumulative = IUniswapV2Pair(pair).price0CumulativeLast();
-        price1Cumulative = IUniswapV2Pair(pair).price1CumulativeLast();
+        price0Cumulative = IBitresUniswapV2Pair(pair).price0CumulativeLast();
+        price1Cumulative = IBitresUniswapV2Pair(pair).price1CumulativeLast();
 
         // Get reserves and last update time
-        (uint112 reserve0, uint112 reserve1, uint32 timestampLast) = IUniswapV2Pair(pair).getReserves();
+        (uint112 reserve0, uint112 reserve1, uint32 timestampLast) = IBitresUniswapV2Pair(pair).getReserves();
 
         // If time has elapsed since last pair update, add the pending cumulative price
         if (timestampLast != blockTimestamp && reserve0 != 0 && reserve1 != 0) {
@@ -71,12 +72,9 @@ contract UniswapV2TWAPOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgr
             unchecked {
                 timeElapsed = blockTimestamp - timestampLast;
             }
-            // Add pending price accumulation (Q112 format)
-            // IMPORTANT: Cast to uint256 before bit shift to avoid overflow
-            unchecked {
-                price0Cumulative += (uint256(reserve1) << 112) / reserve0 * timeElapsed;
-                price1Cumulative += (uint256(reserve0) << 112) / reserve1 * timeElapsed;
-            }
+            // Add pending price accumulation (Q112 format).
+            price0Cumulative += Math.mulDiv(uint256(reserve1) << 112, timeElapsed, reserve0);
+            price1Cumulative += Math.mulDiv(uint256(reserve0) << 112, timeElapsed, reserve1);
         }
     }
 
@@ -113,7 +111,7 @@ contract UniswapV2TWAPOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgr
 
         // Find a ref observation that is >= PERIOD ago
         // Prefer newer if it's old enough, otherwise use older
-        Observation memory ref;
+        Observation memory ref = newer;
         uint32 newerAge;
         uint32 olderAge;
         unchecked {
@@ -121,11 +119,9 @@ contract UniswapV2TWAPOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgr
             olderAge = currentTimestamp - older.timestamp;
         }
 
-        if (newerAge >= PERIOD) {
-            ref = newer;
-        } else if (older.timestamp > 0 && olderAge >= PERIOD) {
+        if (newerAge < PERIOD && older.timestamp > 0 && olderAge >= PERIOD) {
             ref = older;
-        } else {
+        } else if (newerAge < PERIOD) {
             revert("No observation >= PERIOD ago");
         }
 

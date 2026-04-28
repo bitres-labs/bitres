@@ -13,7 +13,7 @@ import "./interfaces/ITreasury.sol";
 import "./ConfigCore.sol";
 import "./libraries/Constants.sol";
 import "./libraries/RewardMath.sol";
-import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
+import "./interfaces/IUniswapV2Pair.sol";
 
 /// @notice Minimal Farm contract for distributing pre-minted BRS rewards
 contract FarmingPool is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpgradeable, UUPSUpgradeable, IFarmingPool {
@@ -34,6 +34,7 @@ contract FarmingPool is Initializable, Ownable2StepUpgradeable, ReentrancyGuardU
     uint256 public constant SHARE_BASE = 100;
 
     event RewardsFunded(address indexed from, uint256 amount);
+    event LazyBuybackAttempted(bool executed);
 
     // ============ Initialization ============
 
@@ -104,7 +105,7 @@ contract FarmingPool is Initializable, Ownable2StepUpgradeable, ReentrancyGuardU
 
     function _setFunds(address[] memory addrs, uint256[] memory shares) internal {
         require(addrs.length == shares.length, "FarmingPool: length mismatch");
-        uint256 sum;
+        uint256 sum = 0;
         for (uint256 i = 0; i < shares.length; i++) {
             sum += shares[i];
         }
@@ -257,17 +258,18 @@ contract FarmingPool is Initializable, Ownable2StepUpgradeable, ReentrancyGuardU
         }
         minted += reward;
 
-        uint256 fundDistributed;
-        uint256 shareSum;
+        uint256 fundDistributed = 0;
+        uint256 shareSum = 0;
         uint256 lastFundIndex = type(uint256).max;
-        for (uint256 i = 0; i < fundAddrs.length; i++) {
+        uint256 fundCount = fundAddrs.length;
+        for (uint256 i = 0; i < fundCount; i++) {
             if (fundAddrs[i] != address(0) && fundShares.length > i && fundShares[i] > 0) {
                 shareSum += fundShares[i];
                 lastFundIndex = i;
             }
         }
 
-        for (uint256 i = 0; i < fundAddrs.length; i++) {
+        for (uint256 i = 0; i < fundCount; i++) {
             address fund = fundAddrs[i];
             uint256 share = fundShares.length > i ? fundShares[i] : 0;
             if (fund != address(0) && share > 0) {
@@ -445,7 +447,8 @@ contract FarmingPool is Initializable, Ownable2StepUpgradeable, ReentrancyGuardU
         uint256 totalSupply = pair.totalSupply();
         require(totalSupply > 0, "FarmingPool: zero LP supply");
 
-        (uint112 reserve0, uint112 reserve1, ) = pair.getReserves();
+        (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast) = pair.getReserves();
+        blockTimestampLast;
         address token0 = pair.token0();
         address token1 = pair.token1();
 
@@ -472,7 +475,8 @@ contract FarmingPool is Initializable, Ownable2StepUpgradeable, ReentrancyGuardU
 
     /// @notice Calculate total fund share sum for reward distribution
     function _totalFundShareSum() internal view returns (uint256 shareSum) {
-        for (uint256 i = 0; i < fundAddrs.length; i++) {
+        uint256 fundCount = fundAddrs.length;
+        for (uint256 i = 0; i < fundCount; i++) {
             if (fundAddrs[i] != address(0) && fundShares.length > i && fundShares[i] > 0) {
                 shareSum += fundShares[i];
             }
@@ -482,7 +486,11 @@ contract FarmingPool is Initializable, Ownable2StepUpgradeable, ReentrancyGuardU
     function _tryLazyBuyback() internal {
         address treasury = core.TREASURY();
         if (treasury != address(0)) {
-            try ITreasury(treasury).tryLazyBuyback() {} catch {}
+            try ITreasury(treasury).tryLazyBuyback() returns (bool executed) {
+                emit LazyBuybackAttempted(executed);
+            } catch {
+                emit LazyBuybackAttempted(false);
+            }
         }
     }
 

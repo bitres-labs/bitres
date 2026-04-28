@@ -218,17 +218,17 @@ contract MinterIntegrationTest is Test {
         assertEq(cr, 0.5e18, "CR should be 50%");
     }
 
-    function test_collateralRatio_withStBTD() public pure {
+    function test_collateralRatio_ignoresWrappedStBTD() public pure {
         uint256 cr = CollateralMath.collateralRatio(
             2e8,        // 2 BTC = $100k
             WBTC_PRICE,
             50000e18,   // 50k BTD
-            50000e18,   // 50k stBTD equivalent
+            50000e18,   // 50k stBTD wraps already-issued BTD
             IUSD_PRICE
         );
 
-        // $100k / ($50k + $50k) = 100%
-        assertEq(cr, 1e18, "CR should be 100%");
+        // $100k / $50k BTD supply = 200%; stBTD is not a separate liability.
+        assertEq(cr, 2e18, "CR should ignore wrapped stBTD assets");
     }
 
     function test_collateralRatio_noLiabilities() public pure {
@@ -251,7 +251,7 @@ contract MinterIntegrationTest is Test {
 
     function test_liabilityValue_calculation() public pure {
         uint256 value = CollateralMath.liabilityValue(100000e18, 50000e18, IUSD_PRICE);
-        assertEq(value, 150000e18, "100k BTD + 50k stBTD = $150k");
+        assertEq(value, 100000e18, "stBTD wraps BTD and is not added again");
     }
 
     function test_maxRedeemableBTD_withSurplus() public pure {

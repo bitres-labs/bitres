@@ -67,8 +67,8 @@ contract FullSystemAttackTest is Test {
         brs = new BRS(deployer);
 
         // Deploy staking tokens (use dummy addresses for non-critical tests)
-        address stBTD = address(0x5001);
-        address stBTB = address(0x5002);
+        address stBTDAddr = address(0x5001);
+        address stBTBAddr = address(0x5002);
 
         // Deploy pool addresses (mock)
         address poolWbtcUsdc = address(0x6001);
@@ -81,7 +81,7 @@ contract FullSystemAttackTest is Test {
             address(wbtc), address(btd), address(btb), address(brs),
             weth, address(usdc), usdt,
             poolWbtcUsdc, poolBtdUsdc, poolBtbBtd, poolBrsBtd,
-            stBTD, stBTB
+            stBTDAddr, stBTBAddr
         );
 
         // Deploy ConfigGov
@@ -122,8 +122,8 @@ contract FullSystemAttackTest is Test {
         );
 
         // Mock stBTD/stBTB totalAssets() since they are dummy addresses
-        vm.mockCall(stBTD, abi.encodeWithSignature("totalAssets()"), abi.encode(uint256(0)));
-        vm.mockCall(stBTB, abi.encodeWithSignature("totalAssets()"), abi.encode(uint256(0)));
+        vm.mockCall(stBTDAddr, abi.encodeWithSignature("totalAssets()"), abi.encode(uint256(0)));
+        vm.mockCall(stBTBAddr, abi.encodeWithSignature("totalAssets()"), abi.encode(uint256(0)));
 
         // Grant roles
         btd.grantRole(btd.MINTER_ROLE(), address(minter));
@@ -386,6 +386,7 @@ contract FullSystemAttackTest is Test {
 
         // Transfer some BRS to attacker
         brs.transfer(attacker, 1000e18);
+        assertEq(brs.balanceOf(deployer), balanceBefore - 1000e18, "BRS balance should decrease after transfer");
 
         // Votes should decrease
         uint256 votesAfter = brs.getVotes(deployer);

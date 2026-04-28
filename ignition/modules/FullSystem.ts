@@ -137,6 +137,15 @@ export default buildModule("FullSystemLocal", (m) => {
     after: [interestPoolProxy, configCore],
   });
 
+  m.call(stBTD, "setInterestPool", [interestPool], {
+    id: "SetStBTDInterestPool",
+    after: [interestPoolProxy],
+  });
+  m.call(stBTB, "setInterestPool", [interestPool], {
+    id: "SetStBTBInterestPool",
+    after: [interestPoolProxy],
+  });
+
   // ===== Phase 10: Grant MINTER_ROLE to Minter and InterestPool =====
   const MINTER_ROLE = keccak256(toHex("MINTER_ROLE"));
 

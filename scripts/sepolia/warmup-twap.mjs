@@ -132,6 +132,7 @@ async function main() {
 
   let allReady = true;
   let anyNeedsUpdate = false;
+  const currentBlock = await publicClient.getBlock();
 
   for (const pair of pairs) {
     const isReady = await publicClient.readContract({
@@ -155,8 +156,11 @@ async function main() {
       args: [pair.address],
     });
 
-    const elapsedMin = Number(elapsed) / 60;
-    const status = isReady ? "✓ Ready" : needsUpdate ? "⏳ Needs update" : `⏳ Wait ${(30 - elapsedMin).toFixed(1)} min`;
+    const ageSeconds = Number(currentBlock.timestamp - BigInt(newerTs));
+    const displaySeconds = olderTs > 0 ? Number(elapsed) : ageSeconds;
+    const elapsedMin = displaySeconds / 60;
+    const waitMin = Math.max(0, (30 * 60 - ageSeconds) / 60);
+    const status = isReady ? "✓ Ready" : needsUpdate ? "⏳ Needs update" : `⏳ Wait ${waitMin.toFixed(1)} min`;
 
     console.log(`   ${pair.name}: ${status} (elapsed: ${elapsedMin.toFixed(1)} min)`);
 

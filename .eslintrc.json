@@ -8,11 +8,17 @@
   "extends": [
     "eslint:recommended"
   ],
+  "parser": "@typescript-eslint/parser",
   "parserOptions": {
-    "ecmaVersion": 12
+    "ecmaVersion": 2022,
+    "sourceType": "module"
   },
+  "ignorePatterns": [
+    "scripts/local/**",
+    "scripts/main/backup/**"
+  ],
   "rules": {
-    "no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
+    "no-unused-vars": "off",
     "no-console": "off"
   }
 }

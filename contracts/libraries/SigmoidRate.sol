@@ -363,7 +363,7 @@ library SigmoidRate {
         }
 
         int256 intPart = x / int256(ONE);
-        uint256 fracPart;
+        uint256 fracPart = 0;
         if (x >= 0) {
             fracPart = uint256(x % int256(ONE));
         } else {

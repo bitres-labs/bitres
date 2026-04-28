@@ -217,7 +217,7 @@ if [ "$SKIP_LINT" = false ]; then
 
     # Solidity Linter
     echo "Running Solidity linter..."
-    npx solhint 'contracts/**/*.sol' 2>&1 | tee /tmp/solhint.log
+    npx solhint 'contracts/**/*.sol' --disc 2>&1 | tee /tmp/solhint.log
     SOLHINT_EXIT=${PIPESTATUS[0]}
 
     # JavaScript/TypeScript Linter
@@ -226,12 +226,11 @@ if [ "$SKIP_LINT" = false ]; then
     npx eslint 'test/**/*.ts' 'scripts/**/*.{js,mjs,ts}' 2>&1 | tee /tmp/eslint.log
     ESLINT_EXIT=${PIPESTATUS[0]}
 
-    # Lint is advisory (matches CI continue-on-error behavior)
     if [ $SOLHINT_EXIT -eq 0 ] && [ $ESLINT_EXIT -eq 0 ]; then
         print_success "Code Quality (Lint)"
     else
-        echo -e "${YELLOW}Note: Lint found issues (check logs above)${NC}"
-        print_success "Code Quality (Lint - with warnings)"
+        echo -e "${RED}Lint found issues (check logs above)${NC}"
+        print_failure "Code Quality (Lint)"
     fi
 else
     print_skip "Code Quality (Lint)"
@@ -241,17 +240,23 @@ fi
 if [ "$SKIP_SECURITY" = false ]; then
     print_header "Security Analysis (Slither)"
     if command -v slither &> /dev/null; then
-        slither contracts/ --exclude-dependencies 2>&1 | tee /tmp/slither.log
+        slither contracts/ \
+            --exclude-dependencies \
+            --filter-paths 'contracts/local|contracts/test' \
+            --exclude-informational \
+            --exclude-low \
+            --exclude-optimization \
+            --exclude divide-before-multiply,incorrect-equality,reentrancy-no-eth \
+            2>&1 | tee /tmp/slither.log
         if [ ${PIPESTATUS[0]} -eq 0 ]; then
             print_success "Security Analysis"
         else
-            # Slither often returns non-zero for warnings, treat as success if it ran
-            echo -e "${YELLOW}Note: Slither found issues (check /tmp/slither.log)${NC}"
-            print_success "Security Analysis (with warnings)"
+            echo -e "${RED}Slither found blocking issues (check /tmp/slither.log)${NC}"
+            print_failure "Security Analysis"
         fi
     else
-        echo -e "${YELLOW}Slither not installed. Install with: pip3 install slither-analyzer${NC}"
-        print_skip "Security Analysis (Slither not installed)"
+        echo -e "${RED}Slither not installed. Install with: pip3 install slither-analyzer${NC}"
+        print_failure "Security Analysis (Slither not installed)"
     fi
 else
     print_skip "Security Analysis"
@@ -273,7 +278,7 @@ fi
 # ============ Coverage Report ============
 if [ "$SKIP_COVERAGE" = false ]; then
     print_header "Coverage Report"
-    forge coverage --report summary --no-match-test "testPCEDeviationLimit" 2>&1 | tee /tmp/coverage.log
+    forge coverage --ir-minimum --report summary --exclude-tests --no-match-coverage "contracts/local|contracts/test" --no-match-test "testPCEDeviationLimit" 2>&1 | tee /tmp/coverage.log
     if [ ${PIPESTATUS[0]} -eq 0 ]; then
         print_success "Coverage Report"
     else

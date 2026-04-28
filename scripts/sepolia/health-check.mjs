@@ -253,15 +253,23 @@ async function main() {
 
   for (const pair of pairs) {
     await check(`TWAP ${pair.label}`, async () => {
-      const [, , elapsed] = await publicClient.readContract({
+      const block = await publicClient.getBlock();
+      const isReady = await publicClient.readContract({
+        address: addresses.TWAPOracle,
+        abi: twapAbi,
+        functionName: "isTWAPReady",
+        args: [addresses[pair.name]],
+      });
+      const [olderTs, newerTs, elapsed] = await publicClient.readContract({
         address: addresses.TWAPOracle,
         abi: twapAbi,
         functionName: "getObservationInfo",
         args: [addresses[pair.name]],
       });
-      const ready = elapsed >= 30 * 60;
-      const mins = Math.floor(Number(elapsed) / 60);
-      return ready ? `Ready (${mins} min)` : `${mins} min elapsed (need 30)`;
+      const age = Number(block.timestamp - BigInt(newerTs));
+      const displaySeconds = olderTs > 0 ? Number(elapsed) : age;
+      const mins = Math.floor(displaySeconds / 60);
+      return isReady ? `Ready (${mins} min)` : `${mins} min since observation (need 30)`;
     });
   }
 

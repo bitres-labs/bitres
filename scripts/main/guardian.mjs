@@ -77,7 +77,9 @@ async function enableAutoMining() {
   console.log("\n⛏️  Enabling interval mining...");
   try {
     await rpcCall("evm_setAutomine", [true]);
-  } catch {}
+  } catch {
+    // Some local RPC providers do not implement this mining toggle.
+  }
   // Only enable interval mining in accelerated mode
   // In realtime mode, we control mining ourselves to prevent double-mining
   if (!useRealTime) {
@@ -167,7 +169,9 @@ async function main() {
         await advanceTime(timeSpeed);
         totalAdvanced += timeSpeed;
       }
-    } catch {}
+    } catch {
+      // Keep the guardian loop alive across transient local RPC failures.
+    }
   }, 1000);
 
   // Display loop

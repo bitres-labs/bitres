@@ -164,8 +164,10 @@ contract InterestPoolRateIntegrationTest is Test {
 
         // All rates should be within valid range
         assertGe(lowPriceRate, 200, "Low price rate >= min");
+        assertGe(pegRate, 200, "Peg rate >= min");
         assertGe(highPriceRate, 200, "High price rate >= min");
         assertLe(lowPriceRate, 2000, "Low price rate <= max");
+        assertLe(pegRate, 2000, "Peg rate <= max");
         assertLe(highPriceRate, 2000, "High price rate <= max");
     }
 

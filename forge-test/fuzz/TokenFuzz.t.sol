@@ -105,7 +105,7 @@ contract TokenFuzzTest is Test {
 
     /// @notice Fuzz test: Infinite approval (type(uint256).max)
     function testFuzz_InfiniteApproval_NoDeduction(
-        uint128 amount
+        uint128
     ) public pure {
         uint256 allowance = type(uint256).max;
 

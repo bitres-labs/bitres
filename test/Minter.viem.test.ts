@@ -64,6 +64,10 @@ describe("Minter Contract (Viem)", function () {
       fullSystem.brs.address,
       fullSystem.btd.address
     ]);
+    await fullSystem.mockPoolBrsBtd.write.setReserves([
+      toWei("1000", 18n),
+      toWei("10000", 18n)     // 1 BRS = 10 BTD
+    ]);
 
     // Note: BTD/BTB ownership already transferred to Minter in deployFullSystem()
 
@@ -274,18 +278,34 @@ describe("Minter Contract (Viem)", function () {
     });
   });
 
-  describe.skip("BTB Redemption", function () {
-    // SKIPPED: Needs a more complete setup
+  describe("BTB Redemption", function () {
     beforeEach(async function () {
-      // Mint BTD first
       const wbtcAmount = toWei("2", 8n);
       await tokens.wbtc.write.approve([minter.address, wbtcAmount], { account: user1.account });
       await minter.write.mintBTD([wbtcAmount], { account: user1.account });
 
-      // Then mint BTB
-      const btdAmount = toWei("5000", 18n);
-      await tokens.btd.write.approve([minter.address, btdAmount], { account: user1.account });
-      await minter.write.mintBTB([btdAmount], { account: user1.account });
+      await system.mockBtcUsd.write.setAnswer([25_000n * 10n ** 8n]);
+      await system.mockWbtcBtc.write.setAnswer([10n ** 8n]);
+      await system.mockPyth.write.setPrice([system.pythId, 2_500_000_000_000n, -8]);
+      await system.mockPoolWbtcUsdc.write.setReserves([
+        100n * 10n ** 8n,
+        2_500_000n * 10n ** 6n
+      ]);
+
+      const btdBalance = await tokens.btd.read.balanceOf([user1.account.address]);
+      const redeemAmount = btdBalance / 2n;
+      await tokens.btd.write.approve([minter.address, redeemAmount], { account: user1.account });
+      await minter.write.redeemBTD([redeemAmount], { account: user1.account });
+
+      expect((await tokens.btb.read.balanceOf([user1.account.address])) > 0n).to.be.true;
+
+      await system.mockBtcUsd.write.setAnswer([60_000n * 10n ** 8n]);
+      await system.mockWbtcBtc.write.setAnswer([10n ** 8n]);
+      await system.mockPyth.write.setPrice([system.pythId, 6_000_000_000_000n, -8]);
+      await system.mockPoolWbtcUsdc.write.setReserves([
+        100n * 10n ** 8n,
+        6_000_000n * 10n ** 6n
+      ]);
     });
 
     it("should allow user to redeem BTB for BTD", async function () {
@@ -456,10 +476,7 @@ describe("Minter Contract (Viem)", function () {
       const btdAmount = toWei("10000", 18n); // 10000 BTD
       const btdBalance = await tokens.btd.read.balanceOf([user1.account.address]);
 
-      if (btdBalance < btdAmount) {
-        console.log('[Redeem Formula] Insufficient BTD, skipping');
-        this.skip();
-      }
+      expect(btdBalance >= btdAmount).to.be.true;
 
       // Expected WBTC (formula: BTD × IUSDPrice / WBTCPrice)
       // Result needs to be converted from 18 to 8 decimals

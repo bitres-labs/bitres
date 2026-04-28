@@ -155,6 +155,7 @@ contract UniswapV2TWAPOracleFuzzTest is Test {
         // Verify: Single block manipulation has small impact on TWAP (< 1%)
         // manipImpact ratio = singleBlockTime / windowSize
         uint256 manipRatio = (singleBlockTime * Constants.BPS_BASE) / windowSize;
+        assertGt(twapWithManip, 0);
 
         // For 1 hour window, single block ratio = 12/3600 = 0.33%
         if (windowSize >= 3600) {
@@ -297,9 +298,6 @@ contract UniswapV2TWAPOracleFuzzTest is Test {
         amount0In = uint112(bound(amount0In, 1, reserve0 / 2 - 1));
         amount1Out = uint112(bound(amount1Out, 1, reserve1 / 2 - 1));
 
-        // K value before trade - with bounded reserves, overflow is not possible
-        uint256 kBefore = uint256(reserve0) * uint256(reserve1);
-
         // Reserves after trade
         uint256 reserve0After = uint256(reserve0) + uint256(amount0In);
         uint256 reserve1After = uint256(reserve1) - uint256(amount1Out);
@@ -397,7 +395,7 @@ contract UniswapV2TWAPOracleFuzzTest is Test {
 
     /// @notice Fuzz test: Same timestamp consecutive queries
     function testFuzz_Edge_SameTimestamp(
-        uint224 accumulator,
+        uint224,
         uint32 timestamp
     ) public pure {
         vm.assume(timestamp > 0);

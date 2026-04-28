@@ -118,7 +118,10 @@ async function main() {
 
   // Helper: write contract and wait for receipt (needed on real networks)
   const writeAndWait = async (client, txParams) => {
-    const hash = await client.writeContract(txParams);
+    const hash = await client.writeContract({
+      gas: 1_500_000n,
+      ...txParams,
+    });
     const receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: 120000 });
     if (receipt.status !== "success") {
       throw new Error(`Transaction reverted: ${hash}`);
@@ -250,7 +253,7 @@ async function main() {
       await minter.read.calculateBurnAmount([redeemAmount]);
     assert(
       expectedWbtc > 0n,
-      `Redeeming 100 BTD returns ${formatUnits(expectedWbtc, 8)} WBTC (fee: ${formatUnits(redeemFeeAmt, 8)})`
+      `Redeeming ${formatEther(redeemAmount)} BTD returns ${formatUnits(expectedWbtc, 8)} WBTC (fee: ${formatUnits(redeemFeeAmt, 8)})`
     );
 
     const wbtcBefore = await wbtc.read.balanceOf([deployer.account.address]);

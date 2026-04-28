@@ -86,7 +86,7 @@ contract MockPriceOracle is IPriceOracle {
         return iusdPrice;
     }
 
-    function getPrice(address token) external view override returns (uint256) {
+    function getPrice(address) external pure override returns (uint256) {
         // Simple mock implementation: all tokens return $1 (except WBTC)
         // In actual tests, specific prices can be set via setXXXPrice()
         return 1e18; // Default $1

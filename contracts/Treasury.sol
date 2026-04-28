@@ -5,11 +5,13 @@ import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/acces
 import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "./ConfigCore.sol";
-import "./interfaces/ITreasury.sol";
-import "./libraries/Constants.sol";
+import {Address} from "@openzeppelin/contracts/utils/Address.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ConfigCore} from "./ConfigCore.sol";
+import {ITreasury} from "./interfaces/ITreasury.sol";
+import {Constants} from "./libraries/Constants.sol";
 
 interface IUniswapV2Router {
     function swapExactTokensForTokens(
@@ -195,13 +197,14 @@ contract Treasury is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpgr
         path[1] = core.BRS();
 
         uint256 beforeBal = BRS().balanceOf(address(this));
-        IUniswapV2Router(router).swapExactTokensForTokens(
+        uint256[] memory amounts = IUniswapV2Router(router).swapExactTokensForTokens(
             btdAmount,
             minBRSOut,
             path,
             address(this),
             block.timestamp + 600
         );
+        require(amounts.length >= 2, "Treasury: invalid swap result");
         uint256 received = BRS().balanceOf(address(this)) - beforeBal;
         emit ITreasury.BRSBuyback(btdAmount, received);
     }
@@ -230,7 +233,9 @@ contract Treasury is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpgr
     // ============ Lazy Buyback Functions ============
 
     /// @notice Attempts lazy buyback of BRS using BTD (called by system contracts)
-    /// @dev Executes if: BTD >= min, cooldown passed, random trigger (10%)
+    /// @dev Executes deterministically when BTD >= min and cooldown has passed.
+    ///      buybackProbability is retained as a governance-controlled execution share,
+    ///      not a pseudo-random trigger.
     /// @dev Access: only Minter, FarmingPool, InterestPool, or owner can trigger
     /// @return executed True if buyback was executed
     function tryLazyBuyback() external nonReentrant returns (bool executed) {
@@ -252,32 +257,29 @@ contract Treasury is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpgr
             return false;
         }
 
-        uint256 random = uint256(keccak256(abi.encodePacked(
-            blockhash(block.number - 1),
-            msg.sender,
-            block.timestamp,
-            btdBalance
-        ))) % 100;
-
-        if (random >= buybackProbability) {
+        uint256 eligibleAmount = btdBalance > maxBuybackAmount ? maxBuybackAmount : btdBalance;
+        uint256 buybackAmount = (eligibleAmount * buybackProbability) / 100;
+        if (buybackAmount < minBuybackAmount) {
+            buybackAmount = minBuybackAmount;
+        }
+        if (buybackAmount > btdBalance) {
             return false;
         }
 
-        uint256 buybackAmount = btdBalance > maxBuybackAmount ? maxBuybackAmount : btdBalance;
         uint256 brsReceived = _executeLazyBuyback(buybackAmount);
 
         _tryTopupEthReserve();
 
         uint256 gasUsed = startGas - gasleft() + 21000 + 10000;
         uint256 compensation = gasUsed * tx.gasprice;
+        uint256 compensationPaid = 0;
 
-        if (address(this).balance >= compensation) {
-            (bool success, ) = msg.sender.call{value: compensation}("");
-            emit LazyBuybackExecuted(msg.sender, buybackAmount, brsReceived, success ? compensation : 0);
-        } else {
-            emit LazyBuybackExecuted(msg.sender, buybackAmount, brsReceived, 0);
+        if (msg.sender.code.length == 0 && address(this).balance >= compensation) {
+            Address.sendValue(payable(msg.sender), compensation);
+            compensationPaid = compensation;
         }
 
+        emit LazyBuybackExecuted(msg.sender, buybackAmount, brsReceived, compensationPaid);
         return true;
     }
 
@@ -286,8 +288,8 @@ contract Treasury is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpgr
         address priceOracle = core.PRICE_ORACLE();
         uint256 brsPrice = IPriceOracleForTreasury(priceOracle).getBRSPrice();
 
-        uint256 expectedBRS = (btdAmount * Constants.PRECISION_18) / brsPrice;
-        uint256 minBRSOut = (expectedBRS * (10000 - maxSlippageBps)) / 10000;
+        uint256 expectedBRS = Math.mulDiv(btdAmount, Constants.PRECISION_18, brsPrice);
+        uint256 minBRSOut = Math.mulDiv(expectedBRS, 10000 - maxSlippageBps, 10000);
 
         BTD().forceApprove(router, btdAmount);
 
@@ -297,13 +299,14 @@ contract Treasury is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpgr
 
         uint256 beforeBal = BRS().balanceOf(address(this));
 
-        IUniswapV2Router(router).swapExactTokensForTokens(
+        uint256[] memory amounts = IUniswapV2Router(router).swapExactTokensForTokens(
             btdAmount,
             minBRSOut,
             path,
             address(this),
             block.timestamp + 600
         );
+        require(amounts.length >= 2, "Treasury: invalid swap result");
 
         brsReceived = BRS().balanceOf(address(this)) - beforeBal;
         lastBuybackTime = block.timestamp;
@@ -335,16 +338,18 @@ contract Treasury is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpgr
 
         uint256 beforeBal = address(this).balance;
 
-        uint256 minEthOut = (ethTopupAmount * 9) / 10;
+        uint256 minEthOut = Math.mulDiv(ethTopupAmount, 9, 10);
         try IUniswapV2Router(router).swapExactTokensForETH(
             btdForEth,
             minEthOut,
             path,
             address(this),
             block.timestamp + 600
-        ) {
+        ) returns (uint256[] memory amounts) {
             uint256 ethReceived = address(this).balance - beforeBal;
-            emit EthReserveToppedUp(btdForEth, ethReceived);
+            if (amounts.length >= 2) {
+                emit EthReserveToppedUp(btdForEth, ethReceived);
+            }
         } catch {
             // ETH topup is not critical
         }
@@ -397,8 +402,7 @@ contract Treasury is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpgr
     function withdrawEth(uint256 amount, address payable to) external onlyOwner {
         require(to != address(0), "Invalid recipient");
         require(address(this).balance >= amount, "Insufficient ETH");
-        (bool success, ) = to.call{value: amount}("");
-        require(success, "ETH transfer failed");
+        Address.sendValue(to, amount);
     }
 
     // ============ Storage Gap ============

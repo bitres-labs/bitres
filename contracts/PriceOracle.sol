@@ -16,7 +16,7 @@ import "./interfaces/IMinter.sol";
 import "./libraries/OracleMath.sol";
 import "./libraries/FeedValidation.sol";
 
-import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
+import "./interfaces/IUniswapV2Pair.sol";
 
 /**
  * @title PriceOracle - Bitres System Price Oracle
@@ -186,6 +186,10 @@ contract PriceOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable,
      * @return true if TWAP is enabled and available
      */
     function isTWAPEnabled() external view returns (bool) {
+        return _isTWAPEnabled();
+    }
+
+    function _isTWAPEnabled() internal view returns (bool) {
         return useTWAP && address(twapOracle) != address(0);
     }
 
@@ -203,7 +207,8 @@ contract PriceOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable,
     function _updateTWAPForPools(address[] memory pools) internal {
         if (!useTWAP || address(twapOracle) == address(0)) return;
         for (uint256 i = 0; i < pools.length; i++) {
-            twapOracle.updateIfNeeded(pools[i]);
+            bool updated = twapOracle.updateIfNeeded(pools[i]);
+            updated;
         }
     }
 
@@ -290,13 +295,14 @@ contract PriceOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable,
         address base = core.BTD();
         address quote = core.USDC();
 
-        uint256 twapPrice = _getPriceTWAP(pool, base, quote);
-
-        uint256 spotPrice = _getPriceSpot(pool, base, quote);
-        require(
-            OracleMath.deviationWithin(twapPrice, spotPrice, BTD_TWAP_SPOT_MAX_BPS),
-            "BTD: TWAP/spot deviation"
-        );
+        uint256 btdPrice = getPrice(pool, base, quote);
+        if (_isTWAPEnabled()) {
+            uint256 spotPrice = _getPriceSpot(pool, base, quote);
+            require(
+                OracleMath.deviationWithin(btdPrice, spotPrice, BTD_TWAP_SPOT_MAX_BPS),
+                "BTD: TWAP/spot deviation"
+            );
+        }
 
         uint256 iusdPrice = getIUSDPrice();
         uint256 cr = _getCollateralRatio();
@@ -308,9 +314,9 @@ contract PriceOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable,
             BTD_FLOOR_MULTIPLIER_BPS,
             10000
         );
-        require(twapPrice >= floor, "BTD: price below floor");
+        require(btdPrice >= floor, "BTD: price below floor");
 
-        return twapPrice;
+        return btdPrice;
     }
 
     function _getCollateralRatio() internal view returns (uint256) {
@@ -329,16 +335,17 @@ contract PriceOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable,
     ) internal view returns (uint256) {
         address quote = core.BTD();
 
-        uint256 twapPrice = _getPriceTWAP(pool, base, quote);
-
-        uint256 spotPrice = _getPriceSpot(pool, base, quote);
-        require(
-            OracleMath.deviationWithin(twapPrice, spotPrice, twapSpotMaxBps),
-            string.concat(tokenName, ": TWAP/spot deviation")
-        );
+        uint256 tokenPriceInBTD = getPrice(pool, base, quote);
+        if (_isTWAPEnabled()) {
+            uint256 spotPrice = _getPriceSpot(pool, base, quote);
+            require(
+                OracleMath.deviationWithin(tokenPriceInBTD, spotPrice, twapSpotMaxBps),
+                string.concat(tokenName, ": TWAP/spot deviation")
+            );
+        }
 
         uint256 btdUsdc = getBTDPrice();
-        return Math.mulDiv(twapPrice, btdUsdc, 1e18);
+        return Math.mulDiv(tokenPriceInBTD, btdUsdc, 1e18);
     }
 
     function getBTBPrice() public view returns (uint256) {
@@ -462,7 +469,8 @@ contract PriceOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable,
     function _getPriceSpot(address pool, address base, address quote)
         internal view returns (uint256) {
         IUniswapV2Pair pair = IUniswapV2Pair(pool);
-        (uint112 reserve0, uint112 reserve1, ) = pair.getReserves();
+        (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast) = pair.getReserves();
+        blockTimestampLast;
         address token0 = pair.token0();
         address token1 = pair.token1();
 

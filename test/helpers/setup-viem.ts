@@ -104,33 +104,18 @@ async function deployProxy(contractName: string, initArgs: any[]) {
     args: initArgs,
   });
 
-  // Deploy proxy using ProxyHelper
-  const proxyHelper = await viem.deployContract(
-    "contracts/test/ProxyImport.sol:ProxyHelper",
-    []
+  // Deploy ERC1967Proxy directly with constructor args
+  const proxy = await viem.deployContract(
+    "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol:ERC1967Proxy",
+    [impl.address, initData]
   );
 
-  const publicClient = await viem.getPublicClient();
-
-  // Use simulateContract to get the return value
-  const { result: proxyAddress } = await publicClient.simulateContract({
-    address: proxyHelper.address,
-    abi: proxyHelper.abi,
-    functionName: 'deploy',
-    args: [impl.address, initData],
-    account: owner.account,
-  });
-
-  // Actually execute the deploy
-  const tx = await proxyHelper.write.deploy([impl.address, initData]);
-  await publicClient.waitForTransactionReceipt({ hash: tx });
-
   // Return contract instance at proxy address
-  return await viem.getContractAt(contractName, proxyAddress);
+  return await viem.getContractAt(contractName, proxy.address);
 }
 
 /**
- * Deploy token contracts
+ * Deploy token contracts (BTD, BTB, BRS are upgradeable — deploy + initialize)
  */
 export async function deployTokens() {
   const [owner] = await getWallets();
@@ -155,20 +140,23 @@ export async function deployTokens() {
     owner.account.address
   ]);
 
-  // Deploy BTD (18 decimals)
-  const btd = await viem.deployContract("contracts/BTD.sol:BTD", [
-    owner.account.address
-  ]);
+  // Deploy BTD via proxy (upgradeable)
+  const btd = await deployProxy(
+    "contracts/BTD.sol:BTD",
+    [owner.account.address]
+  );
 
-  // Deploy BTB (18 decimals)
-  const btb = await viem.deployContract("contracts/BTB.sol:BTB", [
-    owner.account.address
-  ]);
+  // Deploy BTB via proxy (upgradeable)
+  const btb = await deployProxy(
+    "contracts/BTB.sol:BTB",
+    [owner.account.address]
+  );
 
-  // Deploy BRS (18 decimals)
-  const brs = await viem.deployContract("contracts/BRS.sol:BRS", [
-    owner.account.address
-  ]);
+  // Deploy BRS directly (non-upgradeable ERC20, constructor mints supply)
+  const brs = await viem.deployContract(
+    "contracts/BRS.sol:BRS",
+    [owner.account.address]
+  );
 
   return { wbtc, usdc, usdt, weth, btd, btb, brs };
 }
@@ -322,13 +310,15 @@ export async function deployFullSystem(): Promise<SystemContracts> {
   // Step 1: Deploy tokens
   const tokens = await deployTokens();
 
-  // Step 2: Deploy stBTD and stBTB (need BTD/BTB first)
-  const stBTD = await viem.deployContract("contracts/stBTD.sol:stBTD", [
-    tokens.btd.address
-  ]);
-  const stBTB = await viem.deployContract("contracts/stBTB.sol:stBTB", [
-    tokens.btb.address
-  ]);
+  // Step 2: Deploy stBTD and stBTB via proxy (upgradeable — need BTD/BTB first)
+  const stBTD = await deployProxy(
+    "contracts/stBTD.sol:stBTD",
+    [tokens.btd.address, owner.account.address]
+  );
+  const stBTB = await deployProxy(
+    "contracts/stBTB.sol:stBTB",
+    [tokens.btb.address, owner.account.address]
+  );
 
   // Step 3: Deploy pools
   const pools = await deployPools();
@@ -374,7 +364,7 @@ export async function deployFullSystem(): Promise<SystemContracts> {
 
   const priceOracle = await deployProxy(
     "contracts/PriceOracle.sol:PriceOracle",
-    [owner.account.address, config.core.address, config.gov.address, twapOracle.address, pythId]
+    [owner.account.address, config.core.address, config.gov.address, twapOracle.address]
   );
 
   // Disable TWAP for testing (TWAP requires 30 min observation period)
@@ -413,6 +403,10 @@ export async function deployFullSystem(): Promise<SystemContracts> {
 
   // Step 16: Initialize InterestPool pools (after ConfigCore has BTD/BTB)
   await interestPool.write.initializePools([]);
+
+  // Route stToken vault assets into InterestPool so ERC4626 shares accrue policy interest.
+  await stBTD.write.setInterestPool([interestPool.address], { account: owner.account });
+  await stBTB.write.setInterestPool([interestPool.address], { account: owner.account });
 
   // Step 17: Grant MINTER_ROLE to Minter and InterestPool
   const MINTER_ROLE = keccak256(toHex("MINTER_ROLE"));

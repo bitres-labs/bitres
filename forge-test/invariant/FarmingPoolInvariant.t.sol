@@ -368,5 +368,6 @@ contract FarmingPoolInvariantTest is StdInvariant, Test {
         // Farm should have enough rewards to cover pending (allowing some margin)
         // Note: This may not always hold if rewards are distributed but not yet updated
         assertTrue(farmRewardBalance >= 0, "Reward balance negative");
+        assertTrue(totalPending >= 0, "Pending rewards negative");
     }
 }

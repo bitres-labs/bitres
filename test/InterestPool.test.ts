@@ -23,13 +23,40 @@ describe("InterestPool (Viem)", function () {
   let btb: any;
   let minter: any;
   let wbtc: any;
+  let system: any;
+
+  async function setWBTCPrice(usdPrice: bigint) {
+    await system.mockBtcUsd.write.setAnswer([usdPrice * 10n ** 8n]);
+    await system.mockWbtcBtc.write.setAnswer([10n ** 8n]);
+    await system.mockPyth.write.setPrice([system.pythId, usdPrice * 10n ** 8n, -8]);
+    await system.mockPoolWbtcUsdc.write.setReserves([
+      100n * 10n ** 8n,
+      usdPrice * 100n * 10n ** 6n
+    ]);
+  }
+
+  async function prepareBTB(account: any) {
+    if ((await btb.read.balanceOf([account.account.address])) > 0n) {
+      return;
+    }
+
+    await setWBTCPrice(25_000n);
+
+    const btdBalance = await btd.read.balanceOf([account.account.address]);
+    const redeemAmount = btdBalance / 2n;
+    await btd.write.approve([minter.address, redeemAmount], { account: account.account });
+    await minter.write.redeemBTD([redeemAmount], { account: account.account });
+
+    expect((await btb.read.balanceOf([account.account.address])) > 0n).to.be.true;
+    await setWBTCPrice(60_000n);
+  }
 
   beforeEach(async function () {
     const wallets = await getWallets();
     [owner, user1, user2] = wallets;
 
     // Deploy full system which includes InterestPool, stBTD, stBTB
-    const system = await deployFullSystem();
+    system = await deployFullSystem();
 
     interestPool = system.interestPool;
     stBTD = system.stBTD;
@@ -39,8 +66,32 @@ describe("InterestPool (Viem)", function () {
     minter = system.minter;
     wbtc = system.wbtc;
 
-    // Note: configureStTokenVaults() has been removed from InterestPool
-    // InterestPool now directly exposes stakeBTD/stakeBTB/unstakeBTD/unstakeBTB functions
+    await system.mockPoolBtdUsdc.write.initialize([
+      system.btd.address,
+      system.usdc.address
+    ]);
+    await system.mockPoolBtdUsdc.write.setReserves([
+      parseEther("1000000"),
+      parseUnits("1000000", 6)
+    ]);
+
+    await system.mockPoolBtbBtd.write.initialize([
+      system.btb.address,
+      system.btd.address
+    ]);
+    await system.mockPoolBtbBtd.write.setReserves([
+      parseEther("1000000"),
+      parseEther("1000000")
+    ]);
+
+    await system.mockPoolBrsBtd.write.initialize([
+      system.brs.address,
+      system.btd.address
+    ]);
+    await system.mockPoolBrsBtd.write.setReserves([
+      parseEther("1000"),
+      parseEther("10000")
+    ]);
 
     // Transfer WBTC to users (owner has the initial supply)
     await wbtc.write.transfer([user1.account.address, parseUnits("10", 8)], { account: owner.account });
@@ -75,24 +126,58 @@ describe("InterestPool (Viem)", function () {
       expect(btbPool[1]).to.equal(0n);
     });
 
-    it.skip("should set stToken vault addresses", async function () {
-      // InterestPool no longer stores stToken addresses; vaults are standalone ERC4626 tokens
+    it("should configure stToken vaults to use InterestPool", async function () {
+      const stBTDInterestPool = await stBTD.read.interestPool();
+      const stBTBInterestPool = await stBTB.read.interestPool();
+
+      expect(stBTDInterestPool.toLowerCase()).to.equal(interestPool.address.toLowerCase());
+      expect(stBTBInterestPool.toLowerCase()).to.equal(interestPool.address.toLowerCase());
     });
   });
 
   describe("BTD Staking via stBTD", function () {
-    it.skip("should allow staking BTD through stBTD vault", async function () {
-      // stBTD is now a standalone ERC4626 vault and does not call InterestPool
+    it("should allow staking BTD through stBTD vault", async function () {
+      const userBalance = await btd.read.balanceOf([user1.account.address]);
+      const depositAmount = userBalance / 4n;
+
+      await btd.write.approve([stBTD.address, depositAmount], { account: user1.account });
+      await stBTD.write.deposit([depositAmount, user1.account.address], { account: user1.account });
+
+      const btdPool = await interestPool.read.btdPool();
+      const vaultAssets = await interestPool.read.totalAssetsOf([btd.address, stBTD.address]);
+
+      expect(btdPool[1]).to.equal(depositAmount);
+      expect(vaultAssets).to.equal(depositAmount);
     });
 
-    it.skip("should track multiple users' stakes separately", async function () {
-      // stBTD is now a standalone ERC4626 vault and does not call InterestPool
+    it("should track multiple users with vault shares and aggregate pool assets", async function () {
+      const user1Balance = await btd.read.balanceOf([user1.account.address]);
+      const user2Balance = await btd.read.balanceOf([user2.account.address]);
+      const deposit1 = user1Balance / 4n;
+      const deposit2 = user2Balance / 8n;
+
+      await btd.write.approve([stBTD.address, deposit1], { account: user1.account });
+      await stBTD.write.deposit([deposit1, user1.account.address], { account: user1.account });
+      await btd.write.approve([stBTD.address, deposit2], { account: user2.account });
+      await stBTD.write.deposit([deposit2, user2.account.address], { account: user2.account });
+
+      const shares1 = await stBTD.read.balanceOf([user1.account.address]);
+      const shares2 = await stBTD.read.balanceOf([user2.account.address]);
+      const btdPool = await interestPool.read.btdPool();
+
+      expect(shares1 > shares2).to.be.true;
+      expect(btdPool[1]).to.equal(deposit1 + deposit2);
     });
 
-    it("should reject direct stakeBTD call from non-vault", async function () {
-      // Note: stakeBTD() signature changed - now takes only 1 param (amount)
-      // The function is now publicly accessible, so this test is no longer valid
-      this.skip();
+    it("should still allow direct stakeBTD for compatibility", async function () {
+      const userBalance = await btd.read.balanceOf([user1.account.address]);
+      const stakeAmount = userBalance / 4n;
+
+      await btd.write.approve([interestPool.address, stakeAmount], { account: user1.account });
+      await interestPool.write.stakeBTD([stakeAmount], { account: user1.account });
+
+      const userStake = await interestPool.read.userStaked([btd.address, user1.account.address]);
+      expect(userStake).to.equal(stakeAmount);
     });
   });
 
@@ -122,47 +207,103 @@ describe("InterestPool (Viem)", function () {
       expect(btdPool[1] < depositAmount).to.be.true;
     });
 
-    it("should reject direct unstakeBTD call from non-vault", async function () {
-      // Note: unstakeBTD() signature changed - now takes only 1 param (amount)
-      // The function is now publicly accessible, so this test is no longer valid
-      this.skip();
+    it("should still allow direct unstakeBTD for compatibility", async function () {
+      const userBalance = await btd.read.balanceOf([user1.account.address]);
+      const stakeAmount = userBalance / 4n;
+
+      await btd.write.approve([interestPool.address, stakeAmount], { account: user1.account });
+      await interestPool.write.stakeBTD([stakeAmount], { account: user1.account });
+      const assets = await interestPool.read.totalAssetsOf([btd.address, user1.account.address]);
+      await interestPool.write.unstakeBTD([assets], { account: user1.account });
+
+      const userStake = await interestPool.read.userStaked([btd.address, user1.account.address]);
+      expect(userStake < parseEther("0.001")).to.be.true;
     });
   });
 
   describe("BTB Staking via stBTB", function () {
     it("should allow staking BTB through stBTB vault", async function () {
-      // First, user needs to get some BTB
-      // We'll trigger BTB compensation by redeeming BTD when CR < 100%
-      // Or we can use owner to directly mint BTB for testing
-      // Since BTB owner is Minter, we need to trigger compensation
-      // For this test, let's skip BTB staking as it requires complex setup
-      // and focus on BTD staking which is the primary use case
-      this.skip();
+      await prepareBTB(user1);
+
+      const userBalance = await btb.read.balanceOf([user1.account.address]);
+      const depositAmount = userBalance / 4n;
+
+      await btb.write.approve([stBTB.address, depositAmount], { account: user1.account });
+      await stBTB.write.deposit([depositAmount, user1.account.address], { account: user1.account });
+
+      const btbPool = await interestPool.read.btbPool();
+      const vaultAssets = await interestPool.read.totalAssetsOf([btb.address, stBTB.address]);
+
+      expect(btbPool[1]).to.equal(depositAmount);
+      expect(vaultAssets).to.equal(depositAmount);
     });
 
-    it("should reject direct stakeBTB call from non-vault", async function () {
-      // Note: stakeBTB() signature changed - now takes only 1 param (amount)
-      // The function is now publicly accessible, so this test is no longer valid
-      this.skip();
+    it("should still allow direct stakeBTB for compatibility", async function () {
+      await prepareBTB(user1);
+
+      const userBalance = await btb.read.balanceOf([user1.account.address]);
+      const stakeAmount = userBalance / 4n;
+
+      await btb.write.approve([interestPool.address, stakeAmount], { account: user1.account });
+      await interestPool.write.stakeBTB([stakeAmount], { account: user1.account });
+
+      const userStake = await interestPool.read.userStaked([btb.address, user1.account.address]);
+      expect(userStake).to.equal(stakeAmount);
     });
   });
 
   describe("BTB Unstaking via stBTB", function () {
     it("should allow withdrawing BTB through stBTB vault", async function () {
-      // Skip for same reason as BTB staking test
-      this.skip();
+      await prepareBTB(user1);
+
+      const userBalance = await btb.read.balanceOf([user1.account.address]);
+      const depositAmount = userBalance / 4n;
+      const withdrawAmount = depositAmount / 2n;
+
+      await btb.write.approve([stBTB.address, depositAmount], { account: user1.account });
+      await stBTB.write.deposit([depositAmount, user1.account.address], { account: user1.account });
+
+      const balanceBefore = await btb.read.balanceOf([user1.account.address]);
+      await stBTB.write.withdraw(
+        [withdrawAmount, user1.account.address, user1.account.address],
+        { account: user1.account }
+      );
+      const balanceAfter = await btb.read.balanceOf([user1.account.address]);
+
+      expect(balanceAfter > balanceBefore).to.be.true;
+      const btbPool = await interestPool.read.btbPool();
+      expect(btbPool[1] < depositAmount).to.be.true;
     });
 
-    it("should reject direct unstakeBTB call from non-vault", async function () {
-      // Note: unstakeBTB() signature changed - now takes only 1 param (amount)
-      // The function is now publicly accessible, so this test is no longer valid
-      this.skip();
+    it("should still allow direct unstakeBTB for compatibility", async function () {
+      await prepareBTB(user1);
+
+      const userBalance = await btb.read.balanceOf([user1.account.address]);
+      const stakeAmount = userBalance / 4n;
+
+      await btb.write.approve([interestPool.address, stakeAmount], { account: user1.account });
+      await interestPool.write.stakeBTB([stakeAmount], { account: user1.account });
+      const assets = await interestPool.read.totalAssetsOf([btb.address, user1.account.address]);
+      await interestPool.write.unstakeBTB([assets], { account: user1.account });
+
+      const userStake = await interestPool.read.userStaked([btb.address, user1.account.address]);
+      expect(userStake < parseEther("0.001")).to.be.true;
     });
   });
 
   describe("Total Assets Calculation", function () {
-    it.skip("should return correct total BTD assets", async function () {
-      // InterestPool no longer tracks stBTD deposits; totalStaked stays 0 for BTD via vault
+    it("should return correct total BTD assets", async function () {
+      const userBalance = await btd.read.balanceOf([user1.account.address]);
+      const depositAmount = userBalance / 4n;
+
+      await btd.write.approve([stBTD.address, depositAmount], { account: user1.account });
+      await stBTD.write.deposit([depositAmount, user1.account.address], { account: user1.account });
+
+      const totalStaked = await interestPool.read.totalStaked([btd.address]);
+      const vaultAssets = await interestPool.read.totalAssetsOf([btd.address, stBTD.address]);
+
+      expect(totalStaked).to.equal(depositAmount);
+      expect(vaultAssets).to.equal(depositAmount);
     });
 
     it("should return correct total BTB assets initially", async function () {
@@ -177,15 +318,19 @@ describe("InterestPool (Viem)", function () {
     // Note: configureStTokenVaults test removed as function no longer exists
 
     it("should allow owner to update BTD rate", async function () {
-      // Skip: Requires oracle price feeds to be properly set up with liquidity pools
-      // _getCurrentCR() → oracle.getWBTCPrice()/getIUSDPrice() → fails without pools
-      this.skip();
+      await interestPool.write.updateBTDAnnualRate({ account: owner.account });
+
+      const btdPool = await interestPool.read.btdPool();
+      expect(btdPool[4] > 0n).to.be.true;
+      expect((await interestPool.read.btdLastPrice()) > 0n).to.be.true;
     });
 
     it("should allow owner to update BTB rate", async function () {
-      // Skip: Requires BTB price oracle and pool initialization
-      // _currentBTBPrice() → oracle.getBTBPrice() → fails without pools
-      this.skip();
+      await interestPool.write.updateBTBAnnualRate({ account: owner.account });
+
+      const btbPool = await interestPool.read.btbPool();
+      expect(btbPool[4] > 0n).to.be.true;
+      expect((await interestPool.read.btbLastPrice()) > 0n).to.be.true;
     });
   });
 

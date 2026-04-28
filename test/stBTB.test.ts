@@ -11,7 +11,7 @@ import {
 } from "./helpers/setup-viem.js";
 import { parseEther, parseUnits } from "viem";
 
-describe.skip("stBTB (ERC4626 Vault)", function () {
+describe("stBTB (ERC4626 Vault)", function () {
   let owner: any;
   let user1: any;
   let user2: any;
@@ -31,10 +31,7 @@ describe.skip("stBTB (ERC4626 Vault)", function () {
   ) {
     const addr = accountAddr ?? user1.account.address;
     const balance = await btb.read.balanceOf([addr]);
-    if (balance === 0n) {
-      ctx.skip();
-      return 0n;
-    }
+    expect(balance > 0n).to.be.true;
     return balance < target ? balance : target;
   }
 
@@ -52,7 +49,32 @@ describe.skip("stBTB (ERC4626 Vault)", function () {
     wbtc = system.wbtc;
     priceOracle = system.priceOracle;
 
-    // Note: configureStTokenVaults() removed - InterestPool now directly exposes stake/unstake functions
+    await system.mockPoolBtdUsdc.write.initialize([
+      system.btd.address,
+      system.usdc.address
+    ]);
+    await system.mockPoolBtdUsdc.write.setReserves([
+      parseEther("1000000"),
+      parseUnits("1000000", 6)
+    ]);
+
+    await system.mockPoolBtbBtd.write.initialize([
+      system.btb.address,
+      system.btd.address
+    ]);
+    await system.mockPoolBtbBtd.write.setReserves([
+      parseEther("1000000"),
+      parseEther("1000000")
+    ]);
+
+    await system.mockPoolBrsBtd.write.initialize([
+      system.brs.address,
+      system.btd.address
+    ]);
+    await system.mockPoolBrsBtd.write.setReserves([
+      parseEther("1000"),
+      parseEther("10000")
+    ]);
 
     // Transfer WBTC to users
     await wbtc.write.transfer([user1.account.address, parseUnits("10", 8)], { account: owner.account });
@@ -66,9 +88,13 @@ describe.skip("stBTB (ERC4626 Vault)", function () {
     await wbtc.write.approve([minter.address, wbtcAmount], { account: user2.account });
     await minter.write.mintBTD([wbtcAmount], { account: user2.account });
 
-    // Get BTB for users by using Minter which has MINTER_ROLE
-    // We can use Minter's internal mint functions for testing
-    // Since Minter has MINTER_ROLE, we'll have it transfer BTB from treasury or redeem BTD
+    await system.mockBtcUsd.write.setAnswer([25_000n * 10n ** 8n]);
+    await system.mockWbtcBtc.write.setAnswer([10n ** 8n]);
+    await system.mockPyth.write.setPrice([system.pythId, 2_500_000_000_000n, -8]);
+    await system.mockPoolWbtcUsdc.write.setReserves([
+      100n * 10n ** 8n,
+      2_500_000n * 10n ** 6n
+    ]);
 
     // Try to redeem BTD for BTB if CR allows, otherwise skip BTB tests
     const btdBalance1 = await btd.read.balanceOf([user1.account.address]);
@@ -110,8 +136,9 @@ describe.skip("stBTB (ERC4626 Vault)", function () {
       expect(decimals).to.equal(18);
     });
 
-    it.skip("should reference InterestPool correctly", async function () {
-      // stBTB is a pure ERC4626 vault and no longer stores an InterestPool address
+    it("should reference InterestPool correctly", async function () {
+      const configuredPool = await stBTB.read.interestPool();
+      expect(configuredPool.toLowerCase()).to.equal(interestPool.address.toLowerCase());
     });
   });
 
@@ -170,9 +197,7 @@ describe.skip("stBTB (ERC4626 Vault)", function () {
 
     it("should reject deposit exceeding maxDeposit", async function () {
       const userBalance = await btb.read.balanceOf([user1.account.address]);
-      if (userBalance === 0n) {
-        this.skip();
-      }
+      expect(userBalance > 0n).to.be.true;
       const excessiveAmount = userBalance * 2n;
 
       await btb.write.approve([stBTB.address, excessiveAmount], { account: user1.account });
@@ -193,9 +218,8 @@ describe.skip("stBTB (ERC4626 Vault)", function () {
       // Preview how much assets needed
       const assetsNeeded = await stBTB.read.previewMint([shareAmount]);
       const balance = await btb.read.balanceOf([user1.account.address]);
-      if (balance < assetsNeeded || assetsNeeded === 0n) {
-        this.skip();
-      }
+      expect(assetsNeeded > 0n).to.be.true;
+      expect(balance >= assetsNeeded).to.be.true;
 
       await btb.write.approve([stBTB.address, assetsNeeded], { account: user1.account });
 
@@ -211,9 +235,8 @@ describe.skip("stBTB (ERC4626 Vault)", function () {
       const shareAmount = parseEther("500");
       const assetsNeeded = await stBTB.read.previewMint([shareAmount]);
       const balance = await btb.read.balanceOf([user1.account.address]);
-      if (balance < assetsNeeded || assetsNeeded === 0n) {
-        this.skip();
-      }
+      expect(assetsNeeded > 0n).to.be.true;
+      expect(balance >= assetsNeeded).to.be.true;
 
       await btb.write.approve([stBTB.address, assetsNeeded], { account: user1.account });
 
@@ -471,7 +494,31 @@ describe.skip("stBTB (ERC4626 Vault)", function () {
     });
   });
 
-  describe.skip("Integration with InterestPool", function () {
-    // stBTB is now a standalone ERC4626 vault; InterestPool integration tests are not applicable
+  describe("Integration with InterestPool", function () {
+    it("should stake deposited assets into InterestPool", async function () {
+      const depositAmount = await resolveAmount(parseEther("1000"), this);
+
+      await btb.write.approve([stBTB.address, depositAmount], { account: user1.account });
+      await stBTB.write.deposit([depositAmount, user1.account.address], { account: user1.account });
+
+      const stakedAssets = await interestPool.read.totalAssetsOf([btb.address, stBTB.address]);
+      expect(stakedAssets >= depositAmount).to.be.true;
+      expect(await stBTB.read.totalAssets()).to.equal(stakedAssets);
+    });
+
+    it("should unstake assets when shares are redeemed", async function () {
+      const depositAmount = await resolveAmount(parseEther("1000"), this);
+
+      await btb.write.approve([stBTB.address, depositAmount], { account: user1.account });
+      await stBTB.write.deposit([depositAmount, user1.account.address], { account: user1.account });
+
+      const btbBefore = await btb.read.balanceOf([user1.account.address]);
+      const shares = await stBTB.read.balanceOf([user1.account.address]);
+      await stBTB.write.redeem([shares, user1.account.address, user1.account.address], { account: user1.account });
+      const btbAfter = await btb.read.balanceOf([user1.account.address]);
+
+      expect(btbAfter > btbBefore).to.be.true;
+      expect(await stBTB.read.balanceOf([user1.account.address])).to.equal(0n);
+    });
   });
 });

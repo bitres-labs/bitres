@@ -79,6 +79,7 @@ contract TreasuryFuzzTest is Test {
         uint256 btcValue = (uint256(btdAmount) * uint256(btcPrice)) / 1e8;
 
         // Only test cases needing compensation (current price < minimum price)
+        vm.assume(uint256(btcPrice) < minPrice);
         vm.assume(btcValue < expectedValue);
         uint256 shortfall = expectedValue - btcValue;
 

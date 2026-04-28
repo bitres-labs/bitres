@@ -35,6 +35,13 @@ interface IInterestPool {
      */
     function unstakeBTB(uint256 amount) external;
 
+    /**
+     * @notice Returns a user's principal plus accrued interest for a pool token
+     * @param token BTD or BTB token address
+     * @param user Account whose pool assets should be reported
+     */
+    function totalAssetsOf(address token, address user) external view returns (uint256);
+
     // ============ Interest Rate Management ============
 
     /**

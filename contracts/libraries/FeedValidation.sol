@@ -51,7 +51,7 @@ library FeedValidation {
         (
             uint80 roundId,
             int256 answer,
-            ,
+            uint256 startedAt,
             uint256 updatedAt,
             uint80 answeredInRound
         ) = feed.latestRoundData();
@@ -60,6 +60,7 @@ library FeedValidation {
         require(answer > 0, "Invalid feed price");
 
         // Validate round data is complete
+        require(startedAt <= updatedAt, "Invalid round timing");
         require(updatedAt > 0, "Incomplete round data");
 
         // Validate we're not using stale round data
@@ -95,7 +96,7 @@ library FeedValidation {
         (
             uint80 roundId,
             int256 answer,
-            ,
+            uint256 startedAt,
             uint256 updatedAt,
             uint80 answeredInRound
         ) = feed.latestRoundData();
@@ -104,6 +105,7 @@ library FeedValidation {
         require(answer > 0, "Invalid PCE value");
 
         // Validate round data is complete
+        require(startedAt <= updatedAt, "Invalid PCE timing");
         require(updatedAt > 0, "Incomplete PCE round data");
 
         // Validate we're not using stale round data

@@ -32,7 +32,7 @@ contract MockVault {
     }
 
     /// @notice Withdraw assets by burning shares
-    function withdraw(uint256 assets, address receiver, address owner) external returns (uint256 shares) {
+    function withdraw(uint256 assets, address, address owner) external returns (uint256 shares) {
         shares = convertToShares(assets);
         require(balanceOf[owner] >= shares, "insufficient shares");
 
@@ -42,7 +42,7 @@ contract MockVault {
     }
 
     /// @notice Redeem shares for assets
-    function redeem(uint256 shares, address receiver, address owner) external returns (uint256 assets) {
+    function redeem(uint256 shares, address, address owner) external returns (uint256 assets) {
         require(balanceOf[owner] >= shares, "insufficient shares");
 
         assets = convertToAssets(shares);

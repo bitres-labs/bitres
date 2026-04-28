@@ -47,6 +47,13 @@ describe("IdealUSDManager + PCE Oracle (viem)", function () {
   it("should update IUSD based on PCE changes via ConfigGov", async function () {
     const INITIAL_IUSD = 1_000000000000000000n;
 
+    // Get test client for time manipulation
+    const testClient = await viem.getTestClient();
+
+    // Advance time past the 25-day cooldown from initialization
+    await testClient.increaseTime({ seconds: 26 * 24 * 60 * 60 });
+    await testClient.mine({ blocks: 1 });
+
     // Update IUSD - should drop vs target after first update
     await idealUSDManager.write.updateIUSD({ account: owner.account });
     const afterFirst = await idealUSDManager.read.getCurrentIUSD();
@@ -54,6 +61,11 @@ describe("IdealUSDManager + PCE Oracle (viem)", function () {
 
     // Increase PCE by 1%
     await mockPce.write.setAnswer([303_00_000_000n]);
+
+    // Advance time past 25-day cooldown again
+    await testClient.increaseTime({ seconds: 26 * 24 * 60 * 60 });
+    await testClient.mine({ blocks: 1 });
+
     await idealUSDManager.write.updateIUSD({ account: owner.account });
     const afterSecond = await idealUSDManager.read.getCurrentIUSD();
 

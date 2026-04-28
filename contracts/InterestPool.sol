@@ -6,18 +6,16 @@ import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/acces
 import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
-import "./ConfigCore.sol";
-import "./ConfigGov.sol";
+import {ConfigCore} from "./ConfigCore.sol";
+import {ConfigGov} from "./ConfigGov.sol";
 import {IMintableERC20} from "./interfaces/IMintableERC20.sol";
 import {IPriceOracle} from "./interfaces/IPriceOracle.sol";
 import {IInterestPool} from "./interfaces/IInterestPool.sol";
 import {IMinter} from "./interfaces/IMinter.sol";
-import "./libraries/Constants.sol";
-import "./libraries/InterestMath.sol";
-import "./libraries/SigmoidRate.sol";
+import {Constants} from "./libraries/Constants.sol";
+import {InterestMath} from "./libraries/InterestMath.sol";
+import {SigmoidRate} from "./libraries/SigmoidRate.sol";
 
 /// @title InterestPool
 /// @notice Manages interest accrual for BTD/BTB via stBTD/stBTB vaults.
@@ -27,7 +25,6 @@ contract InterestPool is Initializable, Ownable2StepUpgradeable, ReentrancyGuard
     using SafeERC20 for IMintableERC20;
 
     uint256 private constant FALLBACK_DEFAULT_RATE_BPS = 500; // 5%
-    uint256 private constant TREASURY_FEE_BPS = 500; // 5% per whitepaper
 
     ConfigCore public core;
     ConfigGov public gov;
@@ -140,6 +137,16 @@ contract InterestPool is Initializable, Ownable2StepUpgradeable, ReentrancyGuard
     function userStaked(address token, address user) external view returns (uint256) {
         if (token == address(btdPool.token) && token != address(0)) return btdUsers[user].amount;
         if (token == address(btbPool.token) && token != address(0)) return btbUsers[user].amount;
+        return 0;
+    }
+
+    function totalAssetsOf(address token, address user) external view returns (uint256) {
+        if (token == address(btdPool.token) && token != address(0)) {
+            return _totalAssetsOf(btdPool, btdUsers[user]);
+        }
+        if (token == address(btbPool.token) && token != address(0)) {
+            return _totalAssetsOf(btbPool, btbUsers[user]);
+        }
         return 0;
     }
 
@@ -320,19 +327,22 @@ contract InterestPool is Initializable, Ownable2StepUpgradeable, ReentrancyGuard
             amount, pendingAmount, totalAvailable
         );
 
+        if (principalShare > 0) {
+            user.amount -= principalShare;
+            pool.totalStaked -= principalShare;
+        }
+
+        user.rewardDebt = InterestMath.rewardDebtValue(user.amount, pool.accInterestPerShare);
+
         if (interestShare > 0) {
             _payout(pool, msg.sender, interestShare);
             emit InterestClaimed(msg.sender, address(pool.token), interestShare);
         }
 
         if (principalShare > 0) {
-            user.amount -= principalShare;
-            pool.totalStaked -= principalShare;
             pool.token.safeTransfer(msg.sender, principalShare);
             emit Withdrawn(msg.sender, address(pool.token), principalShare);
         }
-
-        user.rewardDebt = InterestMath.rewardDebtValue(user.amount, pool.accInterestPerShare);
     }
 
     function _validateStakeAmount(uint256 amount) private pure {
@@ -342,24 +352,24 @@ contract InterestPool is Initializable, Ownable2StepUpgradeable, ReentrancyGuard
 
     // --- Internal Helpers ---
 
-    function _getPoolAndUsers(address token) private view returns (
-        Pool storage pool,
-        mapping(address => UserInfo) storage users
-    ) {
-        if (token == address(btdPool.token)) {
-            return (btdPool, btdUsers);
-        } else if (token == address(btbPool.token)) {
-            return (btbPool, btbUsers);
-        }
-        revert("InterestPool: unknown token");
-    }
-
     function _pendingCurrent(Pool storage pool, UserInfo storage user) internal view returns (uint256) {
         return InterestMath.pendingReward(user.amount, pool.accInterestPerShare, user.rewardDebt);
     }
 
+    function _totalAssetsOf(Pool storage pool, UserInfo storage user) internal view returns (uint256) {
+        uint256 accInterestPerShare = pool.accInterestPerShare;
+        if (pool.totalStaked > 0 && pool.annualRateBps > 0 && block.timestamp > pool.lastAccrual) {
+            accInterestPerShare += InterestMath.interestPerShareDelta(
+                pool.annualRateBps,
+                block.timestamp - pool.lastAccrual
+            );
+        }
+
+        return user.amount + InterestMath.pendingReward(user.amount, accInterestPerShare, user.rewardDebt);
+    }
+
     function _accruePool(Pool storage pool) internal {
-        if (pool.lastAccrual == block.timestamp) return;
+        if (block.timestamp <= pool.lastAccrual) return;
 
         if (pool.totalStaked == 0 || pool.annualRateBps == 0) {
             pool.lastAccrual = block.timestamp;
@@ -383,7 +393,7 @@ contract InterestPool is Initializable, Ownable2StepUpgradeable, ReentrancyGuard
         if (address(pool.token) == address(btdPool.token)) {
             address treasury = core.TREASURY();
             require(treasury != address(0), "Treasury not set");
-            uint256 fee = InterestMath.feeAmount(amount, TREASURY_FEE_BPS);
+            uint256 fee = InterestMath.feeAmount(amount, gov.interestFeeBP());
             if (fee > 0) {
                 pool.token.mint(treasury, fee);
                 emit TreasuryFeeMinted(address(pool.token), fee);

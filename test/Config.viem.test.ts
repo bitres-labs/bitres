@@ -11,7 +11,7 @@ import {
   getWallets,
   networkHelpers
 } from "./helpers/setup-viem.js";
-import type { Address } from "viem";
+import { zeroAddress } from "viem";
 
 describe("Config Architecture (ConfigCore + ConfigGov - Viem)", function () {
   let owner: any;
@@ -89,9 +89,9 @@ describe("Config Architecture (ConfigCore + ConfigGov - Viem)", function () {
   });
 
   describe("Deployment & Immutable Addresses", function () {
-    it.skip("should set owner correctly", async function () {
-      // SKIPPED: ConfigCore is not Ownable and has no owner
-      // Only ConfigGov has an owner
+    it("should set owner correctly", async function () {
+      expect((await configCore.read.owner()).toLowerCase()).to.equal(owner.account.address.toLowerCase());
+      expect((await configGov.read.owner()).toLowerCase()).to.equal(owner.account.address.toLowerCase());
     });
 
     it("should set all 7 token addresses correctly (immutable)", async function () {
@@ -120,9 +120,11 @@ describe("Config Architecture (ConfigCore + ConfigGov - Viem)", function () {
       expect((await config.read.POOL_BRS_BTD()).toLowerCase()).to.equal(pools.mockPoolBrsBtd.address.toLowerCase());
     });
 
-    it.skip("should have convenience getters matching immutable values", async function () {
-      // SKIPPED: ConfigCore only exposes uppercase immutable variables (WBTC, BTD, etc.), no lowercase convenience getters
-      // This is deliberate to match Solidity immutable naming conventions
+    it("should expose canonical immutable getters", async function () {
+      expect(config.read.WBTC).to.be.a("function");
+      expect(config.read.BTD).to.be.a("function");
+      expect((await config.read.WBTC()).toLowerCase()).to.equal(tokens.wbtc.address.toLowerCase());
+      expect((await config.read.BTD()).toLowerCase()).to.equal(tokens.btd.address.toLowerCase());
     });
   });
 
@@ -133,12 +135,16 @@ describe("Config Architecture (ConfigCore + ConfigGov - Viem)", function () {
       expect(await configGov.read.redeemFeeBP()).to.equal(50n);     // 0.5% default
       expect(await configGov.read.interestFeeBP()).to.equal(500n);  // 5% default
       expect(await configGov.read.minBTBPrice()).to.equal(500000000000000000n); // 0.5 BTD default per whitepaper
-      expect(await configGov.read.maxBTBRate()).to.equal(0n);       // Not initialized
+      expect(await configGov.read.maxBTBRate()).to.equal(2000n);    // 20% max BTB interest rate
     });
 
-    it.skip("should reference ConfigCore correctly", async function () {
-      // SKIPPED: ConfigGov no longer references ConfigCore—they are fully independent
-      // ConfigGov only manages governance parameters and does not need ConfigCore addresses
+    it("should keep parameter updates independent from ConfigCore addresses", async function () {
+      const wbtcBefore = await config.read.WBTC();
+
+      await configGov.write.setParam([0n, 100n], { account: owner.account });
+
+      expect(await configGov.read.mintFeeBP()).to.equal(100n);
+      expect(await config.read.WBTC()).to.equal(wbtcBefore);
     });
 
     it("should allow owner to set mint fee", async function () {
@@ -233,12 +239,54 @@ describe("Config Architecture (ConfigCore + ConfigGov - Viem)", function () {
   });
 
   describe("ConfigCore - Constructor Validation", function () {
-    it.skip("should reject zero address for WBTC", async function () {
-      // Constructor signature has evolved; zero-address validation is enforced on-chain
+    it("should reject zero address for WBTC", async function () {
+      const args = [
+        zeroAddress,
+        tokens.btd.address,
+        tokens.btb.address,
+        tokens.brs.address,
+        tokens.weth.address,
+        tokens.usdc.address,
+        tokens.usdt.address,
+        pools.mockPoolWbtcUsdc.address,
+        pools.mockPoolBtdUsdc.address,
+        pools.mockPoolBtbBtd.address,
+        pools.mockPoolBrsBtd.address,
+        await config.read.ST_BTD(),
+        await config.read.ST_BTB(),
+      ];
+
+      try {
+        await viem.deployContract("contracts/ConfigCore.sol:ConfigCore", args);
+        expect.fail("Should have reverted");
+      } catch (error: any) {
+        expect(error.message).to.include("Invalid WBTC");
+      }
     });
 
-    it.skip("should reject zero address for BTD", async function () {
-      // Constructor signature has evolved; zero-address validation is enforced on-chain
+    it("should reject zero address for BTD", async function () {
+      const args = [
+        tokens.wbtc.address,
+        zeroAddress,
+        tokens.btb.address,
+        tokens.brs.address,
+        tokens.weth.address,
+        tokens.usdc.address,
+        tokens.usdt.address,
+        pools.mockPoolWbtcUsdc.address,
+        pools.mockPoolBtdUsdc.address,
+        pools.mockPoolBtbBtd.address,
+        pools.mockPoolBrsBtd.address,
+        await config.read.ST_BTD(),
+        await config.read.ST_BTB(),
+      ];
+
+      try {
+        await viem.deployContract("contracts/ConfigCore.sol:ConfigCore", args);
+        expect.fail("Should have reverted");
+      } catch (error: any) {
+        expect(error.message).to.include("Invalid BTD");
+      }
     });
   });
 

@@ -315,6 +315,7 @@ contract GovernorFuzzTest is Test {
         bool unanimousPass = forPercentage == Constants.BPS_BASE;
 
         // Verify: Unanimous vote should pass
+        assertEq(votesAgainst, 0);
         assertTrue(quorumReached);
         assertTrue(unanimousPass);
     }

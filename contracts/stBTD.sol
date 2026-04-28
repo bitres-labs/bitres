@@ -7,8 +7,11 @@ import {ERC20PermitUpgradeable} from "@openzeppelin/contracts-upgradeable/token/
 import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IInterestPool} from "./interfaces/IInterestPool.sol";
 
 /**
  * @title stBTD - BTD Staking Receipt (Pure ERC4626 Implementation)
@@ -20,7 +23,19 @@ import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC2
  *      - Interest logic is managed by external contracts (e.g., InterestPool)
  *      - Supports EIP-2612 permit for gasless approvals via depositWithPermit
  */
-contract stBTD is Initializable, ERC4626Upgradeable, ERC20PermitUpgradeable, Ownable2StepUpgradeable, UUPSUpgradeable {
+contract stBTD is
+    Initializable,
+    ERC4626Upgradeable,
+    ERC20PermitUpgradeable,
+    Ownable2StepUpgradeable,
+    UUPSUpgradeable,
+    ReentrancyGuardUpgradeable
+{
+    using SafeERC20 for IERC20;
+
+    IInterestPool public interestPool;
+
+    event InterestPoolUpdated(address indexed oldInterestPool, address indexed newInterestPool);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -42,11 +57,22 @@ contract stBTD is Initializable, ERC4626Upgradeable, ERC20PermitUpgradeable, Own
         __Ownable_init(initialOwner);
         __Ownable2Step_init();
         __UUPSUpgradeable_init();
+        __ReentrancyGuard_init();
     }
 
     // ============ UUPS ============
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    function setInterestPool(address newInterestPool) external onlyOwner {
+        address oldInterestPool = address(interestPool);
+        interestPool = IInterestPool(newInterestPool);
+        emit InterestPoolUpdated(oldInterestPool, newInterestPool);
+    }
+
+    function stakeIdleAssets(uint256 assets) external onlyOwner {
+        _stakeIdleAssets(assets);
+    }
 
     /**
      * @notice Gets token decimals (18 digits)
@@ -55,6 +81,62 @@ contract stBTD is Initializable, ERC4626Upgradeable, ERC20PermitUpgradeable, Own
      */
     function decimals() public view override(ERC20Upgradeable, ERC4626Upgradeable) returns (uint8) {
         return super.decimals();
+    }
+
+    function totalAssets() public view override returns (uint256) {
+        uint256 idleAssets = IERC20(asset()).balanceOf(address(this));
+        if (address(interestPool) == address(0)) {
+            return idleAssets;
+        }
+        return idleAssets + interestPool.totalAssetsOf(asset(), address(this));
+    }
+
+    function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal override nonReentrant {
+        IERC20 assetToken = IERC20(asset());
+        assetToken.safeTransferFrom(caller, address(this), assets);
+        _stakeIdleAssets(assets);
+        _mint(receiver, shares);
+
+        emit Deposit(caller, receiver, assets, shares);
+    }
+
+    function _withdraw(
+        address caller,
+        address receiver,
+        address owner,
+        uint256 assets,
+        uint256 shares
+    ) internal override nonReentrant {
+        if (caller != owner) {
+            _spendAllowance(owner, caller, shares);
+        }
+
+        _burn(owner, shares);
+        _ensureAssetsAvailable(assets);
+        IERC20(asset()).safeTransfer(receiver, assets);
+
+        emit Withdraw(caller, receiver, owner, assets, shares);
+    }
+
+    function _stakeIdleAssets(uint256 assets) internal {
+        if (assets == 0 || address(interestPool) == address(0)) {
+            return;
+        }
+
+        IERC20 assetToken = IERC20(asset());
+        assetToken.forceApprove(address(interestPool), assets);
+        interestPool.stakeBTD(assets);
+    }
+
+    function _ensureAssetsAvailable(uint256 assets) internal {
+        IERC20 assetToken = IERC20(asset());
+        uint256 balance = assetToken.balanceOf(address(this));
+        if (balance >= assets || address(interestPool) == address(0)) {
+            return;
+        }
+
+        interestPool.unstakeBTD(assets - balance);
+        require(assetToken.balanceOf(address(this)) >= assets, "stBTD: insufficient assets");
     }
 
     /**
@@ -111,5 +193,5 @@ contract stBTD is Initializable, ERC4626Upgradeable, ERC20PermitUpgradeable, Own
 
     // ============ Storage Gap ============
 
-    uint256[50] private __gap;
+    uint256[49] private __gap;
 }

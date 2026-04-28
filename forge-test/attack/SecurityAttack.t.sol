@@ -314,8 +314,8 @@ contract SecurityAttackTest is Test {
         assertLt(crHigherSupply, cr1, "More BTD supply should lower CR");
     }
 
-    /// @notice Test that stBTD is properly counted in CR calculation
-    function test_attack_stBTDCountedInLiability() public pure {
+    /// @notice Test that stBTD cannot be used to double-count already-issued BTD
+    function test_attack_stBTDDoesNotDoubleCountLiability() public pure {
         uint256 wbtcBalance = 10 * 1e8;
         uint256 btdSupply = 500000e18;
 
@@ -324,12 +324,12 @@ contract SecurityAttackTest is Test {
             wbtcBalance, WBTC_PRICE, btdSupply, 0, IUSD_PRICE
         );
 
-        // CR with stBTD (should be lower because liability is higher)
+        // CR with stBTD should match: stBTD wraps BTD already counted in totalSupply.
         uint256 crWithStaking = CollateralMath.collateralRatio(
             wbtcBalance, WBTC_PRICE, btdSupply, 100000e18, IUSD_PRICE
         );
 
-        assertLt(crWithStaking, crNoStaking, "stBTD should increase liability and lower CR");
+        assertEq(crWithStaking, crNoStaking, "stBTD must not double-count BTD liability");
     }
 
     // ============ Attack 6: Interest Rate Manipulation ============

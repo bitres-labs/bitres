@@ -186,6 +186,15 @@ export default buildModule("FullSystemSepolia", (m) => {
     after: [interestPoolProxy, configCore],
   });
 
+  m.call(stBTD, "setInterestPool", [interestPool], {
+    id: "SetStBTDInterestPool",
+    after: [interestPoolProxy],
+  });
+  m.call(stBTB, "setInterestPool", [interestPool], {
+    id: "SetStBTBInterestPool",
+    after: [interestPoolProxy],
+  });
+
   // ===== Phase 10: FarmingPool (Proxy) =====
   // FarmingPool fund split: Treasury 20%, Foundation 10%, Team 10%
   const farmingPoolImpl = m.contract("FarmingPool", [], { id: "FarmingPoolImpl" });

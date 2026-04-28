@@ -67,8 +67,9 @@ describe("stBTD (ERC4626 Vault)", function () {
       expect(decimals).to.equal(18);
     });
 
-    it.skip("should reference InterestPool correctly", async function () {
-      // stBTD is a pure ERC4626 vault and no longer stores an InterestPool address
+    it("should reference InterestPool correctly", async function () {
+      const configuredInterestPool = await stBTD.read.interestPool();
+      expect(configuredInterestPool.toLowerCase()).to.equal(interestPool.address.toLowerCase());
     });
   });
 
@@ -418,7 +419,18 @@ describe("stBTD (ERC4626 Vault)", function () {
     });
   });
 
-  describe.skip("Integration with InterestPool", function () {
-    // stBTD is now a standalone ERC4626 vault; InterestPool integration tests are not applicable
+  describe("Integration with InterestPool", function () {
+    it("should stake deposited BTD into InterestPool", async function () {
+      const depositAmount = parseEther("1000");
+
+      await btd.write.approve([stBTD.address, depositAmount], { account: user1.account });
+      await stBTD.write.deposit([depositAmount, user1.account.address], { account: user1.account });
+
+      const poolAssets = await interestPool.read.totalAssetsOf([btd.address, stBTD.address]);
+      const vaultIdleBalance = await btd.read.balanceOf([stBTD.address]);
+
+      expect(poolAssets).to.equal(depositAmount);
+      expect(vaultIdleBalance).to.equal(0n);
+    });
   });
 });

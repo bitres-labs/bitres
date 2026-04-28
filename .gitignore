@@ -57,3 +57,8 @@ scripts/local/
 
 # Test results
 /test-results/
+/reports/
+
+# Generated deployment backups / local repair snippets
+ignition/deployments/*.bak.*
+scripts/sepolia/_*.mjs

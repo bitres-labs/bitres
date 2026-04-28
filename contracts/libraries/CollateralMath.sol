@@ -27,25 +27,25 @@ library CollateralMath {
 
     /**
      * @notice Calculate the USD value of liability
-     * @dev Formula: Value = (Total BTD Equivalent × IUSD Price) / 1e18
-     *      Total BTD Equivalent = BTD Supply + stBTD converted to BTD amount
+     * @dev Formula: Value = (Total BTD Supply × IUSD Price) / 1e18
+     *      stBTD wraps already-issued BTD, so it must not be added again.
      * @param btdSupply BTD total supply (18 decimals)
-     * @param stBTDEquivalent stBTD converted to BTD amount (18 decimals)
+     * @dev The second argument is a deprecated compatibility parameter and is ignored.
      * @param iusdPrice IUSD price (18 decimals, unit: USD)
      * @return Liability USD value (18 decimals)
      */
-    function liabilityValue(uint256 btdSupply, uint256 stBTDEquivalent, uint256 iusdPrice) internal pure returns (uint256) {
-        uint256 totalBTD = btdSupply + stBTDEquivalent;
-        if (totalBTD == 0 || iusdPrice == 0) {
+    function liabilityValue(uint256 btdSupply, uint256, uint256 iusdPrice) internal pure returns (uint256) {
+        if (btdSupply == 0 || iusdPrice == 0) {
             return 0;
         }
-        return Math.mulDiv(totalBTD, iusdPrice, Constants.PRECISION_18);
+        return Math.mulDiv(btdSupply, iusdPrice, Constants.PRECISION_18);
     }
 
     /**
      * @notice Calculate Collateral Ratio (CR)
      * @dev Formula: CR = (Collateral Value / Liability Value) × 1e18
-     *      Total BTD Equivalent = BTD Supply + stBTD converted to BTD amount
+     *      Total BTD liability = BTD Supply. stBTD is an ERC4626 wrapper over BTD,
+     *      and adding its assets again would double-count the same issued BTD.
      *      - CR = 1e18 (100%) indicates fully collateralized
      *      - CR > 1e18 indicates over-collateralized
      *      - CR < 1e18 indicates under-collateralized
@@ -53,7 +53,7 @@ library CollateralMath {
      * @param wbtcBalance WBTC balance (8 decimals)
      * @param wbtcPrice WBTC price (18 decimals)
      * @param btdSupply BTD total supply (18 decimals)
-     * @param stBTDEquivalent stBTD converted to BTD amount (18 decimals)
+     * @dev The fourth argument is a deprecated compatibility parameter and is ignored.
      * @param iusdPrice IUSD price (18 decimals)
      * @return Collateral ratio (18 decimals, 1e18 = 100%)
      */
@@ -61,16 +61,15 @@ library CollateralMath {
         uint256 wbtcBalance,
         uint256 wbtcPrice,
         uint256 btdSupply,
-        uint256 stBTDEquivalent,
+        uint256,
         uint256 iusdPrice
     ) internal pure returns (uint256) {
-        uint256 totalBTD = btdSupply + stBTDEquivalent;
-        if (wbtcBalance == 0 || totalBTD == 0) {
+        if (wbtcBalance == 0 || btdSupply == 0) {
             return Constants.PRECISION_18;
         }
 
         uint256 colValue = collateralValue(wbtcBalance, wbtcPrice);
-        uint256 liabValue = liabilityValue(btdSupply, stBTDEquivalent, iusdPrice);
+        uint256 liabValue = liabilityValue(btdSupply, 0, iusdPrice);
         require(colValue >= Constants.MIN_USD_VALUE, "Collateral value too small");
         require(liabValue >= Constants.MIN_USD_VALUE, "Liability value too small");
         return Math.mulDiv(colValue, Constants.PRECISION_18, liabValue);

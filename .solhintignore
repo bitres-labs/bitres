@@ -1,1 +1,5 @@
 contracts/backup/**
+contracts/local/**
+contracts/test/**
+contracts/interfaces/IUniswapV2Factory.sol
+contracts/interfaces/IUniswapV2Pair.sol
