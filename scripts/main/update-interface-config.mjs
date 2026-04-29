@@ -2,13 +2,13 @@
  * Update Interface Config
  *
  * Syncs deployed contract addresses from bitres to interface project.
- * Supports both local (chain-31337) and Sepolia (chain-11155111) deployments.
+ * Supports local (chain-31337), Sepolia (chain-11155111), and Base Sepolia (chain-84532) deployments.
  *
  * Usage:
  *   node scripts/main/update-interface-config.mjs [options]
  *
  * Options:
- *   --network <network>   Network to sync (local, sepolia, or auto). Default: auto
+ *   --network <network>   Network to sync (local, sepolia, baseSepolia, or auto). Default: auto
  *   --push                Push changes to GitHub after update
  *   --dry-run             Show what would be changed without modifying files
  *
@@ -25,18 +25,25 @@ import { execSync } from "child_process";
 // Configuration
 const BITRES_ROOT = process.cwd();
 const INTERFACE_ROOT = path.join(BITRES_ROOT, "..", "interface");
-const INTERFACE_CONFIG = path.join(INTERFACE_ROOT, "src/config/contracts.json");
 
 const NETWORKS = {
   local: {
     chainId: 31337,
     prefix: "FullSystemLocal#",
     deploymentDir: "ignition/deployments/chain-31337",
+    interfaceConfigFile: "contracts.json",
   },
   sepolia: {
     chainId: 11155111,
     prefix: "FullSystemSepolia#",
     deploymentDir: "ignition/deployments/chain-11155111",
+    interfaceConfigFile: "contracts.json",
+  },
+  baseSepolia: {
+    chainId: 84532,
+    prefix: "FullSystemBaseSepolia#",
+    deploymentDir: "ignition/deployments/chain-84532",
+    interfaceConfigFile: "contracts-base-sepolia.json",
   },
 };
 
@@ -49,6 +56,7 @@ const ADDRESS_MAP = {
     stBTD: "stBTD",
     stBTB: "stBTB",
     WBTC: "WBTC",
+    cbBTC: "WBTC",
     USDC: "USDC",
     USDT: "USDT",
     WETH: "WETH",
@@ -74,6 +82,8 @@ const ADDRESS_MAP = {
   oracles: {
     ChainlinkBTCUSD: "ChainlinkBTCUSD",
     ChainlinkWBTCBTC: "ChainlinkWBTCBTC",
+    ChainlinkUSDCUSD: "ChainlinkUSDCUSD",
+    ChainlinkUSDTUSD: "ChainlinkUSDTUSD",
     MockPyth: "MockPyth",
   },
   uniswap: {
@@ -128,6 +138,9 @@ function loadDeployedAddresses(network) {
 
 function detectNetwork() {
   // Check which deployments exist
+  const baseSepoliaExists = fs.existsSync(
+    path.join(BITRES_ROOT, NETWORKS.baseSepolia.deploymentDir, "deployed_addresses.json")
+  );
   const localExists = fs.existsSync(
     path.join(BITRES_ROOT, NETWORKS.local.deploymentDir, "deployed_addresses.json")
   );
@@ -135,8 +148,11 @@ function detectNetwork() {
     path.join(BITRES_ROOT, NETWORKS.sepolia.deploymentDir, "deployed_addresses.json")
   );
 
-  if (sepoliaExists && localExists) {
-    // Both exist, prefer sepolia for production
+  if (baseSepoliaExists) {
+    console.log("Base Sepolia deployment found. Using Base Sepolia.");
+    return "baseSepolia";
+  } else if (sepoliaExists && localExists) {
+    // Both exist, prefer sepolia for production fallback
     console.log("Both local and Sepolia deployments found. Using Sepolia.");
     return "sepolia";
   } else if (sepoliaExists) {
@@ -169,11 +185,15 @@ function buildConfig(addresses) {
   return config;
 }
 
-function loadCurrentConfig() {
-  if (!fs.existsSync(INTERFACE_CONFIG)) {
+function getInterfaceConfigPath(network) {
+  return path.join(INTERFACE_ROOT, "src/config", NETWORKS[network].interfaceConfigFile);
+}
+
+function loadCurrentConfig(configPath) {
+  if (!fs.existsSync(configPath)) {
     return null;
   }
-  return JSON.parse(fs.readFileSync(INTERFACE_CONFIG, "utf8"));
+  return JSON.parse(fs.readFileSync(configPath, "utf8"));
 }
 
 function compareConfigs(oldConfig, newConfig) {
@@ -198,20 +218,21 @@ function compareConfigs(oldConfig, newConfig) {
   return changes;
 }
 
-function saveConfig(config) {
-  const dir = path.dirname(INTERFACE_CONFIG);
+function saveConfig(configPath, config) {
+  const dir = path.dirname(configPath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  fs.writeFileSync(INTERFACE_CONFIG, JSON.stringify(config, null, 2) + "\n");
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
 }
 
-function gitPush() {
+function gitPush(configPath) {
   const cwd = INTERFACE_ROOT;
+  const relConfigPath = path.relative(cwd, configPath);
 
   try {
     // Check if there are changes
-    const status = execSync("git status --porcelain src/config/contracts.json", { cwd, encoding: "utf8" });
+    const status = execSync(`git status --porcelain ${relConfigPath}`, { cwd, encoding: "utf8" });
     if (!status.trim()) {
       console.log("No changes to commit.");
       return false;
@@ -219,7 +240,7 @@ function gitPush() {
 
     // Stage, commit, and push
     console.log("=> Staging changes...");
-    execSync("git add src/config/contracts.json", { cwd, stdio: "inherit" });
+    execSync(`git add ${relConfigPath}`, { cwd, stdio: "inherit" });
 
     console.log("=> Committing...");
     const message = `Update contract addresses from bitres deployment
@@ -262,13 +283,15 @@ async function main() {
       console.error("\nError: No deployments found. Deploy contracts first:");
       console.error("  npm run local:deploy    (for local)");
       console.error("  npm run sepolia:deploy  (for Sepolia)");
+      console.error("  npm run base-sepolia:deploy  (for Base Sepolia)");
       process.exit(1);
     }
   }
 
   console.log(`\n=> Network: ${network}`);
   console.log(`=> Source: ${NETWORKS[network].deploymentDir}`);
-  console.log(`=> Target: ${INTERFACE_CONFIG}`);
+  const interfaceConfig = getInterfaceConfigPath(network);
+  console.log(`=> Target: ${interfaceConfig}`);
 
   // Load deployed addresses
   const addresses = loadDeployedAddresses(network);
@@ -283,7 +306,7 @@ async function main() {
   const newConfig = buildConfig(addresses);
 
   // Load current config and compare
-  const currentConfig = loadCurrentConfig();
+  const currentConfig = loadCurrentConfig(interfaceConfig);
   const changes = compareConfigs(currentConfig, newConfig);
 
   if (changes.length === 0) {
@@ -306,13 +329,13 @@ async function main() {
 
   // Save config
   console.log("\n=> Updating config...");
-  saveConfig(newConfig);
+  saveConfig(interfaceConfig, newConfig);
   console.log("   Config saved.");
 
   // Push to GitHub if requested
   if (options.push) {
     console.log("\n=> Pushing to GitHub...");
-    const pushed = gitPush();
+    const pushed = gitPush(interfaceConfig);
     if (pushed) {
       console.log("   Changes pushed successfully.");
       console.log("   Vercel will auto-deploy from GitHub.");

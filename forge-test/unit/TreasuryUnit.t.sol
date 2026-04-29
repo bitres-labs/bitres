@@ -257,7 +257,7 @@ contract TreasuryUnitTest is Test {
     function test_depositWBTC_revertsExceedsMax() public {
         uint256 overMax = Constants.MAX_WBTC_AMOUNT + 1;
         vm.prank(minter);
-        vm.expectRevert("Treasury: exceeds max WBTC");
+        vm.expectRevert("Treasury: exceeds max BTC collateral");
         treasury.depositWBTC(overMax);
     }
 
@@ -327,13 +327,13 @@ contract TreasuryUnitTest is Test {
 
     function test_withdrawWBTC_revertsExceedsMax() public {
         vm.prank(minter);
-        vm.expectRevert("Treasury: exceeds max WBTC");
+        vm.expectRevert("Treasury: exceeds max BTC collateral");
         treasury.withdrawWBTC(Constants.MAX_WBTC_AMOUNT + 1);
     }
 
     function test_withdrawWBTC_revertsInsufficientBalance() public {
         vm.prank(minter);
-        vm.expectRevert("Treasury: insufficient WBTC");
+        vm.expectRevert("Treasury: insufficient BTC collateral");
         treasury.withdrawWBTC(1e8);
     }
 

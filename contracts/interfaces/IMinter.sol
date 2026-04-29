@@ -13,6 +13,13 @@ interface IMinter {
      */
     function mintBTD(uint256 wbtcAmount) external;
 
+    /**
+     * @notice Mint BTD stablecoin using the configured BTC collateral token.
+     * @dev Base deployments use cbBTC; legacy deployments use WBTC. Alias for mintBTD().
+     * @param collateralAmount Amount of BTC collateral token
+     */
+    function mintBTDWithCollateral(uint256 collateralAmount) external;
+
     // --- Redemption Operations ---
     /**
      * @notice Redeem BTD to receive WBTC, BTB, and BRS based on collateral ratio
@@ -57,6 +64,12 @@ interface IMinter {
      * @return fee Minting fee (denominated in BTD), 18 decimal precision
      */
     function calculateMintAmount(uint256 wbtcAmount) external view returns (uint256 btdAmount, uint256 fee);
+
+    /**
+     * @notice Calculate BTD mint amount using the configured BTC collateral token.
+     * @param collateralAmount Input BTC collateral amount, 8 decimal precision
+     */
+    function calculateMintCollateralAmount(uint256 collateralAmount) external view returns (uint256 btdAmount, uint256 fee);
 
     /**
      * @notice Calculate WBTC amount and fee when redeeming BTD (without executing actual redemption)

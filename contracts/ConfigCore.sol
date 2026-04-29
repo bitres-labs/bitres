@@ -15,7 +15,8 @@ contract ConfigCore is Ownable {
     // ==================== Core Token Addresses ====================
     // All token addresses are immutable, set at deployment
 
-    address public immutable WBTC;    // Wrapped BTC, Collateral token
+    address public immutable WBTC;    // Backward-compatible name for BTC collateral token
+    address public immutable BTC_COLLATERAL; // BTC collateral token (WBTC on legacy deployments, cbBTC on Base)
     address public immutable BTD;     // Primary stablecoin
     address public immutable BTB;     // Bond token
     address public immutable BRS;     // Governance token
@@ -26,7 +27,8 @@ contract ConfigCore is Ownable {
     // ==================== Uniswap V2 Pool Addresses ====================
     // All pool addresses are immutable, created before ConfigCore deployment
 
-    address public immutable POOL_WBTC_USDC;    // WBTC-USDC pair
+    address public immutable POOL_WBTC_USDC;    // Backward-compatible BTC collateral/USDC pair
+    address public immutable POOL_BTC_COLLATERAL_USDC; // BTC collateral/USDC pair
     address public immutable POOL_BTD_USDC;     // BTD-USDC pair
     address public immutable POOL_BTB_BTD;      // BTB-BTD pair
     address public immutable POOL_BRS_BTD;      // BRS-BTD pair
@@ -74,7 +76,7 @@ contract ConfigCore is Ownable {
         address _stBTB
     ) Ownable(msg.sender) {
         // Validate token addresses
-        require(_wbtc != address(0), "Invalid WBTC");
+        require(_wbtc != address(0), "Invalid BTC collateral");
         require(_btd != address(0), "Invalid BTD");
         require(_btb != address(0), "Invalid BTB");
         require(_brs != address(0), "Invalid BRS");
@@ -83,7 +85,7 @@ contract ConfigCore is Ownable {
         require(_usdt != address(0), "Invalid USDT");
 
         // Validate pool addresses
-        require(_poolWbtcUsdc != address(0), "Invalid Pool WBTC/USDC");
+        require(_poolWbtcUsdc != address(0), "Invalid Pool BTC/USDC");
         require(_poolBtdUsdc != address(0), "Invalid Pool BTD/USDC");
         require(_poolBtbBtd != address(0), "Invalid Pool BTB/BTD");
         require(_poolBrsBtd != address(0), "Invalid Pool BRS/BTD");
@@ -94,6 +96,7 @@ contract ConfigCore is Ownable {
 
         // Set immutable token addresses
         WBTC = _wbtc;
+        BTC_COLLATERAL = _wbtc;
         BTD = _btd;
         BTB = _btb;
         BRS = _brs;
@@ -103,6 +106,7 @@ contract ConfigCore is Ownable {
 
         // Set immutable pool addresses
         POOL_WBTC_USDC = _poolWbtcUsdc;
+        POOL_BTC_COLLATERAL_USDC = _poolWbtcUsdc;
         POOL_BTD_USDC = _poolBtdUsdc;
         POOL_BTB_BTD = _poolBtbBtd;
         POOL_BRS_BTD = _poolBrsBtd;

@@ -260,7 +260,7 @@ describe("Config Architecture (ConfigCore + ConfigGov - Viem)", function () {
         await viem.deployContract("contracts/ConfigCore.sol:ConfigCore", args);
         expect.fail("Should have reverted");
       } catch (error: any) {
-        expect(error.message).to.include("Invalid WBTC");
+        expect(error.message).to.include("Invalid BTC collateral");
       }
     });
 

@@ -24,6 +24,13 @@ interface IPriceOracle {
     function getWBTCPrice() external view returns (uint256 price);
 
     /**
+     * @notice Get BTC collateral/USD price.
+     * @dev Base deployments use cbBTC as the BTC collateral token; legacy deployments use WBTC.
+     *      This is an alias for getWBTCPrice() kept alongside the legacy interface.
+     */
+    function getBTCCollateralPrice() external view returns (uint256 price);
+
+    /**
      * @notice Get BTD/USD actual market price
      * @dev Queries BTD's actual market price from Uniswap BTD/USDC pool
      *      Note: This is BTD's actual trading price, which may deviate from IUSD target price
@@ -104,6 +111,11 @@ interface IPriceOracle {
      * @notice Update TWAP for WBTC price (WBTC/USDC pair)
      */
     function updateTWAPForWBTC() external;
+
+    /**
+     * @notice Update TWAP for the configured BTC collateral token price.
+     */
+    function updateTWAPForBTCCollateral() external;
 
     /**
      * @notice Update TWAP for BTD price (BTD/USDC pair)

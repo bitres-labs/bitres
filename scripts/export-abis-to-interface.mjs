@@ -3,32 +3,32 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 // Source: brs/artifacts/contracts
-// Target: brs-interface/src/abis
+// Target: interface/src/abis
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const BRS_ROOT = path.resolve(__dirname, '..');
-const INTERFACE_ROOT = path.resolve(BRS_ROOT, '../brs-interface');
+const INTERFACE_ROOT = path.resolve(BRS_ROOT, '../interface');
 
 const CONTRACTS = [
-  { name: 'BRS', path: 'BRS.sol/Bitreserve.json' },
-  { name: 'BTD', path: 'BTD.sol/Bitdollar.json' },
-  { name: 'BTB', path: 'BTB.sol/Bitbond.json' },
+  { name: 'BRS', path: 'BRS.sol/BRS.json' },
+  { name: 'BTD', path: 'BTD.sol/BTD.json' },
+  { name: 'BTB', path: 'BTB.sol/BTB.json' },
   { name: 'stBTD', path: 'stBTD.sol/stBTD.json' },
   { name: 'stBTB', path: 'stBTB.sol/stBTB.json' },
   { name: 'Minter', path: 'Minter.sol/Minter.json' },
   { name: 'Treasury', path: 'Treasury.sol/Treasury.json' },
-  { name: 'Config', path: 'Config.sol/Config.json' },
+  { name: 'Config', path: 'ConfigGov.sol/ConfigGov.json' },
   { name: 'InterestPool', path: 'InterestPool.sol/InterestPool.json' },
   { name: 'FarmingPool', path: 'FarmingPool.sol/FarmingPool.json' },
-  { name: 'StakingRouter', path: 'StakingRouter.sol/StakingRouter.json' },
   { name: 'PriceOracle', path: 'PriceOracle.sol/PriceOracle.json' },
   { name: 'WBTC', path: 'local/MockWBTC.sol/MockWBTC.json' },
   { name: 'USDC', path: 'local/MockUSDC.sol/MockUSDC.json' },
   { name: 'USDT', path: 'local/MockUSDT.sol/MockUSDT.json' },
   { name: 'WETH', path: 'local/MockWETH.sol/MockWETH.json' },
   { name: 'UniswapV2Pair', path: 'interfaces/IUniswapV2Pair.sol/IUniswapV2Pair.json' },
+  { name: 'Faucet', path: 'local/Faucet.sol/Faucet.json' },
 ];
 
 const artifactsDir = path.join(BRS_ROOT, 'artifacts/contracts');

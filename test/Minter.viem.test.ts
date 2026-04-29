@@ -130,6 +130,23 @@ describe("Minter Contract (Viem)", function () {
       expect(await minter.read.totalWBTC()).to.equal(0n);
       expect(await minter.read.totalBTD()).to.equal(0n);
     });
+
+    it("should expose BTC collateral aliases for Base/cbBTC deployments", async function () {
+      expect((await system.configCore.read.BTC_COLLATERAL()).toLowerCase()).to.equal(tokens.wbtc.address.toLowerCase());
+      expect((await system.configCore.read.POOL_BTC_COLLATERAL_USDC()).toLowerCase()).to.equal(
+        system.mockPoolWbtcUsdc.address.toLowerCase()
+      );
+
+      const legacyPrice = await system.priceOracle.read.getWBTCPrice();
+      const collateralPrice = await system.priceOracle.read.getBTCCollateralPrice();
+      expect(collateralPrice).to.equal(legacyPrice);
+
+      const amount = toWei("0.25", 8n);
+      const [legacyMint, legacyFee] = await minter.read.calculateMintAmount([amount]);
+      const [aliasMint, aliasFee] = await minter.read.calculateMintCollateralAmount([amount]);
+      expect(aliasMint).to.equal(legacyMint);
+      expect(aliasFee).to.equal(legacyFee);
+    });
   });
 
   describe("BTD Minting", function () {
@@ -146,6 +163,17 @@ describe("Minter Contract (Viem)", function () {
       // Check BTD balance (should be ~50,000 BTD for 1 WBTC at $50k)
       const btdBalance = await tokens.btd.read.balanceOf([user1.account.address]);
       expect(btdBalance > 0n).to.be.true;
+    });
+
+    it("should allow user to mint BTD through the generic BTC collateral alias", async function () {
+      const collateralAmount = toWei("0.5", 8n);
+
+      await tokens.wbtc.write.approve([minter.address, collateralAmount], { account: user1.account });
+      await minter.write.mintBTDWithCollateral([collateralAmount], { account: user1.account });
+
+      expect(await minter.read.totalBTCCollateral()).to.equal(collateralAmount);
+      expect(await tokens.wbtc.read.balanceOf([treasury.address])).to.equal(collateralAmount);
+      expect((await tokens.btd.read.balanceOf([user1.account.address])) > 0n).to.be.true;
     });
 
     it("should transfer WBTC to treasury", async function () {

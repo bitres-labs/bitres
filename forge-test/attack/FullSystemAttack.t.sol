@@ -219,7 +219,7 @@ contract FullSystemAttackTest is Test {
         vm.startPrank(user1);
         wbtc.approve(address(minter), type(uint256).max);
 
-        vm.expectRevert("Amount exceeds max WBTC");
+        vm.expectRevert("Amount exceeds max BTC collateral");
         minter.mintBTD(Constants.MAX_WBTC_AMOUNT + 1);
         vm.stopPrank();
     }

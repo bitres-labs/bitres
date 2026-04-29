@@ -70,6 +70,10 @@ contract MockPriceOracle is IPriceOracle {
         return wbtcPrice;
     }
 
+    function getBTCCollateralPrice() external view override returns (uint256) {
+        return wbtcPrice;
+    }
+
     function getBTDPrice() external view override returns (uint256) {
         return btdPrice;
     }
@@ -121,6 +125,10 @@ contract MockPriceOracle is IPriceOracle {
     // ============ TWAP Update Functions (no-op in mock) ============
 
     function updateTWAPForWBTC() external override {
+        // No-op in mock - prices are set manually
+    }
+
+    function updateTWAPForBTCCollateral() external override {
         // No-op in mock - prices are set manually
     }
 

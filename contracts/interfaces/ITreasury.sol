@@ -15,11 +15,23 @@ interface ITreasury {
     function depositWBTC(uint256 amt) external;
 
     /**
+     * @notice Deposit configured BTC collateral token from caller (Minter) to treasury.
+     * @dev Alias for depositWBTC(); Base deployments use cbBTC as the token behind this path.
+     */
+    function depositBTCCollateral(uint256 amt) external;
+
+    /**
      * @notice Withdraw WBTC from treasury to caller (Minter)
      * @dev Minter is responsible for transferring WBTC to end user
      * @param amt WBTC amount
      */
     function withdrawWBTC(uint256 amt) external;
+
+    /**
+     * @notice Withdraw configured BTC collateral token from treasury to caller (Minter).
+     * @dev Alias for withdrawWBTC(); Base deployments use cbBTC as the token behind this path.
+     */
+    function withdrawBTCCollateral(uint256 amt) external;
 
     /**
      * @notice Compensate user with BRS tokens from treasury

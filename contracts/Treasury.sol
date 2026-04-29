@@ -36,8 +36,8 @@ interface IPriceOracleForTreasury {
 }
 
 /// @title Treasury - Bitres System Treasury Contract
-/// @notice Manages WBTC/BTD/BRS assets, provides liquidity support for Minter
-/// @dev Core functions: WBTC deposit/withdraw, BRS compensation, BTD buyback BRS
+/// @notice Manages BTC collateral/BTD/BRS assets, provides liquidity support for Minter
+/// @dev Legacy WBTC function names are kept as aliases; Base deployments use cbBTC behind the same path.
 contract Treasury is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpgradeable, UUPSUpgradeable, ITreasury {
     using SafeERC20 for IERC20;
 
@@ -133,7 +133,11 @@ contract Treasury is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpgr
     }
 
     function WBTC() internal view returns (IERC20) {
-        return IERC20(core.WBTC());
+        return BTCCollateral();
+    }
+
+    function BTCCollateral() internal view returns (IERC20) {
+        return IERC20(core.BTC_COLLATERAL());
     }
 
     function BRS() internal view returns (IERC20) {
@@ -147,19 +151,35 @@ contract Treasury is Initializable, Ownable2StepUpgradeable, ReentrancyGuardUpgr
     /// @notice Deposit WBTC to treasury (only Minter)
     /// @param amt WBTC amount (8 decimals)
     function depositWBTC(uint256 amt) external override onlyMint nonReentrant {
+        _depositBTCCollateral(amt);
+    }
+
+    function depositBTCCollateral(uint256 amt) external override onlyMint nonReentrant {
+        _depositBTCCollateral(amt);
+    }
+
+    function _depositBTCCollateral(uint256 amt) internal {
         require(amt >= Constants.MIN_BTC_AMOUNT, "Treasury: amount too small");
-        require(amt <= Constants.MAX_WBTC_AMOUNT, "Treasury: exceeds max WBTC");
-        WBTC().safeTransferFrom(msg.sender, address(this), amt);
+        require(amt <= Constants.MAX_BTC_COLLATERAL_AMOUNT, "Treasury: exceeds max BTC collateral");
+        BTCCollateral().safeTransferFrom(msg.sender, address(this), amt);
         emit ITreasury.WBTCDeposited(msg.sender, amt);
     }
 
     /// @notice Withdraw WBTC from treasury (only Minter)
     /// @param amt WBTC amount (8 decimals)
     function withdrawWBTC(uint256 amt) external override onlyMint nonReentrant {
+        _withdrawBTCCollateral(amt);
+    }
+
+    function withdrawBTCCollateral(uint256 amt) external override onlyMint nonReentrant {
+        _withdrawBTCCollateral(amt);
+    }
+
+    function _withdrawBTCCollateral(uint256 amt) internal {
         require(amt >= Constants.MIN_BTC_AMOUNT, "Treasury: amount too small");
-        require(amt <= Constants.MAX_WBTC_AMOUNT, "Treasury: exceeds max WBTC");
-        require(WBTC().balanceOf(address(this)) >= amt, "Treasury: insufficient WBTC");
-        WBTC().safeTransfer(msg.sender, amt);
+        require(amt <= Constants.MAX_BTC_COLLATERAL_AMOUNT, "Treasury: exceeds max BTC collateral");
+        require(BTCCollateral().balanceOf(address(this)) >= amt, "Treasury: insufficient BTC collateral");
+        BTCCollateral().safeTransfer(msg.sender, amt);
         emit ITreasury.WBTCWithdrawn(msg.sender, amt);
     }
 

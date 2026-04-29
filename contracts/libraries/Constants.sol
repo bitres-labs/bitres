@@ -26,9 +26,12 @@ library Constants {
 
     // ============ Precision Conversion Scale Constants ============
 
-    /// @notice WBTC (8 decimals) to normalized (18 decimals) scale factor
+    /// @notice BTC collateral token (WBTC/cbBTC/BTCB, 8 decimals) to normalized (18 decimals) scale factor
     /// @dev 10^(18-8) = 1e10, used for explicit precision conversion, avoiding runtime EXP calculation
     uint256 internal constant SCALE_WBTC_TO_NORM = 1e10;
+
+    /// @notice Alias used by Base/cbBTC deployments. Kept equal to SCALE_WBTC_TO_NORM for compatibility.
+    uint256 internal constant SCALE_BTC_COLLATERAL_TO_NORM = SCALE_WBTC_TO_NORM;
 
     /// @notice USDC (6 decimals) to normalized (18 decimals) scale factor
     /// @dev 10^(18-6) = 1e12, used for explicit precision conversion
@@ -79,10 +82,13 @@ library Constants {
 
     // ============ Maximum Single Operation Limits (Prevents Hacker Attacks and Overflow) ============
 
-    /// @notice Maximum WBTC amount per single operation
+    /// @notice Maximum BTC collateral amount per single operation
     /// @dev 10,000 BTC (8 decimals = 10000 * 1e8)
-    /// Prevents hacker attacks and integer overflow, applies to all WBTC transfer/mint/redeem operations
+    /// Prevents hacker attacks and integer overflow, applies to all BTC collateral transfer/mint/redeem operations
     uint256 internal constant MAX_WBTC_AMOUNT = 10_000 * 1e8;
+
+    /// @notice Alias used by Base/cbBTC deployments. Kept equal to MAX_WBTC_AMOUNT for compatibility.
+    uint256 internal constant MAX_BTC_COLLATERAL_AMOUNT = MAX_WBTC_AMOUNT;
 
     /// @notice Maximum ETH amount per single operation
     /// @dev 100,000 ETH (18 decimals = 100000 * 1e18)

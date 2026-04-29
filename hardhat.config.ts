@@ -13,7 +13,14 @@ console.log("Loading Hardhat config...");
 
 dotenv.config();
 
-const { SEPOLIA_RPC_URL, SEPOLIA_PRIVATE_KEY, ETHERSCAN_API_KEY } = process.env;
+const {
+  SEPOLIA_RPC_URL,
+  SEPOLIA_PRIVATE_KEY,
+  BASE_SEPOLIA_RPC_URL,
+  BASE_SEPOLIA_PRIVATE_KEY,
+  ETHERSCAN_API_KEY,
+  BASESCAN_API_KEY,
+} = process.env;
 
 const config: HardhatUserConfig = defineConfig({
   paths: {
@@ -92,10 +99,24 @@ const config: HardhatUserConfig = defineConfig({
       accounts: SEPOLIA_PRIVATE_KEY ? [SEPOLIA_PRIVATE_KEY] : [],
       chainId: 11155111,
       timeout: 120000
+    },
+    baseSepolia: {
+      type: "http",
+      url: BASE_SEPOLIA_RPC_URL || "https://sepolia.base.org",
+      accounts: BASE_SEPOLIA_PRIVATE_KEY
+        ? [BASE_SEPOLIA_PRIVATE_KEY]
+        : SEPOLIA_PRIVATE_KEY
+          ? [SEPOLIA_PRIVATE_KEY]
+          : [],
+      chainId: 84532,
+      timeout: 120000
     }
   },
   etherscan: {
-    apiKey: ETHERSCAN_API_KEY || ""
+    apiKey: {
+      sepolia: ETHERSCAN_API_KEY || "",
+      baseSepolia: BASESCAN_API_KEY || ETHERSCAN_API_KEY || "",
+    }
   },
   mocha: {
     timeout: 120000

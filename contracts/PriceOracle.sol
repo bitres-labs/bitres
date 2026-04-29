@@ -213,8 +213,16 @@ contract PriceOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable,
     }
 
     function updateTWAPForWBTC() external {
+        _updateTWAPForBTCCollateral();
+    }
+
+    function updateTWAPForBTCCollateral() external {
+        _updateTWAPForBTCCollateral();
+    }
+
+    function _updateTWAPForBTCCollateral() internal {
         address[] memory pools = new address[](1);
-        pools[0] = core.POOL_WBTC_USDC();
+        pools[0] = core.POOL_BTC_COLLATERAL_USDC();
         _updateTWAPForPools(pools);
     }
 
@@ -240,7 +248,7 @@ contract PriceOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable,
 
     function updateTWAPAll() external {
         address[] memory pools = new address[](4);
-        pools[0] = core.POOL_WBTC_USDC();
+        pools[0] = core.POOL_BTC_COLLATERAL_USDC();
         pools[1] = core.POOL_BTD_USDC();
         pools[2] = core.POOL_BTB_BTD();
         pools[3] = core.POOL_BRS_BTD();
@@ -257,7 +265,7 @@ contract PriceOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable,
         return FeedValidation.readAggregator(feedAddress);
     }
 
-    function _getChainlinkWBTCUSD() internal view returns (uint256) {
+    function _getChainlinkBTCCollateralUSD() internal view returns (uint256) {
         uint256 wbtcToBtc = _getChainlinkPrice(gov.chainlinkWbtcBtc());
         uint256 btcToUsd = getChainlinkBTCUSD();
         return Math.mulDiv(wbtcToBtc, btcToUsd, 1e18);
@@ -274,11 +282,19 @@ contract PriceOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable,
     }
 
     function getWBTCPrice() public view returns (uint256) {
-        uint256 chainlinkPrice = _getChainlinkWBTCUSD();
+        return _getBTCCollateralPrice();
+    }
+
+    function getBTCCollateralPrice() public view returns (uint256) {
+        return _getBTCCollateralPrice();
+    }
+
+    function _getBTCCollateralPrice() internal view returns (uint256) {
+        uint256 chainlinkPrice = _getChainlinkBTCCollateralUSD();
 
         uint256 uniPrice = getPrice(
-            core.POOL_WBTC_USDC(),
-            core.WBTC(),
+            core.POOL_BTC_COLLATERAL_USDC(),
+            core.BTC_COLLATERAL(),
             core.USDC()
         );
 
@@ -424,7 +440,7 @@ contract PriceOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable,
     }
 
     function getPrice(address token) public view returns (uint256) {
-        if (token == core.WBTC()) return getWBTCPrice();
+        if (token == core.WBTC() || token == core.BTC_COLLATERAL()) return getBTCCollateralPrice();
         if (token == core.BTD()) return getBTDPrice();
         if (token == core.BTB()) return getBTBPrice();
         if (token == core.BRS()) return getBRSPrice();
@@ -491,7 +507,7 @@ contract PriceOracle is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable,
     // ============ Helper Functions ============
 
     function _getTokenDecimals(address token) internal view returns (uint8) {
-        if (token == core.WBTC()) {
+        if (token == core.WBTC() || token == core.BTC_COLLATERAL()) {
             return 8;
         } else if (token == core.USDC()) {
             return 6;

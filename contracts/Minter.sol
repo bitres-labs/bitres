@@ -125,19 +125,27 @@ contract Minter is Initializable, Ownable2StepUpgradeable, PausableUpgradeable, 
 
     // ============ Precision Conversion Helpers ============
 
-    function _wbtcToNormalized(uint256 wbtcAmount) internal pure returns (uint256) {
-        return wbtcAmount * Constants.SCALE_WBTC_TO_NORM;
+    function _btcCollateralToNormalized(uint256 collateralAmount) internal pure returns (uint256) {
+        return collateralAmount * Constants.SCALE_BTC_COLLATERAL_TO_NORM;
+    }
+
+    function _btcCollateralFromNormalized(uint256 normalizedAmount) internal pure returns (uint256) {
+        return normalizedAmount / Constants.SCALE_BTC_COLLATERAL_TO_NORM;
     }
 
     function _wbtcFromNormalized(uint256 normalizedAmount) internal pure returns (uint256) {
-        return normalizedAmount / Constants.SCALE_WBTC_TO_NORM;
+        return _btcCollateralFromNormalized(normalizedAmount);
     }
 
     // ============ Amount Validation ============
 
+    function _checkBTCCollateralAmount(uint256 collateralAmount) internal pure {
+        require(collateralAmount >= Constants.MIN_BTC_AMOUNT, "Amount below minimum BTC");
+        require(collateralAmount <= Constants.MAX_BTC_COLLATERAL_AMOUNT, "Amount exceeds max BTC collateral");
+    }
+
     function _checkWBTCAmount(uint256 wbtcAmount) internal pure {
-        require(wbtcAmount >= Constants.MIN_BTC_AMOUNT, "Amount below minimum BTC");
-        require(wbtcAmount <= Constants.MAX_WBTC_AMOUNT, "Amount exceeds max WBTC");
+        _checkBTCCollateralAmount(wbtcAmount);
     }
 
     function _checkStablecoinAmount(uint256 amount) internal pure {
@@ -157,6 +165,10 @@ contract Minter is Initializable, Ownable2StepUpgradeable, PausableUpgradeable, 
         _getPriceOracle().updateTWAPForWBTC();
     }
 
+    function _updateTWAPForBTCCollateral() internal {
+        _getPriceOracle().updateTWAPForBTCCollateral();
+    }
+
     function _updateTWAPAll() internal {
         _getPriceOracle().updateTWAPAll();
     }
@@ -174,6 +186,10 @@ contract Minter is Initializable, Ownable2StepUpgradeable, PausableUpgradeable, 
 
     function getWBTCPrice() internal view returns (uint256) {
         return _getPriceOracle().getWBTCPrice();
+    }
+
+    function getBTCCollateralPrice() internal view returns (uint256) {
+        return _getPriceOracle().getBTCCollateralPrice();
     }
 
     function getBTDPrice() internal view returns (uint256) {
@@ -201,6 +217,10 @@ contract Minter is Initializable, Ownable2StepUpgradeable, PausableUpgradeable, 
         return wbtcBalance;
     }
 
+    function totalBTCCollateral() public view returns (uint256) {
+        return totalWBTC();
+    }
+
     function totalBTD() public view returns (uint256) {
         return IMintableERC20(core.BTD()).totalSupply();
     }
@@ -211,14 +231,22 @@ contract Minter is Initializable, Ownable2StepUpgradeable, PausableUpgradeable, 
 
     function getCollateralRatio() public view override returns (uint256) {
         return CollateralMath.collateralRatio(
-            totalWBTC(), getWBTCPrice(), totalBTD(), totalStBTDEquivalent(), getIUSDPrice()
+            totalBTCCollateral(), getBTCCollateralPrice(), totalBTD(), totalStBTDEquivalent(), getIUSDPrice()
         );
     }
 
     function calculateMintAmount(uint256 wbtcAmount) external view override returns (uint256 btdAmount, uint256 fee) {
+        return _calculateMintCollateralAmount(wbtcAmount);
+    }
+
+    function calculateMintCollateralAmount(uint256 collateralAmount) external view override returns (uint256 btdAmount, uint256 fee) {
+        return _calculateMintCollateralAmount(collateralAmount);
+    }
+
+    function _calculateMintCollateralAmount(uint256 collateralAmount) internal view returns (uint256 btdAmount, uint256 fee) {
         MintLogic.MintInputs memory inputs = MintLogic.MintInputs({
-            wbtcAmount: wbtcAmount,
-            wbtcPrice: getWBTCPrice(),
+            wbtcAmount: collateralAmount,
+            wbtcPrice: getBTCCollateralPrice(),
             iusdPrice: getIUSDPrice(),
             currentBTDSupply: totalBTD(),
             feeBP: gov.mintFeeBP()
@@ -240,7 +268,7 @@ contract Minter is Initializable, Ownable2StepUpgradeable, PausableUpgradeable, 
 
     function _getCRWithPrice(uint256 wbtcPrice, uint256 iusdPrice) private view returns (uint256) {
         return CollateralMath.collateralRatio(
-            totalWBTC(),
+            totalBTCCollateral(),
             wbtcPrice,
             totalBTD(),
             totalStBTDEquivalent(),
@@ -279,26 +307,34 @@ contract Minter is Initializable, Ownable2StepUpgradeable, PausableUpgradeable, 
     // ============ Mint BTD ============
 
     function mintBTD(uint256 wbtcAmount) external nonReentrant whenNotPaused {
-        _updateTWAPForWBTC();
+        _mintBTDWithCollateral(wbtcAmount);
+    }
+
+    function mintBTDWithCollateral(uint256 collateralAmount) external override nonReentrant whenNotPaused {
+        _mintBTDWithCollateral(collateralAmount);
+    }
+
+    function _mintBTDWithCollateral(uint256 collateralAmount) internal {
+        _updateTWAPForBTCCollateral();
         _tryUpdateIUSD();
-        _checkWBTCAmount(wbtcAmount);
+        _checkBTCCollateralAmount(collateralAmount);
 
         MintLogic.MintInputs memory inputs = MintLogic.MintInputs({
-            wbtcAmount: wbtcAmount,
-            wbtcPrice: getWBTCPrice(),
+            wbtcAmount: collateralAmount,
+            wbtcPrice: getBTCCollateralPrice(),
             iusdPrice: getIUSDPrice(),
             currentBTDSupply: totalBTD(),
             feeBP: gov.mintFeeBP()
         });
         MintLogic.MintOutputs memory outputs = MintLogic.evaluate(inputs);
 
-        IERC20 wbtc = IERC20(core.WBTC());
+        IERC20 btcCollateral = IERC20(core.BTC_COLLATERAL());
         address treasuryAddr = core.TREASURY();
-        wbtc.safeTransferFrom(msg.sender, address(this), wbtcAmount);
-        if (wbtc.allowance(address(this), treasuryAddr) < wbtcAmount) {
-            wbtc.forceApprove(treasuryAddr, type(uint256).max);
+        btcCollateral.safeTransferFrom(msg.sender, address(this), collateralAmount);
+        if (btcCollateral.allowance(address(this), treasuryAddr) < collateralAmount) {
+            btcCollateral.forceApprove(treasuryAddr, type(uint256).max);
         }
-        ITreasury(treasuryAddr).depositWBTC(wbtcAmount);
+        ITreasury(treasuryAddr).depositBTCCollateral(collateralAmount);
 
         IMintableERC20 btdToken = IMintableERC20(core.BTD());
         btdToken.mint(msg.sender, outputs.btdToMint);
@@ -306,7 +342,7 @@ contract Minter is Initializable, Ownable2StepUpgradeable, PausableUpgradeable, 
             btdToken.mint(treasuryAddr, outputs.fee);
         }
 
-        emit BTDMinted(msg.sender, wbtcAmount, outputs.btdToMint, outputs.fee);
+        emit BTDMinted(msg.sender, collateralAmount, outputs.btdToMint, outputs.fee);
     }
 
     // ============ Redeem BTD ============
@@ -343,7 +379,7 @@ contract Minter is Initializable, Ownable2StepUpgradeable, PausableUpgradeable, 
         require(IMintableERC20(core.BTD()).balanceOf(account) >= btdAmount, "Not enough BTD");
         _checkStablecoinAmount(btdAmount);
 
-        uint256 wbtcPrice = getWBTCPrice();
+        uint256 wbtcPrice = getBTCCollateralPrice();
         uint256 iusdPrice = getIUSDPrice();
         uint256 cr = _getCRWithPrice(wbtcPrice, iusdPrice);
 
@@ -357,9 +393,9 @@ contract Minter is Initializable, Ownable2StepUpgradeable, PausableUpgradeable, 
 
         uint256 wbtcOut = _wbtcFromNormalized(outputs.wbtcOutNormalized);
         if (wbtcOut > 0) {
-            _checkWBTCAmount(wbtcOut);
-            ITreasury(core.TREASURY()).withdrawWBTC(wbtcOut);
-            IERC20(core.WBTC()).safeTransfer(account, wbtcOut);
+            _checkBTCCollateralAmount(wbtcOut);
+            ITreasury(core.TREASURY()).withdrawBTCCollateral(wbtcOut);
+            IERC20(core.BTC_COLLATERAL()).safeTransfer(account, wbtcOut);
         }
 
         if (outputs.brsOut > 0) {
@@ -407,15 +443,15 @@ contract Minter is Initializable, Ownable2StepUpgradeable, PausableUpgradeable, 
     }
 
     function _redeemBTB(address account, uint256 btbAmount) internal {
-        _updateTWAPForWBTC();
+        _updateTWAPForBTCCollateral();
         _tryUpdateIUSD();
 
-        uint256 wbtcPrice = getWBTCPrice();
+        uint256 wbtcPrice = getBTCCollateralPrice();
         uint256 iusdPrice = getIUSDPrice();
         uint256 cr = _getCRWithPrice(wbtcPrice, iusdPrice);
         require(cr >= Constants.PRECISION_18, "CR<100%, BTB not redeemable");
 
-        uint256 collateralValue = CollateralMath.collateralValue(totalWBTC(), wbtcPrice);
+        uint256 collateralValue = CollateralMath.collateralValue(totalBTCCollateral(), wbtcPrice);
         uint256 liabilityValue = CollateralMath.liabilityValue(totalBTD(), totalStBTDEquivalent(), iusdPrice);
         uint256 maxRedeemableBTD = CollateralMath.maxRedeemableBTD(collateralValue, liabilityValue, iusdPrice);
         require(btbAmount <= maxRedeemableBTD, "Exceeds max redeemable");
@@ -440,7 +476,7 @@ contract Minter is Initializable, Ownable2StepUpgradeable, PausableUpgradeable, 
             uint256 _brsPrice
         )
     {
-        return (totalBTD(), totalWBTC(), getCollateralRatio(), getWBTCPrice(), getBTBPrice(), getBRSPrice());
+        return (totalBTD(), totalBTCCollateral(), getCollateralRatio(), getBTCCollateralPrice(), getBTBPrice(), getBRSPrice());
     }
 
     // ============ Storage Gap ============
