@@ -1,28 +1,112 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
+import "forge-std/Test.sol";
 import "../../contracts/libraries/FeedValidation.sol";
 import "../../contracts/libraries/IUSDMath.sol";
 import "../../contracts/libraries/OracleMath.sol";
 import "../../contracts/libraries/Constants.sol";
 import "../../contracts/local/MockAggregatorV3.sol";
 
-contract LibraryUnitTest {
+contract LibraryUnitTest is Test {
     function testFeedValidationReadsAndScales() public {
         MockAggregatorV3 feed = new MockAggregatorV3(300_000_000_000);
         uint256 price = FeedValidation.readAggregator(address(feed));
         require(price == 3000e18, "price should scale to 18 decimals");
     }
 
-    function testFeedValidationRejectsZero() public view {
-        bool reverted = _expectRevertFeed(address(0));
-        require(reverted, "zero feed should revert");
+    function testFeedValidationRejectsZero() public {
+        vm.expectRevert(bytes("Feed not set"));
+        this._callFeedRead(address(0));
     }
 
     function testFeedValidationRejectsNegative() public {
         MockAggregatorV3 feed = new MockAggregatorV3(-1);
-        bool reverted = _expectRevertFeed(address(feed));
-        require(reverted, "negative answer should revert");
+        vm.expectRevert(bytes("Invalid feed price"));
+        this._callFeedRead(address(feed));
+    }
+
+    function testFeedValidationRejectsInvalidRoundTiming() public {
+        MockAggregatorV3 feed = new MockAggregatorV3(300_000_000_000);
+        feed.setRoundData(1, 101, 100, 1);
+
+        vm.expectRevert(bytes("Invalid round timing"));
+        this._callFeedRead(address(feed));
+    }
+
+    function testFeedValidationRejectsIncompleteRoundData() public {
+        MockAggregatorV3 feed = new MockAggregatorV3(300_000_000_000);
+        feed.setRoundData(1, 0, 0, 1);
+
+        vm.expectRevert(bytes("Incomplete round data"));
+        this._callFeedRead(address(feed));
+    }
+
+    function testFeedValidationRejectsStaleAnsweredRound() public {
+        MockAggregatorV3 feed = new MockAggregatorV3(300_000_000_000);
+        feed.setRoundData(2, block.timestamp, block.timestamp, 1);
+
+        vm.expectRevert(bytes("Stale round data"));
+        this._callFeedRead(address(feed));
+    }
+
+    function testFeedValidationRejectsOldPriceData() public {
+        MockAggregatorV3 feed = new MockAggregatorV3(300_000_000_000);
+        feed.setRoundData(1, 1, 1, 1);
+        vm.warp(7200 + 2);
+
+        vm.expectRevert(bytes("Price data too old"));
+        this._callFeedRead(address(feed));
+    }
+
+    function testPCEFeedValidationReadsAndScales() public {
+        MockAggregatorV3 feed = new MockAggregatorV3(300_00_000_000);
+        uint256 pce = FeedValidation.readPCEAggregator(address(feed));
+        require(pce == 300e18, "pce should scale to 18 decimals");
+    }
+
+    function testPCEFeedValidationRejectsZero() public {
+        vm.expectRevert(bytes("PCE Feed not set"));
+        this._callPCEFeedRead(address(0));
+    }
+
+    function testPCEFeedValidationRejectsNegative() public {
+        MockAggregatorV3 feed = new MockAggregatorV3(-1);
+        vm.expectRevert(bytes("Invalid PCE value"));
+        this._callPCEFeedRead(address(feed));
+    }
+
+    function testPCEFeedValidationRejectsInvalidRoundTiming() public {
+        MockAggregatorV3 feed = new MockAggregatorV3(300_00_000_000);
+        feed.setRoundData(1, 101, 100, 1);
+
+        vm.expectRevert(bytes("Invalid PCE timing"));
+        this._callPCEFeedRead(address(feed));
+    }
+
+    function testPCEFeedValidationRejectsIncompleteRoundData() public {
+        MockAggregatorV3 feed = new MockAggregatorV3(300_00_000_000);
+        feed.setRoundData(1, 0, 0, 1);
+
+        vm.expectRevert(bytes("Incomplete PCE round data"));
+        this._callPCEFeedRead(address(feed));
+    }
+
+    function testPCEFeedValidationRejectsStaleAnsweredRound() public {
+        MockAggregatorV3 feed = new MockAggregatorV3(300_00_000_000);
+        feed.setRoundData(2, block.timestamp, block.timestamp, 1);
+
+        vm.expectRevert(bytes("Stale PCE round data"));
+        this._callPCEFeedRead(address(feed));
+    }
+
+    function testPCEFeedValidationRejectsOldPriceData() public {
+        MockAggregatorV3 feed = new MockAggregatorV3(300_00_000_000);
+        feed.setRoundData(1, 1, 1, 1);
+        vm.warp(35 days + 2);
+
+        vm.expectRevert(bytes("PCE data too old"));
+        this._callPCEFeedRead(address(feed));
     }
 
     function testIUSDMathAdjustment() public pure {
@@ -64,10 +148,9 @@ contract LibraryUnitTest {
         require(!OracleMath.deviationWithin(1e18, 0, 100), "zero should fail");
     }
 
-    // ---- helpers for revert expectation ----
-    function _expectRevertFeed(address feed) internal view returns (bool) {
+    function _expectRevertInverse(uint256 price) internal view returns (bool) {
         (bool ok, ) = address(this).staticcall(
-            abi.encodeWithSelector(this._callFeedRead.selector, feed)
+            abi.encodeWithSelector(this._callInverse.selector, price)
         );
         return !ok;
     }
@@ -76,11 +159,8 @@ contract LibraryUnitTest {
         return FeedValidation.readAggregator(feed);
     }
 
-    function _expectRevertInverse(uint256 price) internal view returns (bool) {
-        (bool ok, ) = address(this).staticcall(
-            abi.encodeWithSelector(this._callInverse.selector, price)
-        );
-        return !ok;
+    function _callPCEFeedRead(address feed) external view returns (uint256) {
+        return FeedValidation.readPCEAggregator(feed);
     }
 
     function _callInverse(uint256 price) external pure returns (uint256) {

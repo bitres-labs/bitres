@@ -73,8 +73,23 @@ contract MintLogicFormalTest is Test {
         assert(result.btdToMint == result.btdGross);
     }
 
-    /// @notice Verify new liability value covers the minted collateral value up to one wei of rounding.
-    function check_newLiabilityValue_ge_usdValue_minus_rounding(
+    /// @notice Verify exact mint accounting at the IUSD peg with zero fee.
+    function check_z_atPeg_zeroFee_exactAccounting(
+        uint32 wbtcMilliBtc,
+        uint8 wbtcPriceKUsd,
+        uint32 currentSupplyTokens
+    ) public pure {
+        MintLogic.MintOutputs memory result =
+            MintLogic.evaluate(_inputs(wbtcMilliBtc, wbtcPriceKUsd, 10_000, currentSupplyTokens, 0));
+
+        assert(result.btdGross == result.usdValue);
+        assert(result.btdToMint == result.usdValue);
+        assert(result.fee == 0);
+        assert(result.newLiabilityValue == _supply(currentSupplyTokens) + result.usdValue);
+    }
+
+    /// @notice Verify protocol fee cap leaves at least 90% of gross mint amount for the user.
+    function check_z_fee_cap_keeps_user_mint_above_90_percent(
         uint32 wbtcMilliBtc,
         uint8 wbtcPriceKUsd,
         uint16 iusdBps,
@@ -85,7 +100,8 @@ contract MintLogicFormalTest is Test {
             _inputs(wbtcMilliBtc, wbtcPriceKUsd, iusdBps, currentSupplyTokens, feeBP)
         );
 
-        assert(result.newLiabilityValue + 1 >= result.usdValue);
+        assert(result.fee <= result.btdGross / 10);
+        assert(result.btdToMint >= result.btdGross - (result.btdGross / 10));
     }
 
     /// @notice Verify normalizedWBTC equals wbtcAmount * SCALE_WBTC_TO_NORM.
@@ -116,6 +132,21 @@ contract MintLogicFormalTest is Test {
         );
 
         assert(result.usdValue > 0);
+    }
+
+    /// @notice Verify new liability value covers the minted collateral value up to one wei of rounding.
+    function check_z_newLiabilityValue_ge_usdValue_minus_rounding(
+        uint32 wbtcMilliBtc,
+        uint8 wbtcPriceKUsd,
+        uint16 iusdBps,
+        uint32 currentSupplyTokens,
+        uint16 feeBP
+    ) public pure {
+        MintLogic.MintOutputs memory result = MintLogic.evaluate(
+            _inputs(wbtcMilliBtc, wbtcPriceKUsd, iusdBps, currentSupplyTokens, feeBP)
+        );
+
+        assert(result.newLiabilityValue + 1 >= result.usdValue);
     }
 
     /// @notice Verify btdToMint is always less than or equal to btdGross.
