@@ -7,281 +7,206 @@ import "../../contracts/libraries/Constants.sol";
 
 /**
  * @title MintLogic Formal Verification Tests
- * @notice Formal verification tests using Halmos symbolic execution
- * @dev Tests prefixed with "check_" are symbolic tests for Halmos
+ * @notice Symbolic properties for the BTD minting calculation library.
+ * @dev Symbolic inputs use compact business units, then scale to protocol decimals.
  */
 contract MintLogicFormalTest is Test {
+    uint32 private constant MAX_WBTC_MILLI_BTC = 100_000; // 100 BTC
+    uint32 private constant MAX_SUPPLY_TOKENS = 1_000_000_000;
 
-    // ============ Output Properties ============
-
-    /// @notice Verify btdToMint + fee equals btdGross
-    function check_btdToMint_plus_fee_equals_gross(
-        uint64 wbtcAmount,
-        uint64 wbtcPrice,
-        uint64 iusdPrice,
-        uint64 currentSupply,
-        uint16 feeBP
-    ) public pure {
-        // Bounds to avoid overflow and meet minimums
-        vm.assume(wbtcAmount >= 1e5 && wbtcAmount <= 100e8); // 0.001 to 100 BTC
-        vm.assume(wbtcPrice >= 10000e18 && wbtcPrice <= 200000e18); // $10k to $200k
-        vm.assume(iusdPrice >= 0.9e18 && iusdPrice <= 1.1e18); // 0.9 to 1.1 USD
-        vm.assume(feeBP <= 1000); // max 10% fee
-
-        MintLogic.MintInputs memory inputs = MintLogic.MintInputs({
-            wbtcAmount: wbtcAmount,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            currentBTDSupply: currentSupply,
-            feeBP: feeBP
-        });
-
-        MintLogic.MintOutputs memory result = MintLogic.evaluate(inputs);
-
-        assert(result.btdToMint + result.fee == result.btdGross);
+    function _wbtcAmount(uint32 milliBtc) private pure returns (uint256) {
+        return uint256(milliBtc) * 1e5; // 0.001 BTC = 100000 WBTC satoshis
     }
 
-    /// @notice Verify btdToMint is always less than or equal to btdGross
-    function check_btdToMint_le_btdGross(
-        uint64 wbtcAmount,
-        uint64 wbtcPrice,
-        uint64 iusdPrice,
-        uint64 currentSupply,
-        uint16 feeBP
-    ) public pure {
-        vm.assume(wbtcAmount >= 1e5 && wbtcAmount <= 100e8);
-        vm.assume(wbtcPrice >= 10000e18 && wbtcPrice <= 200000e18);
-        vm.assume(iusdPrice >= 0.9e18 && iusdPrice <= 1.1e18);
-        vm.assume(feeBP <= 1000);
-
-        MintLogic.MintInputs memory inputs = MintLogic.MintInputs({
-            wbtcAmount: wbtcAmount,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            currentBTDSupply: currentSupply,
-            feeBP: feeBP
-        });
-
-        MintLogic.MintOutputs memory result = MintLogic.evaluate(inputs);
-
-        assert(result.btdToMint <= result.btdGross);
+    function _price(uint8 thousandUsd) private pure returns (uint256) {
+        return uint256(thousandUsd) * 1_000e18;
     }
 
-    /// @notice Verify fee is zero when feeBP is zero
+    function _iusd(uint16 bps) private pure returns (uint256) {
+        return uint256(bps) * 1e14;
+    }
+
+    function _supply(uint32 wholeTokens) private pure returns (uint256) {
+        return uint256(wholeTokens) * 1e18;
+    }
+
+    function _assumeMintDomain(
+        uint32 wbtcMilliBtc,
+        uint8 wbtcPriceKUsd,
+        uint16 iusdBps,
+        uint32 currentSupplyTokens,
+        uint16 feeBP
+    ) private pure {
+        vm.assume(wbtcMilliBtc > 0 && wbtcMilliBtc <= MAX_WBTC_MILLI_BTC);
+        vm.assume(wbtcPriceKUsd >= 10 && wbtcPriceKUsd <= 200);
+        vm.assume(iusdBps >= 9_000 && iusdBps <= 11_000);
+        vm.assume(currentSupplyTokens <= MAX_SUPPLY_TOKENS);
+        vm.assume(feeBP <= 1_000);
+    }
+
+    function _inputs(uint32 wbtcMilliBtc, uint8 wbtcPriceKUsd, uint16 iusdBps, uint32 currentSupplyTokens, uint16 feeBP)
+        private
+        pure
+        returns (MintLogic.MintInputs memory)
+    {
+        _assumeMintDomain(wbtcMilliBtc, wbtcPriceKUsd, iusdBps, currentSupplyTokens, feeBP);
+        return MintLogic.MintInputs({
+            wbtcAmount: _wbtcAmount(wbtcMilliBtc),
+            wbtcPrice: _price(wbtcPriceKUsd),
+            iusdPrice: _iusd(iusdBps),
+            currentBTDSupply: _supply(currentSupplyTokens),
+            feeBP: feeBP
+        });
+    }
+
+    /// @notice Verify fee is zero when feeBP is zero.
     function check_fee_zero_when_feeBP_zero(
-        uint64 wbtcAmount,
-        uint64 wbtcPrice,
-        uint64 iusdPrice,
-        uint64 currentSupply
+        uint32 wbtcMilliBtc,
+        uint8 wbtcPriceKUsd,
+        uint16 iusdBps,
+        uint32 currentSupplyTokens
     ) public pure {
-        vm.assume(wbtcAmount >= 1e5 && wbtcAmount <= 100e8);
-        vm.assume(wbtcPrice >= 10000e18 && wbtcPrice <= 200000e18);
-        vm.assume(iusdPrice >= 0.9e18 && iusdPrice <= 1.1e18);
-
-        MintLogic.MintInputs memory inputs = MintLogic.MintInputs({
-            wbtcAmount: wbtcAmount,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            currentBTDSupply: currentSupply,
-            feeBP: 0
-        });
-
-        MintLogic.MintOutputs memory result = MintLogic.evaluate(inputs);
+        MintLogic.MintOutputs memory result =
+            MintLogic.evaluate(_inputs(wbtcMilliBtc, wbtcPriceKUsd, iusdBps, currentSupplyTokens, 0));
 
         assert(result.fee == 0);
         assert(result.btdToMint == result.btdGross);
     }
 
-    /// @notice Verify btdGross is monotonic in wbtcAmount
-    function check_btdGross_monotonic_wbtcAmount(
-        uint64 wbtcAmount1,
-        uint64 wbtcAmount2,
-        uint64 wbtcPrice,
-        uint64 iusdPrice,
-        uint64 currentSupply,
+    /// @notice Verify new liability value covers the minted collateral value up to one wei of rounding.
+    function check_newLiabilityValue_ge_usdValue_minus_rounding(
+        uint32 wbtcMilliBtc,
+        uint8 wbtcPriceKUsd,
+        uint16 iusdBps,
+        uint32 currentSupplyTokens,
         uint16 feeBP
     ) public pure {
-        vm.assume(wbtcAmount1 >= 1e5 && wbtcAmount1 <= 50e8);
-        vm.assume(wbtcAmount2 >= 1e5 && wbtcAmount2 <= 100e8);
-        vm.assume(wbtcAmount1 <= wbtcAmount2);
-        vm.assume(wbtcPrice >= 10000e18 && wbtcPrice <= 200000e18);
-        vm.assume(iusdPrice >= 0.9e18 && iusdPrice <= 1.1e18);
-        vm.assume(feeBP <= 1000);
+        MintLogic.MintOutputs memory result = MintLogic.evaluate(
+            _inputs(wbtcMilliBtc, wbtcPriceKUsd, iusdBps, currentSupplyTokens, feeBP)
+        );
 
-        MintLogic.MintInputs memory inputs1 = MintLogic.MintInputs({
-            wbtcAmount: wbtcAmount1,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            currentBTDSupply: currentSupply,
-            feeBP: feeBP
-        });
-
-        MintLogic.MintInputs memory inputs2 = MintLogic.MintInputs({
-            wbtcAmount: wbtcAmount2,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            currentBTDSupply: currentSupply,
-            feeBP: feeBP
-        });
-
-        MintLogic.MintOutputs memory result1 = MintLogic.evaluate(inputs1);
-        MintLogic.MintOutputs memory result2 = MintLogic.evaluate(inputs2);
-
-        assert(result1.btdGross <= result2.btdGross);
+        assert(result.newLiabilityValue + 1 >= result.usdValue);
     }
 
-    /// @notice Verify btdGross is monotonic in wbtcPrice
-    function check_btdGross_monotonic_wbtcPrice(
-        uint64 wbtcAmount,
-        uint64 wbtcPrice1,
-        uint64 wbtcPrice2,
-        uint64 iusdPrice,
-        uint64 currentSupply,
+    /// @notice Verify normalizedWBTC equals wbtcAmount * SCALE_WBTC_TO_NORM.
+    function check_normalizedWBTC_correct(
+        uint32 wbtcMilliBtc,
+        uint8 wbtcPriceKUsd,
+        uint16 iusdBps,
+        uint32 currentSupplyTokens,
         uint16 feeBP
     ) public pure {
-        vm.assume(wbtcAmount >= 1e5 && wbtcAmount <= 100e8);
-        vm.assume(wbtcPrice1 >= 10000e18 && wbtcPrice1 <= 100000e18);
-        vm.assume(wbtcPrice2 >= 10000e18 && wbtcPrice2 <= 200000e18);
-        vm.assume(wbtcPrice1 <= wbtcPrice2);
-        vm.assume(iusdPrice >= 0.9e18 && iusdPrice <= 1.1e18);
-        vm.assume(feeBP <= 1000);
+        MintLogic.MintOutputs memory result = MintLogic.evaluate(
+            _inputs(wbtcMilliBtc, wbtcPriceKUsd, iusdBps, currentSupplyTokens, feeBP)
+        );
 
-        MintLogic.MintInputs memory inputs1 = MintLogic.MintInputs({
-            wbtcAmount: wbtcAmount,
-            wbtcPrice: wbtcPrice1,
-            iusdPrice: iusdPrice,
-            currentBTDSupply: currentSupply,
-            feeBP: feeBP
-        });
-
-        MintLogic.MintInputs memory inputs2 = MintLogic.MintInputs({
-            wbtcAmount: wbtcAmount,
-            wbtcPrice: wbtcPrice2,
-            iusdPrice: iusdPrice,
-            currentBTDSupply: currentSupply,
-            feeBP: feeBP
-        });
-
-        MintLogic.MintOutputs memory result1 = MintLogic.evaluate(inputs1);
-        MintLogic.MintOutputs memory result2 = MintLogic.evaluate(inputs2);
-
-        assert(result1.btdGross <= result2.btdGross);
+        assert(result.normalizedWBTC == _wbtcAmount(wbtcMilliBtc) * Constants.SCALE_WBTC_TO_NORM);
     }
 
-    /// @notice Verify usdValue is positive when wbtcAmount and wbtcPrice are positive
+    /// @notice Verify usdValue is positive when WBTC amount and price are positive.
     function check_usdValue_positive(
-        uint64 wbtcAmount,
-        uint64 wbtcPrice,
-        uint64 iusdPrice,
-        uint64 currentSupply,
+        uint32 wbtcMilliBtc,
+        uint8 wbtcPriceKUsd,
+        uint16 iusdBps,
+        uint32 currentSupplyTokens,
         uint16 feeBP
     ) public pure {
-        vm.assume(wbtcAmount >= 1e5 && wbtcAmount <= 100e8);
-        vm.assume(wbtcPrice >= 10000e18 && wbtcPrice <= 200000e18);
-        vm.assume(iusdPrice >= 0.9e18 && iusdPrice <= 1.1e18);
-        vm.assume(feeBP <= 1000);
-
-        MintLogic.MintInputs memory inputs = MintLogic.MintInputs({
-            wbtcAmount: wbtcAmount,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            currentBTDSupply: currentSupply,
-            feeBP: feeBP
-        });
-
-        MintLogic.MintOutputs memory result = MintLogic.evaluate(inputs);
+        MintLogic.MintOutputs memory result = MintLogic.evaluate(
+            _inputs(wbtcMilliBtc, wbtcPriceKUsd, iusdBps, currentSupplyTokens, feeBP)
+        );
 
         assert(result.usdValue > 0);
     }
 
-    /// @notice Verify normalizedWBTC equals wbtcAmount * SCALE_WBTC_TO_NORM
-    function check_normalizedWBTC_correct(
-        uint64 wbtcAmount,
-        uint64 wbtcPrice,
-        uint64 iusdPrice,
-        uint64 currentSupply,
+    /// @notice Verify btdToMint is always less than or equal to btdGross.
+    function check_z_btdToMint_le_btdGross(
+        uint32 wbtcMilliBtc,
+        uint8 wbtcPriceKUsd,
+        uint16 iusdBps,
+        uint32 currentSupplyTokens,
         uint16 feeBP
     ) public pure {
-        vm.assume(wbtcAmount >= 1e5 && wbtcAmount <= 100e8);
-        vm.assume(wbtcPrice >= 10000e18 && wbtcPrice <= 200000e18);
-        vm.assume(iusdPrice >= 0.9e18 && iusdPrice <= 1.1e18);
-        vm.assume(feeBP <= 1000);
+        MintLogic.MintOutputs memory result = MintLogic.evaluate(
+            _inputs(wbtcMilliBtc, wbtcPriceKUsd, iusdBps, currentSupplyTokens, feeBP)
+        );
 
-        MintLogic.MintInputs memory inputs = MintLogic.MintInputs({
-            wbtcAmount: wbtcAmount,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            currentBTDSupply: currentSupply,
-            feeBP: feeBP
-        });
-
-        MintLogic.MintOutputs memory result = MintLogic.evaluate(inputs);
-
-        assert(result.normalizedWBTC == wbtcAmount * Constants.SCALE_WBTC_TO_NORM);
+        assert(result.btdToMint <= result.btdGross);
     }
 
-    /// @notice Verify fee is monotonic in feeBP
-    function check_fee_monotonic_feeBP(
-        uint64 wbtcAmount,
-        uint64 wbtcPrice,
-        uint64 iusdPrice,
-        uint64 currentSupply,
+    /// @notice Verify btdToMint + fee equals btdGross.
+    function check_z_btdToMint_plus_fee_equals_gross(
+        uint32 wbtcMilliBtc,
+        uint8 wbtcPriceKUsd,
+        uint16 iusdBps,
+        uint32 currentSupplyTokens,
+        uint16 feeBP
+    ) public pure {
+        MintLogic.MintOutputs memory result = MintLogic.evaluate(
+            _inputs(wbtcMilliBtc, wbtcPriceKUsd, iusdBps, currentSupplyTokens, feeBP)
+        );
+
+        assert(result.btdToMint + result.fee == result.btdGross);
+    }
+
+    /// @notice Verify btdGross is monotonic in wbtcAmount.
+    function check_z_btdGross_monotonic_wbtcAmount(
+        uint32 wbtcMilliBtc1,
+        uint32 wbtcMilliBtc2,
+        uint8 wbtcPriceKUsd,
+        uint16 iusdBps,
+        uint32 currentSupplyTokens,
+        uint16 feeBP
+    ) public pure {
+        vm.assume(wbtcMilliBtc1 > 0 && wbtcMilliBtc1 <= 50_000);
+        vm.assume(wbtcMilliBtc2 > 0 && wbtcMilliBtc2 <= MAX_WBTC_MILLI_BTC);
+        vm.assume(wbtcMilliBtc1 <= wbtcMilliBtc2);
+
+        MintLogic.MintOutputs memory result1 =
+            MintLogic.evaluate(_inputs(wbtcMilliBtc1, wbtcPriceKUsd, iusdBps, currentSupplyTokens, feeBP));
+        MintLogic.MintOutputs memory result2 =
+            MintLogic.evaluate(_inputs(wbtcMilliBtc2, wbtcPriceKUsd, iusdBps, currentSupplyTokens, feeBP));
+
+        assert(result1.btdGross <= result2.btdGross);
+    }
+
+    /// @notice Verify btdGross is monotonic in wbtcPrice.
+    function check_z_btdGross_monotonic_wbtcPrice(
+        uint32 wbtcMilliBtc,
+        uint8 wbtcPriceKUsd1,
+        uint8 wbtcPriceKUsd2,
+        uint16 iusdBps,
+        uint32 currentSupplyTokens,
+        uint16 feeBP
+    ) public pure {
+        vm.assume(wbtcPriceKUsd1 >= 10 && wbtcPriceKUsd1 <= 100);
+        vm.assume(wbtcPriceKUsd2 >= 10 && wbtcPriceKUsd2 <= 200);
+        vm.assume(wbtcPriceKUsd1 <= wbtcPriceKUsd2);
+
+        MintLogic.MintOutputs memory result1 =
+            MintLogic.evaluate(_inputs(wbtcMilliBtc, wbtcPriceKUsd1, iusdBps, currentSupplyTokens, feeBP));
+        MintLogic.MintOutputs memory result2 =
+            MintLogic.evaluate(_inputs(wbtcMilliBtc, wbtcPriceKUsd2, iusdBps, currentSupplyTokens, feeBP));
+
+        assert(result1.btdGross <= result2.btdGross);
+    }
+
+    /// @notice Verify fee is monotonic in feeBP.
+    function check_z_fee_monotonic_feeBP(
+        uint32 wbtcMilliBtc,
+        uint8 wbtcPriceKUsd,
+        uint16 iusdBps,
+        uint32 currentSupplyTokens,
         uint16 feeBP1,
         uint16 feeBP2
     ) public pure {
-        vm.assume(wbtcAmount >= 1e5 && wbtcAmount <= 100e8);
-        vm.assume(wbtcPrice >= 10000e18 && wbtcPrice <= 200000e18);
-        vm.assume(iusdPrice >= 0.9e18 && iusdPrice <= 1.1e18);
         vm.assume(feeBP1 <= feeBP2);
-        vm.assume(feeBP2 <= 1000);
+        vm.assume(feeBP2 <= 1_000);
 
-        MintLogic.MintInputs memory inputs1 = MintLogic.MintInputs({
-            wbtcAmount: wbtcAmount,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            currentBTDSupply: currentSupply,
-            feeBP: feeBP1
-        });
-
-        MintLogic.MintInputs memory inputs2 = MintLogic.MintInputs({
-            wbtcAmount: wbtcAmount,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            currentBTDSupply: currentSupply,
-            feeBP: feeBP2
-        });
-
-        MintLogic.MintOutputs memory result1 = MintLogic.evaluate(inputs1);
-        MintLogic.MintOutputs memory result2 = MintLogic.evaluate(inputs2);
+        MintLogic.MintOutputs memory result1 =
+            MintLogic.evaluate(_inputs(wbtcMilliBtc, wbtcPriceKUsd, iusdBps, currentSupplyTokens, feeBP1));
+        MintLogic.MintOutputs memory result2 =
+            MintLogic.evaluate(_inputs(wbtcMilliBtc, wbtcPriceKUsd, iusdBps, currentSupplyTokens, feeBP2));
 
         assert(result1.fee <= result2.fee);
-    }
-
-    /// @notice Verify newLiabilityValue is always >= usdValue
-    function check_newLiabilityValue_ge_usdValue(
-        uint64 wbtcAmount,
-        uint64 wbtcPrice,
-        uint64 iusdPrice,
-        uint64 currentSupply,
-        uint16 feeBP
-    ) public pure {
-        vm.assume(wbtcAmount >= 1e5 && wbtcAmount <= 100e8);
-        vm.assume(wbtcPrice >= 10000e18 && wbtcPrice <= 200000e18);
-        vm.assume(iusdPrice >= 0.9e18 && iusdPrice <= 1.1e18);
-        vm.assume(feeBP <= 1000);
-
-        MintLogic.MintInputs memory inputs = MintLogic.MintInputs({
-            wbtcAmount: wbtcAmount,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            currentBTDSupply: currentSupply,
-            feeBP: feeBP
-        });
-
-        MintLogic.MintOutputs memory result = MintLogic.evaluate(inputs);
-
-        // New liability should account for new minted BTD
-        // Since IUSD price ~= 1 USD, newLiabilityValue ~= currentSupply + btdGross
-        assert(result.newLiabilityValue >= result.usdValue);
     }
 }

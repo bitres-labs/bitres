@@ -3,380 +3,235 @@ pragma solidity ^0.8.30;
 
 import "forge-std/Test.sol";
 import "../../contracts/libraries/RedeemLogic.sol";
-import "../../contracts/libraries/Constants.sol";
 
 /**
  * @title RedeemLogic Formal Verification Tests
- * @notice Formal verification tests using Halmos symbolic execution
- * @dev Tests prefixed with "check_" are symbolic tests for Halmos
+ * @notice Symbolic properties for the BTD redemption calculation library.
+ * @dev Symbolic inputs use compact business units, then scale to protocol decimals.
  */
 contract RedeemLogicFormalTest is Test {
+    function _btd(uint32 wholeTokens) private pure returns (uint256) {
+        return uint256(wholeTokens) * 1e18;
+    }
 
-    // ============ Over-collateralized (CR >= 100%) Properties ============
+    function _price(uint8 thousandUsd) private pure returns (uint256) {
+        return uint256(thousandUsd) * 1_000e18;
+    }
 
-    /// @notice Verify only WBTC is returned when CR >= 100%
-    function check_overcollateralized_only_wbtc(
-        uint64 btdAmount,
-        uint64 wbtcPrice,
-        uint64 iusdPrice,
-        uint16 redeemFeeBP
-    ) public pure {
-        vm.assume(btdAmount >= 100e18 && btdAmount <= 1000000e18);
-        vm.assume(wbtcPrice >= 10000e18 && wbtcPrice <= 200000e18);
-        vm.assume(iusdPrice >= 0.9e18 && iusdPrice <= 1.1e18);
+    function _iusd(uint16 bps) private pure returns (uint256) {
+        return uint256(bps) * 1e14;
+    }
+
+    function _cr(uint16 bps) private pure returns (uint256) {
+        return uint256(bps) * 1e14;
+    }
+
+    function _assumeRedeemDomain(uint32 btdTokens, uint8 wbtcPriceKUsd, uint16 iusdBps, uint16 redeemFeeBP)
+        private
+        pure
+    {
+        vm.assume(btdTokens >= 100 && btdTokens <= 1_000_000);
+        vm.assume(wbtcPriceKUsd >= 10 && wbtcPriceKUsd <= 200);
+        vm.assume(iusdBps >= 9_000 && iusdBps <= 11_000);
         vm.assume(redeemFeeBP <= 500);
+    }
 
-        RedeemLogic.RedeemInputs memory inputs = RedeemLogic.RedeemInputs({
-            btdAmount: btdAmount,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            cr: 1.5e18, // 150% CR - over-collateralized
+    function _overInputs(uint32 btdTokens, uint8 wbtcPriceKUsd, uint16 iusdBps, uint16 redeemFeeBP)
+        private
+        pure
+        returns (RedeemLogic.RedeemInputs memory)
+    {
+        _assumeRedeemDomain(btdTokens, wbtcPriceKUsd, iusdBps, redeemFeeBP);
+        return RedeemLogic.RedeemInputs({
+            btdAmount: _btd(btdTokens),
+            wbtcPrice: _price(wbtcPriceKUsd),
+            iusdPrice: _iusd(iusdBps),
+            cr: 1.5e18,
             btdPrice: 1e18,
             btbPrice: 0.5e18,
             brsPrice: 0.1e18,
             minBTBPriceInBTD: 0.3e18,
             redeemFeeBP: redeemFeeBP
         });
+    }
 
+    function _underInputs(
+        uint32 btdTokens,
+        uint8 wbtcPriceKUsd,
+        uint16 iusdBps,
+        uint16 crBps,
+        uint256 btbPrice,
+        uint256 minBTBPriceInBTD
+    ) private pure returns (RedeemLogic.RedeemInputs memory) {
+        vm.assume(btdTokens >= 1_000 && btdTokens <= 100_000);
+        vm.assume(wbtcPriceKUsd >= 20 && wbtcPriceKUsd <= 100);
+        vm.assume(iusdBps >= 9_500 && iusdBps <= 10_500);
+        vm.assume(crBps >= 5_000 && crBps < 10_000);
+
+        return RedeemLogic.RedeemInputs({
+            btdAmount: _btd(btdTokens),
+            wbtcPrice: _price(wbtcPriceKUsd),
+            iusdPrice: _iusd(iusdBps),
+            cr: _cr(crBps),
+            btdPrice: 1e18,
+            btbPrice: btbPrice,
+            brsPrice: 0.1e18,
+            minBTBPriceInBTD: minBTBPriceInBTD,
+            redeemFeeBP: 50
+        });
+    }
+
+    /// @notice Verify fee is calculated correctly.
+    function check_fee_calculation(uint32 btdTokens, uint8 wbtcPriceKUsd, uint16 iusdBps, uint16 redeemFeeBP)
+        public
+        pure
+    {
+        RedeemLogic.RedeemOutputs memory result =
+            RedeemLogic.evaluate(_overInputs(btdTokens, wbtcPriceKUsd, iusdBps, redeemFeeBP));
+
+        uint256 expectedFee = (_btd(btdTokens) * uint256(redeemFeeBP)) / 10_000;
+        assert(result.fee == expectedFee);
+    }
+
+    /// @notice Verify fee is zero when feeBP is zero.
+    function check_fee_zero_when_feeBP_zero(uint32 btdTokens, uint8 wbtcPriceKUsd, uint16 iusdBps) public pure {
+        RedeemLogic.RedeemOutputs memory result =
+            RedeemLogic.evaluate(_overInputs(btdTokens, wbtcPriceKUsd, iusdBps, 0));
+
+        assert(result.fee == 0);
+    }
+
+    /// @notice Verify no compensation is returned when CR >= 100%.
+    function check_no_compensation_overcollateralized(
+        uint32 btdTokens,
+        uint8 wbtcPriceKUsd,
+        uint16 iusdBps,
+        uint16 crBps
+    ) public pure {
+        vm.assume(crBps >= 10_000 && crBps <= 30_000);
+
+        RedeemLogic.RedeemInputs memory inputs = _overInputs(btdTokens, wbtcPriceKUsd, iusdBps, 50);
+        inputs.cr = _cr(crBps);
         RedeemLogic.RedeemOutputs memory result = RedeemLogic.evaluate(inputs);
 
-        // Should only get WBTC, no BTB or BRS
+        assert(result.btbOut == 0);
+        assert(result.brsOut == 0);
+    }
+
+    /// @notice Verify only WBTC is returned when CR >= 100%.
+    function check_overcollateralized_only_wbtc(
+        uint32 btdTokens,
+        uint8 wbtcPriceKUsd,
+        uint16 iusdBps,
+        uint16 redeemFeeBP
+    ) public pure {
+        RedeemLogic.RedeemOutputs memory result =
+            RedeemLogic.evaluate(_overInputs(btdTokens, wbtcPriceKUsd, iusdBps, redeemFeeBP));
+
         assert(result.wbtcOutNormalized > 0);
         assert(result.btbOut == 0);
         assert(result.brsOut == 0);
     }
 
-    /// @notice Verify fee is calculated correctly
-    function check_fee_calculation(
-        uint64 btdAmount,
-        uint64 wbtcPrice,
-        uint64 iusdPrice,
-        uint16 redeemFeeBP
-    ) public pure {
-        vm.assume(btdAmount >= 100e18 && btdAmount <= 1000000e18);
-        vm.assume(wbtcPrice >= 10000e18 && wbtcPrice <= 200000e18);
-        vm.assume(iusdPrice >= 0.9e18 && iusdPrice <= 1.1e18);
-        vm.assume(redeemFeeBP <= 500);
-
-        RedeemLogic.RedeemInputs memory inputs = RedeemLogic.RedeemInputs({
-            btdAmount: btdAmount,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            cr: 1.5e18,
-            btdPrice: 1e18,
-            btbPrice: 0.5e18,
-            brsPrice: 0.1e18,
-            minBTBPriceInBTD: 0.3e18,
-            redeemFeeBP: redeemFeeBP
-        });
-
-        RedeemLogic.RedeemOutputs memory result = RedeemLogic.evaluate(inputs);
-
-        // Fee should be btdAmount * feeBP / 10000
-        uint256 expectedFee = (uint256(btdAmount) * uint256(redeemFeeBP)) / 10000;
-        assert(result.fee == expectedFee);
-    }
-
-    /// @notice Verify fee is zero when feeBP is zero
-    function check_fee_zero_when_feeBP_zero(
-        uint64 btdAmount,
-        uint64 wbtcPrice,
-        uint64 iusdPrice
-    ) public pure {
-        vm.assume(btdAmount >= 100e18 && btdAmount <= 1000000e18);
-        vm.assume(wbtcPrice >= 10000e18 && wbtcPrice <= 200000e18);
-        vm.assume(iusdPrice >= 0.9e18 && iusdPrice <= 1.1e18);
-
-        RedeemLogic.RedeemInputs memory inputs = RedeemLogic.RedeemInputs({
-            btdAmount: btdAmount,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            cr: 1.5e18,
-            btdPrice: 1e18,
-            btbPrice: 0.5e18,
-            brsPrice: 0.1e18,
-            minBTBPriceInBTD: 0.3e18,
-            redeemFeeBP: 0
-        });
-
-        RedeemLogic.RedeemOutputs memory result = RedeemLogic.evaluate(inputs);
-
-        assert(result.fee == 0);
-    }
-
-    /// @notice Verify fee is monotonic in feeBP
-    function check_fee_monotonic_feeBP(
-        uint64 btdAmount,
-        uint64 wbtcPrice,
-        uint64 iusdPrice,
-        uint16 feeBP1,
-        uint16 feeBP2
-    ) public pure {
-        vm.assume(btdAmount >= 100e18 && btdAmount <= 1000000e18);
-        vm.assume(wbtcPrice >= 10000e18 && wbtcPrice <= 200000e18);
-        vm.assume(iusdPrice >= 0.9e18 && iusdPrice <= 1.1e18);
-        vm.assume(feeBP1 <= feeBP2);
-        vm.assume(feeBP2 <= 500);
-
-        RedeemLogic.RedeemInputs memory inputs1 = RedeemLogic.RedeemInputs({
-            btdAmount: btdAmount,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            cr: 1.5e18,
-            btdPrice: 1e18,
-            btbPrice: 0.5e18,
-            brsPrice: 0.1e18,
-            minBTBPriceInBTD: 0.3e18,
-            redeemFeeBP: feeBP1
-        });
-
-        RedeemLogic.RedeemInputs memory inputs2 = RedeemLogic.RedeemInputs({
-            btdAmount: btdAmount,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            cr: 1.5e18,
-            btdPrice: 1e18,
-            btbPrice: 0.5e18,
-            brsPrice: 0.1e18,
-            minBTBPriceInBTD: 0.3e18,
-            redeemFeeBP: feeBP2
-        });
-
-        RedeemLogic.RedeemOutputs memory result1 = RedeemLogic.evaluate(inputs1);
-        RedeemLogic.RedeemOutputs memory result2 = RedeemLogic.evaluate(inputs2);
-
-        assert(result1.fee <= result2.fee);
-    }
-
-    // ============ Under-collateralized (CR < 100%) Properties ============
-
-    /// @notice Verify BTB is returned when CR < 100% and BTB price >= min price
+    /// @notice Verify BTB is returned when CR < 100% and BTB price >= min price.
     function check_undercollateralized_btb_compensation(
-        uint64 btdAmount,
-        uint64 wbtcPrice,
-        uint64 iusdPrice,
-        uint64 cr
+        uint32 btdTokens,
+        uint8 wbtcPriceKUsd,
+        uint16 iusdBps,
+        uint16 crBps
     ) public pure {
-        vm.assume(btdAmount >= 1000e18 && btdAmount <= 100000e18);
-        vm.assume(wbtcPrice >= 20000e18 && wbtcPrice <= 100000e18);
-        vm.assume(iusdPrice >= 0.95e18 && iusdPrice <= 1.05e18);
-        vm.assume(cr >= 0.5e18 && cr < 1e18); // 50% to 99%
+        RedeemLogic.RedeemOutputs memory result =
+            RedeemLogic.evaluate(_underInputs(btdTokens, wbtcPriceKUsd, iusdBps, crBps, 0.5e18, 0.3e18));
 
-        RedeemLogic.RedeemInputs memory inputs = RedeemLogic.RedeemInputs({
-            btdAmount: btdAmount,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            cr: cr,
-            btdPrice: 1e18,
-            btbPrice: 0.5e18, // BTB at 50%
-            brsPrice: 0.1e18,
-            minBTBPriceInBTD: 0.3e18, // Min price 30%, BTB >= min so no BRS
-            redeemFeeBP: 50
-        });
-
-        RedeemLogic.RedeemOutputs memory result = RedeemLogic.evaluate(inputs);
-
-        // Should get WBTC + BTB, no BRS
         assert(result.wbtcOutNormalized > 0);
         assert(result.btbOut > 0);
         assert(result.brsOut == 0);
     }
 
-    /// @notice Verify BRS is returned when BTB price < min price
+    /// @notice Verify BRS is returned when BTB price is below the configured minimum.
     function check_undercollateralized_brs_compensation(
-        uint64 btdAmount,
-        uint64 wbtcPrice,
-        uint64 iusdPrice,
-        uint64 cr
+        uint32 btdTokens,
+        uint8 wbtcPriceKUsd,
+        uint16 iusdBps,
+        uint16 crBps
     ) public pure {
-        vm.assume(btdAmount >= 1000e18 && btdAmount <= 100000e18);
-        vm.assume(wbtcPrice >= 20000e18 && wbtcPrice <= 100000e18);
-        vm.assume(iusdPrice >= 0.95e18 && iusdPrice <= 1.05e18);
-        vm.assume(cr >= 0.5e18 && cr < 1e18);
+        RedeemLogic.RedeemOutputs memory result =
+            RedeemLogic.evaluate(_underInputs(btdTokens, wbtcPriceKUsd, iusdBps, crBps, 0.2e18, 0.5e18));
 
-        RedeemLogic.RedeemInputs memory inputs = RedeemLogic.RedeemInputs({
-            btdAmount: btdAmount,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            cr: cr,
-            btdPrice: 1e18,
-            btbPrice: 0.2e18, // BTB at 20%
-            brsPrice: 0.1e18,
-            minBTBPriceInBTD: 0.5e18, // Min price 50%, BTB < min so BRS needed
-            redeemFeeBP: 50
-        });
-
-        RedeemLogic.RedeemOutputs memory result = RedeemLogic.evaluate(inputs);
-
-        // Should get WBTC + BTB + BRS
         assert(result.wbtcOutNormalized > 0);
         assert(result.btbOut > 0);
         assert(result.brsOut > 0);
     }
 
-    /// @notice Verify WBTC output is proportional to CR when under-collateralized
-    function check_wbtc_proportional_to_cr(
-        uint64 btdAmount,
-        uint64 wbtcPrice,
-        uint64 iusdPrice,
-        uint64 cr1,
-        uint64 cr2
+    /// @notice Verify BTB output decreases as CR increases.
+    function check_z_btb_inverse_to_cr(
+        uint32 btdTokens,
+        uint8 wbtcPriceKUsd,
+        uint16 iusdBps,
+        uint16 crBps1,
+        uint16 crBps2
     ) public pure {
-        vm.assume(btdAmount >= 1000e18 && btdAmount <= 100000e18);
-        vm.assume(wbtcPrice >= 20000e18 && wbtcPrice <= 100000e18);
-        vm.assume(iusdPrice >= 0.95e18 && iusdPrice <= 1.05e18);
-        vm.assume(cr1 >= 0.5e18 && cr1 < 1e18);
-        vm.assume(cr2 >= 0.5e18 && cr2 < 1e18);
-        vm.assume(cr1 <= cr2);
+        vm.assume(crBps1 <= crBps2);
 
-        RedeemLogic.RedeemInputs memory inputs1 = RedeemLogic.RedeemInputs({
-            btdAmount: btdAmount,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            cr: cr1,
-            btdPrice: 1e18,
-            btbPrice: 0.5e18,
-            brsPrice: 0.1e18,
-            minBTBPriceInBTD: 0.3e18,
-            redeemFeeBP: 50
-        });
+        RedeemLogic.RedeemOutputs memory result1 =
+            RedeemLogic.evaluate(_underInputs(btdTokens, wbtcPriceKUsd, iusdBps, crBps1, 0.5e18, 0.3e18));
+        RedeemLogic.RedeemOutputs memory result2 =
+            RedeemLogic.evaluate(_underInputs(btdTokens, wbtcPriceKUsd, iusdBps, crBps2, 0.5e18, 0.3e18));
 
-        RedeemLogic.RedeemInputs memory inputs2 = RedeemLogic.RedeemInputs({
-            btdAmount: btdAmount,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            cr: cr2,
-            btdPrice: 1e18,
-            btbPrice: 0.5e18,
-            brsPrice: 0.1e18,
-            minBTBPriceInBTD: 0.3e18,
-            redeemFeeBP: 50
-        });
-
-        RedeemLogic.RedeemOutputs memory result1 = RedeemLogic.evaluate(inputs1);
-        RedeemLogic.RedeemOutputs memory result2 = RedeemLogic.evaluate(inputs2);
-
-        // Higher CR means more WBTC
-        assert(result1.wbtcOutNormalized <= result2.wbtcOutNormalized);
-    }
-
-    /// @notice Verify BTB output decreases as CR increases
-    function check_btb_inverse_to_cr(
-        uint64 btdAmount,
-        uint64 wbtcPrice,
-        uint64 iusdPrice,
-        uint64 cr1,
-        uint64 cr2
-    ) public pure {
-        vm.assume(btdAmount >= 1000e18 && btdAmount <= 100000e18);
-        vm.assume(wbtcPrice >= 20000e18 && wbtcPrice <= 100000e18);
-        vm.assume(iusdPrice >= 0.95e18 && iusdPrice <= 1.05e18);
-        vm.assume(cr1 >= 0.5e18 && cr1 < 1e18);
-        vm.assume(cr2 >= 0.5e18 && cr2 < 1e18);
-        vm.assume(cr1 <= cr2);
-
-        RedeemLogic.RedeemInputs memory inputs1 = RedeemLogic.RedeemInputs({
-            btdAmount: btdAmount,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            cr: cr1,
-            btdPrice: 1e18,
-            btbPrice: 0.5e18,
-            brsPrice: 0.1e18,
-            minBTBPriceInBTD: 0.3e18,
-            redeemFeeBP: 50
-        });
-
-        RedeemLogic.RedeemInputs memory inputs2 = RedeemLogic.RedeemInputs({
-            btdAmount: btdAmount,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            cr: cr2,
-            btdPrice: 1e18,
-            btbPrice: 0.5e18,
-            brsPrice: 0.1e18,
-            minBTBPriceInBTD: 0.3e18,
-            redeemFeeBP: 50
-        });
-
-        RedeemLogic.RedeemOutputs memory result1 = RedeemLogic.evaluate(inputs1);
-        RedeemLogic.RedeemOutputs memory result2 = RedeemLogic.evaluate(inputs2);
-
-        // Lower CR means more BTB compensation
         assert(result1.btbOut >= result2.btbOut);
     }
 
-    /// @notice Verify no compensation when CR >= 100%
-    function check_no_compensation_overcollateralized(
-        uint64 btdAmount,
-        uint64 wbtcPrice,
-        uint64 iusdPrice,
-        uint64 cr
+    /// @notice Verify fee is monotonic in feeBP.
+    function check_z_fee_monotonic_feeBP(
+        uint32 btdTokens,
+        uint8 wbtcPriceKUsd,
+        uint16 iusdBps,
+        uint16 feeBP1,
+        uint16 feeBP2
     ) public pure {
-        vm.assume(btdAmount >= 100e18 && btdAmount <= 1000000e18);
-        vm.assume(wbtcPrice >= 10000e18 && wbtcPrice <= 200000e18);
-        vm.assume(iusdPrice >= 0.9e18 && iusdPrice <= 1.1e18);
-        vm.assume(cr >= 1e18 && cr <= 3e18); // 100% to 300%
+        vm.assume(feeBP1 <= feeBP2);
+        vm.assume(feeBP2 <= 500);
 
-        RedeemLogic.RedeemInputs memory inputs = RedeemLogic.RedeemInputs({
-            btdAmount: btdAmount,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            cr: cr,
-            btdPrice: 1e18,
-            btbPrice: 0.5e18,
-            brsPrice: 0.1e18,
-            minBTBPriceInBTD: 0.3e18,
-            redeemFeeBP: 50
-        });
+        RedeemLogic.RedeemOutputs memory result1 =
+            RedeemLogic.evaluate(_overInputs(btdTokens, wbtcPriceKUsd, iusdBps, feeBP1));
+        RedeemLogic.RedeemOutputs memory result2 =
+            RedeemLogic.evaluate(_overInputs(btdTokens, wbtcPriceKUsd, iusdBps, feeBP2));
 
-        RedeemLogic.RedeemOutputs memory result = RedeemLogic.evaluate(inputs);
-
-        assert(result.btbOut == 0);
-        assert(result.brsOut == 0);
+        assert(result1.fee <= result2.fee);
     }
 
-    /// @notice Verify WBTC output is monotonic in btdAmount
-    function check_wbtc_monotonic_btdAmount(
-        uint64 btdAmount1,
-        uint64 btdAmount2,
-        uint64 wbtcPrice,
-        uint64 iusdPrice
+    /// @notice Verify WBTC output is monotonic in btdAmount.
+    function check_z_wbtc_monotonic_btdAmount(uint32 btdTokens1, uint32 btdTokens2, uint8 wbtcPriceKUsd, uint16 iusdBps)
+        public
+        pure
+    {
+        vm.assume(btdTokens1 >= 100 && btdTokens1 <= 500_000);
+        vm.assume(btdTokens2 >= 100 && btdTokens2 <= 1_000_000);
+        vm.assume(btdTokens1 <= btdTokens2);
+
+        RedeemLogic.RedeemOutputs memory result1 =
+            RedeemLogic.evaluate(_overInputs(btdTokens1, wbtcPriceKUsd, iusdBps, 50));
+        RedeemLogic.RedeemOutputs memory result2 =
+            RedeemLogic.evaluate(_overInputs(btdTokens2, wbtcPriceKUsd, iusdBps, 50));
+
+        assert(result1.wbtcOutNormalized <= result2.wbtcOutNormalized);
+    }
+
+    /// @notice Verify WBTC output is proportional to CR when under-collateralized.
+    function check_z_wbtc_proportional_to_cr(
+        uint32 btdTokens,
+        uint8 wbtcPriceKUsd,
+        uint16 iusdBps,
+        uint16 crBps1,
+        uint16 crBps2
     ) public pure {
-        vm.assume(btdAmount1 >= 100e18 && btdAmount1 <= 500000e18);
-        vm.assume(btdAmount2 >= 100e18 && btdAmount2 <= 1000000e18);
-        vm.assume(btdAmount1 <= btdAmount2);
-        vm.assume(wbtcPrice >= 10000e18 && wbtcPrice <= 200000e18);
-        vm.assume(iusdPrice >= 0.9e18 && iusdPrice <= 1.1e18);
+        vm.assume(crBps1 <= crBps2);
 
-        RedeemLogic.RedeemInputs memory inputs1 = RedeemLogic.RedeemInputs({
-            btdAmount: btdAmount1,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            cr: 1.5e18,
-            btdPrice: 1e18,
-            btbPrice: 0.5e18,
-            brsPrice: 0.1e18,
-            minBTBPriceInBTD: 0.3e18,
-            redeemFeeBP: 50
-        });
+        RedeemLogic.RedeemOutputs memory result1 =
+            RedeemLogic.evaluate(_underInputs(btdTokens, wbtcPriceKUsd, iusdBps, crBps1, 0.5e18, 0.3e18));
+        RedeemLogic.RedeemOutputs memory result2 =
+            RedeemLogic.evaluate(_underInputs(btdTokens, wbtcPriceKUsd, iusdBps, crBps2, 0.5e18, 0.3e18));
 
-        RedeemLogic.RedeemInputs memory inputs2 = RedeemLogic.RedeemInputs({
-            btdAmount: btdAmount2,
-            wbtcPrice: wbtcPrice,
-            iusdPrice: iusdPrice,
-            cr: 1.5e18,
-            btdPrice: 1e18,
-            btbPrice: 0.5e18,
-            brsPrice: 0.1e18,
-            minBTBPriceInBTD: 0.3e18,
-            redeemFeeBP: 50
-        });
-
-        RedeemLogic.RedeemOutputs memory result1 = RedeemLogic.evaluate(inputs1);
-        RedeemLogic.RedeemOutputs memory result2 = RedeemLogic.evaluate(inputs2);
-
-        // More BTD redeemed means more WBTC out
         assert(result1.wbtcOutNormalized <= result2.wbtcOutNormalized);
     }
 }

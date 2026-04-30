@@ -18,6 +18,7 @@ ignition/deployments/chain-31337
 
 # Foundry files
 /out
+/out-formal
 /cache_forge
 /lib
 
