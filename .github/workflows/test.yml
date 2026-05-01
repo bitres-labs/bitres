@@ -249,5 +249,5 @@ jobs:
           version: stable
 
       - name: Run Forge coverage
-        run: forge coverage --report summary --no-match-test "testPCEDeviationLimit"
+        run: npm run test:coverage
         continue-on-error: true
