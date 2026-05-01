@@ -4,18 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       network:
-        description: 'Target network'
+        description: "Target network"
         required: true
         type: choice
         options:
+          - base-sepolia
           - sepolia
-          - mainnet
       confirm:
         description: 'Type "deploy" to confirm'
         required: true
 
 env:
-  NODE_VERSION: '22.x'
+  NODE_VERSION: "22.x"
 
 jobs:
   validate:
@@ -26,30 +26,40 @@ jobs:
       - name: Validate confirmation
         if: github.event.inputs.confirm != 'deploy'
         run: |
-          echo "❌ Deployment not confirmed"
+          echo "Deployment not confirmed"
           exit 1
 
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          cache: npm
 
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
       - name: Compile contracts
         run: npx hardhat compile
 
-      - name: Run all tests
-        run: npx hardhat test
+      - name: Run quick test suite
+        run: npm run test:quick
 
-      - name: Run security checks
-        run: npx slither contracts/ --exclude-dependencies
+      - name: Run Slither
+        uses: crytic/slither-action@v0.3.0
         continue-on-error: true
+        with:
+          target: contracts/
+          slither-args: --exclude-dependencies
 
   deploy:
     name: Deploy to ${{ github.event.inputs.network }}
@@ -61,36 +71,81 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          cache: npm
 
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
-      - name: Deploy contracts
-        run: npx hardhat run scripts/deploy.js --network ${{ github.event.inputs.network }}
+      - name: Write deployment environment
         env:
-          PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          BASE_SEPOLIA_PRIVATE_KEY: ${{ secrets.BASE_SEPOLIA_PRIVATE_KEY }}
+          SEPOLIA_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
+          SEPOLIA_PRIVATE_KEY: ${{ secrets.SEPOLIA_PRIVATE_KEY }}
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
-          INFURA_API_KEY: ${{ secrets.INFURA_API_KEY }}
+          BASESCAN_API_KEY: ${{ secrets.BASESCAN_API_KEY }}
+        run: |
+          set -euo pipefail
 
-      - name: Verify contracts
-        run: npx hardhat run scripts/verify.js --network ${{ github.event.inputs.network }}
-        env:
-          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
-        continue-on-error: true
+          case "${{ github.event.inputs.network }}" in
+            base-sepolia)
+              test -n "$BASE_SEPOLIA_RPC_URL"
+              test -n "$BASE_SEPOLIA_PRIVATE_KEY"
+              ;;
+            sepolia)
+              test -n "$SEPOLIA_RPC_URL"
+              test -n "$SEPOLIA_PRIVATE_KEY"
+              ;;
+            *)
+              echo "Unsupported network: ${{ github.event.inputs.network }}"
+              exit 1
+              ;;
+          esac
+
+          umask 077
+          {
+            printf 'BASE_SEPOLIA_RPC_URL=%s\n' "$BASE_SEPOLIA_RPC_URL"
+            printf 'BASE_SEPOLIA_PRIVATE_KEY=%s\n' "$BASE_SEPOLIA_PRIVATE_KEY"
+            printf 'SEPOLIA_RPC_URL=%s\n' "$SEPOLIA_RPC_URL"
+            printf 'SEPOLIA_PRIVATE_KEY=%s\n' "$SEPOLIA_PRIVATE_KEY"
+            printf 'ETHERSCAN_API_KEY=%s\n' "$ETHERSCAN_API_KEY"
+            printf 'BASESCAN_API_KEY=%s\n' "$BASESCAN_API_KEY"
+          } > .env
+
+      - name: Deploy and initialize system
+        run: |
+          set -euo pipefail
+
+          case "${{ github.event.inputs.network }}" in
+            base-sepolia)
+              npm run base-sepolia:deploy
+              npm run base-sepolia:init
+              npm run base-sepolia:faucet
+              npm run base-sepolia:health-check
+              ;;
+            sepolia)
+              npm run sepolia:deploy
+              npm run sepolia:init
+              npm run sepolia:faucet
+              npm run sepolia:health-check
+              ;;
+          esac
 
       - name: Upload deployment artifacts
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: deployment-${{ github.event.inputs.network }}-${{ github.sha }}
           path: |
+            ignition/deployments/
             deployments/
-            .openzeppelin/
           retention-days: 90
 
   notify:
@@ -101,20 +156,26 @@ jobs:
 
     steps:
       - name: Send Discord notification
-        if: env.DISCORD_WEBHOOK_URL != ''
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
         run: |
+          set -euo pipefail
+
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "No Discord webhook configured"
+            exit 0
+          fi
+
           curl -X POST "$DISCORD_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
             -d "{
-              \"content\": \"🚀 Deployment to **${{ github.event.inputs.network }}** completed\",
+              \"content\": \"Bitres deployment to ${{ github.event.inputs.network }} finished with status: ${DEPLOY_RESULT}\",
               \"embeds\": [{
-                \"title\": \"BRS Contract Deployment\",
-                \"color\": ${{ needs.deploy.result == 'success' && '3066993' || '15158332' }},
+                \"title\": \"Bitres Contract Deployment\",
                 \"fields\": [
                   {\"name\": \"Network\", \"value\": \"${{ github.event.inputs.network }}\", \"inline\": true},
-                  {\"name\": \"Status\", \"value\": \"${{ needs.deploy.result }}\", \"inline\": true},
+                  {\"name\": \"Status\", \"value\": \"${DEPLOY_RESULT}\", \"inline\": true},
                   {\"name\": \"Commit\", \"value\": \"${{ github.sha }}\", \"inline\": true}
                 ]
               }]
