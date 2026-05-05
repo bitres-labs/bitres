@@ -1,0 +1,30 @@
+{
+  "allowed_prefixes": [
+    "npm ",
+    "npx ",
+    "forge ",
+    "cast call ",
+    "cd contracts && npm ",
+    "cd contracts && forge ",
+    "python3 ",
+    "bash "
+  ],
+  "blocked_patterns": [
+    "rm -rf /",
+    "git reset --hard",
+    "git checkout --",
+    "git clean -fd",
+    "PRIVATE_KEY=",
+    "MNEMONIC=",
+    "OPENAI_API_KEY=",
+    "ANTHROPIC_API_KEY="
+  ],
+  "profile": "evm-protocol",
+  "requires_live_flag_patterns": [
+    "--broadcast",
+    "cast send",
+    "deploy:mainnet",
+    "verify:mainnet"
+  ],
+  "version": 1
+}

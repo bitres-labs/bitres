@@ -1,0 +1,53 @@
+{
+  "decision_log_path": ".engineering/state/decision-log.jsonl",
+  "default_timeout_seconds": 300,
+  "milestones": [
+    {
+      "id": "baseline",
+      "objective": "Verify the project can run its baseline checks under the shared engineering harness.",
+      "status": "active",
+      "tasks": [
+        {
+          "acceptance": [
+            {
+              "command": "npm run compile",
+              "name": "Compile contracts",
+              "required": true,
+              "timeout_seconds": 600
+            }
+          ],
+          "file_scope": [
+            "**"
+          ],
+          "id": "compile",
+          "max_attempts": 2,
+          "status": "pending",
+          "title": "Compile contracts"
+        },
+        {
+          "acceptance": [
+            {
+              "command": "npm run test",
+              "name": "Run protocol tests",
+              "required": true,
+              "timeout_seconds": 600
+            }
+          ],
+          "file_scope": [
+            "**"
+          ],
+          "id": "test",
+          "max_attempts": 2,
+          "status": "pending",
+          "title": "Run protocol tests"
+        }
+      ],
+      "title": "Project Baseline"
+    }
+  ],
+  "profile": "evm-protocol",
+  "project": "bitres",
+  "report_dir": ".engineering/reports/tasks",
+  "state_path": ".engineering/state/harness-state.json",
+  "version": 1
+}
