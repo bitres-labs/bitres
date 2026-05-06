@@ -11,10 +11,10 @@ import "../../contracts/libraries/Constants.sol";
  * @dev Symbolic inputs use compact business units, then scale to protocol decimals.
  */
 contract MintLogicFormalTest is Test {
-    uint32 private constant MAX_WBTC_MILLI_BTC = 100_000; // 100 BTC
-    uint32 private constant MAX_SUPPLY_TOKENS = 1_000_000_000;
+    uint16 private constant MAX_WBTC_MILLI_BTC = 50_000; // 50 BTC
+    uint24 private constant MAX_SUPPLY_TOKENS = 10_000_000;
 
-    function _wbtcAmount(uint32 milliBtc) private pure returns (uint256) {
+    function _wbtcAmount(uint16 milliBtc) private pure returns (uint256) {
         return uint256(milliBtc) * 1e5; // 0.001 BTC = 100000 WBTC satoshis
     }
 
@@ -26,15 +26,15 @@ contract MintLogicFormalTest is Test {
         return uint256(bps) * 1e14;
     }
 
-    function _supply(uint32 wholeTokens) private pure returns (uint256) {
+    function _supply(uint24 wholeTokens) private pure returns (uint256) {
         return uint256(wholeTokens) * 1e18;
     }
 
     function _assumeMintDomain(
-        uint32 wbtcMilliBtc,
+        uint16 wbtcMilliBtc,
         uint8 wbtcPriceKUsd,
         uint16 iusdBps,
-        uint32 currentSupplyTokens,
+        uint24 currentSupplyTokens,
         uint16 feeBP
     ) private pure {
         vm.assume(wbtcMilliBtc > 0 && wbtcMilliBtc <= MAX_WBTC_MILLI_BTC);
@@ -44,7 +44,7 @@ contract MintLogicFormalTest is Test {
         vm.assume(feeBP <= 1_000);
     }
 
-    function _inputs(uint32 wbtcMilliBtc, uint8 wbtcPriceKUsd, uint16 iusdBps, uint32 currentSupplyTokens, uint16 feeBP)
+    function _inputs(uint16 wbtcMilliBtc, uint8 wbtcPriceKUsd, uint16 iusdBps, uint24 currentSupplyTokens, uint16 feeBP)
         private
         pure
         returns (MintLogic.MintInputs memory)
@@ -61,10 +61,10 @@ contract MintLogicFormalTest is Test {
 
     /// @notice Verify fee is zero when feeBP is zero.
     function check_fee_zero_when_feeBP_zero(
-        uint32 wbtcMilliBtc,
+        uint16 wbtcMilliBtc,
         uint8 wbtcPriceKUsd,
         uint16 iusdBps,
-        uint32 currentSupplyTokens
+        uint24 currentSupplyTokens
     ) public pure {
         MintLogic.MintOutputs memory result =
             MintLogic.evaluate(_inputs(wbtcMilliBtc, wbtcPriceKUsd, iusdBps, currentSupplyTokens, 0));
@@ -74,11 +74,10 @@ contract MintLogicFormalTest is Test {
     }
 
     /// @notice Verify exact mint accounting at the IUSD peg with zero fee.
-    function check_z_atPeg_zeroFee_exactAccounting(
-        uint32 wbtcMilliBtc,
-        uint8 wbtcPriceKUsd,
-        uint32 currentSupplyTokens
-    ) public pure {
+    function check_z_atPeg_zeroFee_exactAccounting(uint16 wbtcMilliBtc, uint8 wbtcPriceKUsd, uint24 currentSupplyTokens)
+        public
+        pure
+    {
         MintLogic.MintOutputs memory result =
             MintLogic.evaluate(_inputs(wbtcMilliBtc, wbtcPriceKUsd, 10_000, currentSupplyTokens, 0));
 
@@ -90,10 +89,10 @@ contract MintLogicFormalTest is Test {
 
     /// @notice Verify protocol fee cap leaves at least 90% of gross mint amount for the user.
     function check_z_fee_cap_keeps_user_mint_above_90_percent(
-        uint32 wbtcMilliBtc,
+        uint16 wbtcMilliBtc,
         uint8 wbtcPriceKUsd,
         uint16 iusdBps,
-        uint32 currentSupplyTokens,
+        uint24 currentSupplyTokens,
         uint16 feeBP
     ) public pure {
         MintLogic.MintOutputs memory result = MintLogic.evaluate(
@@ -106,10 +105,10 @@ contract MintLogicFormalTest is Test {
 
     /// @notice Verify normalizedWBTC equals wbtcAmount * SCALE_WBTC_TO_NORM.
     function check_normalizedWBTC_correct(
-        uint32 wbtcMilliBtc,
+        uint16 wbtcMilliBtc,
         uint8 wbtcPriceKUsd,
         uint16 iusdBps,
-        uint32 currentSupplyTokens,
+        uint24 currentSupplyTokens,
         uint16 feeBP
     ) public pure {
         MintLogic.MintOutputs memory result = MintLogic.evaluate(
@@ -121,10 +120,10 @@ contract MintLogicFormalTest is Test {
 
     /// @notice Verify usdValue is positive when WBTC amount and price are positive.
     function check_usdValue_positive(
-        uint32 wbtcMilliBtc,
+        uint16 wbtcMilliBtc,
         uint8 wbtcPriceKUsd,
         uint16 iusdBps,
-        uint32 currentSupplyTokens,
+        uint24 currentSupplyTokens,
         uint16 feeBP
     ) public pure {
         MintLogic.MintOutputs memory result = MintLogic.evaluate(
@@ -136,10 +135,10 @@ contract MintLogicFormalTest is Test {
 
     /// @notice Verify new liability value covers the minted collateral value up to one wei of rounding.
     function check_z_newLiabilityValue_ge_usdValue_minus_rounding(
-        uint32 wbtcMilliBtc,
+        uint16 wbtcMilliBtc,
         uint8 wbtcPriceKUsd,
         uint16 iusdBps,
-        uint32 currentSupplyTokens,
+        uint24 currentSupplyTokens,
         uint16 feeBP
     ) public pure {
         MintLogic.MintOutputs memory result = MintLogic.evaluate(
@@ -151,10 +150,10 @@ contract MintLogicFormalTest is Test {
 
     /// @notice Verify btdToMint is always less than or equal to btdGross.
     function check_z_btdToMint_le_btdGross(
-        uint32 wbtcMilliBtc,
+        uint16 wbtcMilliBtc,
         uint8 wbtcPriceKUsd,
         uint16 iusdBps,
-        uint32 currentSupplyTokens,
+        uint24 currentSupplyTokens,
         uint16 feeBP
     ) public pure {
         MintLogic.MintOutputs memory result = MintLogic.evaluate(
@@ -166,10 +165,10 @@ contract MintLogicFormalTest is Test {
 
     /// @notice Verify btdToMint + fee equals btdGross.
     function check_z_btdToMint_plus_fee_equals_gross(
-        uint32 wbtcMilliBtc,
+        uint16 wbtcMilliBtc,
         uint8 wbtcPriceKUsd,
         uint16 iusdBps,
-        uint32 currentSupplyTokens,
+        uint24 currentSupplyTokens,
         uint16 feeBP
     ) public pure {
         MintLogic.MintOutputs memory result = MintLogic.evaluate(
@@ -181,11 +180,11 @@ contract MintLogicFormalTest is Test {
 
     /// @notice Verify btdGross is monotonic in wbtcAmount.
     function check_z_btdGross_monotonic_wbtcAmount(
-        uint32 wbtcMilliBtc1,
-        uint32 wbtcMilliBtc2,
+        uint16 wbtcMilliBtc1,
+        uint16 wbtcMilliBtc2,
         uint8 wbtcPriceKUsd,
         uint16 iusdBps,
-        uint32 currentSupplyTokens,
+        uint24 currentSupplyTokens,
         uint16 feeBP
     ) public pure {
         vm.assume(wbtcMilliBtc1 > 0 && wbtcMilliBtc1 <= 50_000);
@@ -202,11 +201,11 @@ contract MintLogicFormalTest is Test {
 
     /// @notice Verify btdGross is monotonic in wbtcPrice.
     function check_z_btdGross_monotonic_wbtcPrice(
-        uint32 wbtcMilliBtc,
+        uint16 wbtcMilliBtc,
         uint8 wbtcPriceKUsd1,
         uint8 wbtcPriceKUsd2,
         uint16 iusdBps,
-        uint32 currentSupplyTokens,
+        uint24 currentSupplyTokens,
         uint16 feeBP
     ) public pure {
         vm.assume(wbtcPriceKUsd1 >= 10 && wbtcPriceKUsd1 <= 100);
@@ -223,10 +222,10 @@ contract MintLogicFormalTest is Test {
 
     /// @notice Verify fee is monotonic in feeBP.
     function check_z_fee_monotonic_feeBP(
-        uint32 wbtcMilliBtc,
+        uint16 wbtcMilliBtc,
         uint8 wbtcPriceKUsd,
         uint16 iusdBps,
-        uint32 currentSupplyTokens,
+        uint24 currentSupplyTokens,
         uint16 feeBP1,
         uint16 feeBP2
     ) public pure {

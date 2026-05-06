@@ -6,6 +6,9 @@ set -euo pipefail
 REPORT_DIR="${REPORT_DIR:-reports/coverage}"
 LCOV_FILE="${LCOV_FILE:-lcov.info}"
 RUN_COVERAGE="${RUN_COVERAGE:-true}"
+MIN_LINE_COVERAGE="${MIN_LINE_COVERAGE:-0}"
+MIN_FUNCTION_COVERAGE="${MIN_FUNCTION_COVERAGE:-0}"
+MIN_BRANCH_COVERAGE="${MIN_BRANCH_COVERAGE:-0}"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 REPORT_FILE="${REPORT_DIR}/branches-${TIMESTAMP}.txt"
 
@@ -111,3 +114,34 @@ fi
 
 echo ""
 echo "Saved branch report to ${REPORT_FILE}"
+
+awk -v min_line="${MIN_LINE_COVERAGE}" \
+    -v min_function="${MIN_FUNCTION_COVERAGE}" \
+    -v min_branch="${MIN_BRANCH_COVERAGE}" '
+    BEGIN { brf=0; brh=0; lf=0; lh=0; fnf=0; fnh=0 }
+    /^BRF:/ { v=$0; sub("BRF:", "", v); brf += v }
+    /^BRH:/ { v=$0; sub("BRH:", "", v); brh += v }
+    /^LF:/ { v=$0; sub("LF:", "", v); lf += v }
+    /^LH:/ { v=$0; sub("LH:", "", v); lh += v }
+    /^FNF:/ { v=$0; sub("FNF:", "", v); fnf += v }
+    /^FNH:/ { v=$0; sub("FNH:", "", v); fnh += v }
+    END {
+        line_pct = lf == 0 ? 100 : lh * 100 / lf
+        function_pct = fnf == 0 ? 100 : fnh * 100 / fnf
+        branch_pct = brf == 0 ? 100 : brh * 100 / brf
+        failed = 0
+        if (line_pct + 0.00001 < min_line) {
+            printf "Line coverage %.2f%% is below threshold %.2f%%\n", line_pct, min_line > "/dev/stderr"
+            failed = 1
+        }
+        if (function_pct + 0.00001 < min_function) {
+            printf "Function coverage %.2f%% is below threshold %.2f%%\n", function_pct, min_function > "/dev/stderr"
+            failed = 1
+        }
+        if (branch_pct + 0.00001 < min_branch) {
+            printf "Branch coverage %.2f%% is below threshold %.2f%%\n", branch_pct, min_branch > "/dev/stderr"
+            failed = 1
+        }
+        exit failed
+    }
+' "${LCOV_FILE}"

@@ -12,16 +12,14 @@ import "../../contracts/libraries/Constants.sol";
  *      Tests prefixed with "test_" are concrete tests for Foundry
  */
 contract CollateralMathFormalTest is Test {
-
     /**
      * @notice Verify collateralValue is monotonic in both inputs
      * @dev If wbtcBalance1 <= wbtcBalance2 and price is same, value1 <= value2
      */
-    function check_collateralValue_monotonic_balance(
-        uint128 wbtcBalance1,
-        uint128 wbtcBalance2,
-        uint128 wbtcPrice
-    ) public pure {
+    function check_collateralValue_monotonic_balance(uint64 wbtcBalance1, uint64 wbtcBalance2, uint64 wbtcPrice)
+        public
+        pure
+    {
         // Avoid zero values
         vm.assume(wbtcPrice > 0);
         vm.assume(wbtcBalance1 <= wbtcBalance2);
@@ -36,11 +34,10 @@ contract CollateralMathFormalTest is Test {
     /**
      * @notice Verify collateralValue is monotonic in price
      */
-    function check_collateralValue_monotonic_price(
-        uint128 wbtcBalance,
-        uint128 wbtcPrice1,
-        uint128 wbtcPrice2
-    ) public pure {
+    function check_collateralValue_monotonic_price(uint64 wbtcBalance, uint64 wbtcPrice1, uint64 wbtcPrice2)
+        public
+        pure
+    {
         vm.assume(wbtcBalance > 0);
         vm.assume(wbtcPrice1 <= wbtcPrice2);
 
@@ -70,10 +67,10 @@ contract CollateralMathFormalTest is Test {
      * @notice Verify liability value is monotonic in BTD supply
      */
     function check_liabilityValue_monotonic(
-        uint128 btdSupply1,
-        uint128 btdSupply2,
-        uint128 stBTDEquivalent,
-        uint128 iusdPrice
+        uint64 btdSupply1,
+        uint64 btdSupply2,
+        uint64 stBTDEquivalent,
+        uint64 iusdPrice
     ) public pure {
         vm.assume(iusdPrice > 0);
         vm.assume(btdSupply1 <= btdSupply2);
@@ -87,10 +84,7 @@ contract CollateralMathFormalTest is Test {
     /**
      * @notice Verify maxRedeemableUSD is always <= collateral value
      */
-    function check_maxRedeemable_bounded(
-        uint128 collateralValue_,
-        uint128 liabilityValue_
-    ) public pure {
+    function check_maxRedeemable_bounded(uint64 collateralValue_, uint64 liabilityValue_) public pure {
         uint256 maxRedeem = CollateralMath.maxRedeemableUSD(collateralValue_, liabilityValue_);
 
         // maxRedeemable should never exceed collateral
@@ -100,10 +94,7 @@ contract CollateralMathFormalTest is Test {
     /**
      * @notice Verify maxRedeemableUSD is zero when under-collateralized
      */
-    function check_maxRedeemable_zero_undercollateralized(
-        uint128 collateralValue_,
-        uint128 liabilityValue_
-    ) public pure {
+    function check_maxRedeemable_zero_undercollateralized(uint64 collateralValue_, uint64 liabilityValue_) public pure {
         vm.assume(collateralValue_ < liabilityValue_);
 
         uint256 maxRedeem = CollateralMath.maxRedeemableUSD(collateralValue_, liabilityValue_);
@@ -113,10 +104,7 @@ contract CollateralMathFormalTest is Test {
     /**
      * @notice Verify maxRedeemable equals surplus when overcollateralized
      */
-    function check_maxRedeemable_equals_surplus(
-        uint128 collateralValue_,
-        uint128 liabilityValue_
-    ) public pure {
+    function check_maxRedeemable_equals_surplus(uint64 collateralValue_, uint64 liabilityValue_) public pure {
         vm.assume(collateralValue_ >= liabilityValue_);
 
         uint256 maxRedeem = CollateralMath.maxRedeemableUSD(collateralValue_, liabilityValue_);

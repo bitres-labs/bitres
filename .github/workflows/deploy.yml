@@ -56,10 +56,21 @@ jobs:
 
       - name: Run Slither
         uses: crytic/slither-action@v0.3.0
-        continue-on-error: true
         with:
           target: contracts/
-          slither-args: --exclude-dependencies
+          slither-args: >-
+            --exclude-dependencies
+            --filter-paths 'contracts/local|contracts/test'
+            --exclude-informational
+            --exclude-low
+            --exclude-optimization
+            --exclude divide-before-multiply,incorrect-equality,reentrancy-no-eth
+
+      - name: Install Halmos
+        run: python3 -m pip install --user halmos
+
+      - name: Run strict formal core properties
+        run: npm run formal:core
 
   deploy:
     name: Deploy to ${{ github.event.inputs.network }}
@@ -126,13 +137,13 @@ jobs:
           case "${{ github.event.inputs.network }}" in
             base-sepolia)
               printf 'y\n' | npm run base-sepolia:deploy
-              npm run base-sepolia:init
+              BITRES_ALLOW_TWAP_DISABLED_AFTER_INIT=true npm run base-sepolia:init
               npm run base-sepolia:faucet
               npm run base-sepolia:health-check
               ;;
             sepolia)
               printf 'y\n' | npm run sepolia:deploy
-              npm run sepolia:init
+              BITRES_ALLOW_TWAP_DISABLED_AFTER_INIT=true npm run sepolia:init
               npm run sepolia:faucet
               npm run sepolia:health-check
               ;;

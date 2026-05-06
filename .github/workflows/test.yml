@@ -155,11 +155,9 @@ jobs:
 
       - name: Run Solidity linter
         run: npx solhint 'contracts/**/*.sol'
-        continue-on-error: true
 
       - name: Run JavaScript/TypeScript linter
         run: npx eslint 'test/**/*.ts' 'scripts/**/*.{js,mjs,ts}'
-        continue-on-error: true
 
   # ============ Security Analysis ============
   security:
@@ -186,10 +184,15 @@ jobs:
 
       - name: Run Slither
         uses: crytic/slither-action@v0.3.0
-        continue-on-error: true
         with:
           target: 'contracts/'
-          slither-args: '--exclude-dependencies'
+          slither-args: >-
+            --exclude-dependencies
+            --filter-paths 'contracts/local|contracts/test'
+            --exclude-informational
+            --exclude-low
+            --exclude-optimization
+            --exclude divide-before-multiply,incorrect-equality,reentrancy-no-eth
 
   # ============ Gas Report ============
   gas-report:
@@ -213,10 +216,8 @@ jobs:
 
       - name: Run gas reporter
         run: |
-          set +e
           REPORT_GAS=true npx hardhat test 2>&1 | tee gas-report.txt
           exit ${PIPESTATUS[0]}
-        continue-on-error: true
 
       - name: Upload gas report
         uses: actions/upload-artifact@v6
@@ -251,6 +252,36 @@ jobs:
         with:
           version: stable
 
-      - name: Run Forge coverage
-        run: npm run test:coverage
-        continue-on-error: true
+      - name: Run Forge coverage and enforce branch baseline
+        run: MIN_BRANCH_COVERAGE=33 npm run coverage:branches
+
+  # ============ Formal Verification Core ============
+  formal-core:
+    name: Formal Verification Core
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Install Halmos
+        run: python3 -m pip install --user halmos
+
+      - name: Run strict formal core properties
+        run: npm run formal:core

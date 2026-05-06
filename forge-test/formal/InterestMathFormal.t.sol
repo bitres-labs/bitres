@@ -14,19 +14,19 @@ contract InterestMathFormalTest is Test {
     // ============ pendingReward Properties ============
 
     /// @notice Verify pendingReward is zero when amount is zero
-    function check_pendingReward_zeroAmount(uint128 accInterestPerShare, uint128 rewardDebt) public pure {
+    function check_pendingReward_zeroAmount(uint64 accInterestPerShare, uint64 rewardDebt) public pure {
         uint256 pending = InterestMath.pendingReward(0, accInterestPerShare, rewardDebt);
         assert(pending == 0);
     }
 
     /// @notice Verify pendingReward is zero when accInterestPerShare is zero
-    function check_pendingReward_zeroAccInterest(uint128 amount, uint128 rewardDebt) public pure {
+    function check_pendingReward_zeroAccInterest(uint64 amount, uint64 rewardDebt) public pure {
         uint256 pending = InterestMath.pendingReward(amount, 0, rewardDebt);
         assert(pending == 0);
     }
 
     /// @notice Verify pendingReward is bounded
-    function check_pendingReward_bounded(uint64 amount, uint64 accInterestPerShare, uint128 rewardDebt) public pure {
+    function check_pendingReward_bounded(uint32 amount, uint32 accInterestPerShare, uint64 rewardDebt) public pure {
         uint256 pending = InterestMath.pendingReward(amount, accInterestPerShare, rewardDebt);
         uint256 accumulated = (uint256(amount) * uint256(accInterestPerShare)) / Constants.PRECISION_18;
 
@@ -40,7 +40,7 @@ contract InterestMathFormalTest is Test {
     // ============ interestPerShareDelta Properties ============
 
     /// @notice Verify interestPerShareDelta is zero when rate is zero
-    function check_interestPerShareDelta_zeroRate(uint64 timeElapsed) public pure {
+    function check_interestPerShareDelta_zeroRate(uint32 timeElapsed) public pure {
         uint256 delta = InterestMath.interestPerShareDelta(0, timeElapsed);
         assert(delta == 0);
     }
@@ -74,19 +74,19 @@ contract InterestMathFormalTest is Test {
     // ============ rewardDebtValue Properties ============
 
     /// @notice Verify rewardDebtValue is zero when amount is zero
-    function check_rewardDebtValue_zeroAmount(uint128 accInterestPerShare) public pure {
+    function check_rewardDebtValue_zeroAmount(uint64 accInterestPerShare) public pure {
         uint256 debt = InterestMath.rewardDebtValue(0, accInterestPerShare);
         assert(debt == 0);
     }
 
     /// @notice Verify rewardDebtValue is zero when accInterestPerShare is zero
-    function check_rewardDebtValue_zeroAccInterest(uint128 amount) public pure {
+    function check_rewardDebtValue_zeroAccInterest(uint64 amount) public pure {
         uint256 debt = InterestMath.rewardDebtValue(amount, 0);
         assert(debt == 0);
     }
 
     /// @notice Verify rewardDebtValue is monotonic in amount
-    function check_z_rewardDebtValue_monotonicAmount(uint64 amount1, uint64 amount2, uint64 accInterestPerShare)
+    function check_z_rewardDebtValue_monotonicAmount(uint32 amount1, uint32 amount2, uint32 accInterestPerShare)
         public
         pure
     {
@@ -107,13 +107,13 @@ contract InterestMathFormalTest is Test {
     }
 
     /// @notice Verify feeAmount is zero when feeBps is zero
-    function check_feeAmount_zeroFee(uint128 amount) public pure {
+    function check_feeAmount_zeroFee(uint64 amount) public pure {
         uint256 fee = InterestMath.feeAmount(amount, 0);
         assert(fee == 0);
     }
 
     /// @notice Verify feeAmount never exceeds amount
-    function check_z_feeAmount_bounded(uint128 amount, uint16 feeBps) public pure {
+    function check_z_feeAmount_bounded(uint64 amount, uint16 feeBps) public pure {
         vm.assume(feeBps <= 10000); // Fee <= 100%
 
         uint256 fee = InterestMath.feeAmount(amount, feeBps);
@@ -121,13 +121,13 @@ contract InterestMathFormalTest is Test {
     }
 
     /// @notice Verify feeAmount equals amount when feeBps is 10000 (100%)
-    function check_z_feeAmount_fullFee(uint128 amount) public pure {
+    function check_z_feeAmount_fullFee(uint64 amount) public pure {
         uint256 fee = InterestMath.feeAmount(amount, 10000);
         assert(fee == amount);
     }
 
     /// @notice Verify feeAmount is monotonic in amount
-    function check_z_feeAmount_monotonicAmount(uint64 amount1, uint64 amount2, uint16 feeBps) public pure {
+    function check_z_feeAmount_monotonicAmount(uint32 amount1, uint32 amount2, uint16 feeBps) public pure {
         vm.assume(amount1 <= amount2);
 
         uint256 fee1 = InterestMath.feeAmount(amount1, feeBps);
@@ -137,7 +137,7 @@ contract InterestMathFormalTest is Test {
     }
 
     /// @notice Verify feeAmount is monotonic in feeBps
-    function check_z_feeAmount_monotonicFee(uint128 amount, uint16 feeBps1, uint16 feeBps2) public pure {
+    function check_z_feeAmount_monotonicFee(uint64 amount, uint16 feeBps1, uint16 feeBps2) public pure {
         vm.assume(feeBps1 <= feeBps2);
 
         uint256 fee1 = InterestMath.feeAmount(amount, feeBps1);
@@ -149,7 +149,7 @@ contract InterestMathFormalTest is Test {
     // ============ splitWithdrawal Properties ============
 
     /// @notice Verify splitWithdrawal sums to amount
-    function check_splitWithdrawal_sumEqualsAmount(uint64 amount, uint64 pendingInterest, uint64 totalAvailable)
+    function check_splitWithdrawal_sumEqualsAmount(uint32 amount, uint32 pendingInterest, uint32 totalAvailable)
         public
         pure
     {
@@ -164,7 +164,7 @@ contract InterestMathFormalTest is Test {
     }
 
     /// @notice Verify splitWithdrawal returns zero shares when amount is zero
-    function check_splitWithdrawal_zeroAmount(uint64 pendingInterest, uint64 totalAvailable) public pure {
+    function check_splitWithdrawal_zeroAmount(uint32 pendingInterest, uint32 totalAvailable) public pure {
         (uint256 interestShare, uint256 principalShare) =
             InterestMath.splitWithdrawal(0, pendingInterest, totalAvailable);
 
@@ -173,7 +173,7 @@ contract InterestMathFormalTest is Test {
     }
 
     /// @notice Verify splitWithdrawal returns all principal when no pending interest
-    function check_splitWithdrawal_noPendingInterest(uint64 amount, uint64 totalAvailable) public pure {
+    function check_splitWithdrawal_noPendingInterest(uint32 amount, uint32 totalAvailable) public pure {
         vm.assume(totalAvailable > 0);
         vm.assume(amount <= totalAvailable);
 
@@ -184,7 +184,7 @@ contract InterestMathFormalTest is Test {
     }
 
     /// @notice Verify interestShare never exceeds amount
-    function check_splitWithdrawal_interestShareBounded(uint64 amount, uint64 pendingInterest, uint64 totalAvailable)
+    function check_splitWithdrawal_interestShareBounded(uint32 amount, uint32 pendingInterest, uint32 totalAvailable)
         public
         pure
     {
@@ -198,9 +198,9 @@ contract InterestMathFormalTest is Test {
 
     /// @notice Verify interestShare never exceeds pendingInterest
     function check_splitWithdrawal_interestShareBoundedByPending(
-        uint64 amount,
-        uint64 pendingInterest,
-        uint64 totalAvailable
+        uint32 amount,
+        uint32 pendingInterest,
+        uint32 totalAvailable
     ) public pure {
         vm.assume(totalAvailable > 0);
         vm.assume(amount <= totalAvailable);
@@ -214,7 +214,7 @@ contract InterestMathFormalTest is Test {
     // ============ totalAssetsWithAccrued Properties ============
 
     /// @notice Verify totalAssetsWithAccrued returns principal when rate is zero
-    function check_totalAssetsWithAccrued_zeroRate(uint64 principal, uint64 lastAccrual, uint64 currentTimestamp)
+    function check_totalAssetsWithAccrued_zeroRate(uint32 principal, uint32 lastAccrual, uint32 currentTimestamp)
         public
         pure
     {
@@ -233,8 +233,8 @@ contract InterestMathFormalTest is Test {
     /// @notice Verify totalAssetsWithAccrued returns zero when principal is zero
     function check_totalAssetsWithAccrued_zeroPrincipal(
         uint16 annualRateBps,
-        uint64 lastAccrual,
-        uint64 currentTimestamp
+        uint32 lastAccrual,
+        uint32 currentTimestamp
     ) public pure {
         uint256 total = InterestMath.totalAssetsWithAccrued(0, annualRateBps, lastAccrual, currentTimestamp);
 
@@ -242,7 +242,7 @@ contract InterestMathFormalTest is Test {
     }
 
     /// @notice Verify totalAssetsWithAccrued returns principal when no time elapsed
-    function check_totalAssetsWithAccrued_noTimeElapsed(uint64 principal, uint16 annualRateBps, uint64 timestamp)
+    function check_totalAssetsWithAccrued_noTimeElapsed(uint32 principal, uint16 annualRateBps, uint32 timestamp)
         public
         pure
     {
@@ -253,7 +253,7 @@ contract InterestMathFormalTest is Test {
 
     /// @notice Verify totalAssetsWithAccrued is >= principal
     function check_totalAssetsWithAccrued_geqPrincipal(
-        uint64 principal,
+        uint32 principal,
         uint16 annualRateBps,
         uint32 lastAccrual,
         uint32 currentTimestamp
@@ -268,19 +268,19 @@ contract InterestMathFormalTest is Test {
     // ============ priceChangeBps Properties ============
 
     /// @notice Verify priceChangeBps is zero when prices are equal
-    function check_priceChangeBps_equalPrices(uint128 price) public pure {
+    function check_priceChangeBps_equalPrices(uint64 price) public pure {
         int256 change = InterestMath.priceChangeBps(price, price);
         assert(change == 0);
     }
 
     /// @notice Verify priceChangeBps is zero when previous price is zero
-    function check_priceChangeBps_zeroPreviousPrice(uint128 currentPrice) public pure {
+    function check_priceChangeBps_zeroPreviousPrice(uint64 currentPrice) public pure {
         int256 change = InterestMath.priceChangeBps(0, currentPrice);
         assert(change == 0);
     }
 
     /// @notice Verify priceChangeBps is never negative when price increases
-    function check_z_priceChangeBps_nonNegativeOnIncrease(uint64 previousPrice, uint64 currentPrice) public pure {
+    function check_z_priceChangeBps_nonNegativeOnIncrease(uint32 previousPrice, uint32 currentPrice) public pure {
         vm.assume(previousPrice > 0);
         vm.assume(currentPrice > previousPrice);
 
@@ -289,7 +289,7 @@ contract InterestMathFormalTest is Test {
     }
 
     /// @notice Verify priceChangeBps is never positive when price decreases
-    function check_z_priceChangeBps_nonPositiveOnDecrease(uint64 previousPrice, uint64 currentPrice) public pure {
+    function check_z_priceChangeBps_nonPositiveOnDecrease(uint32 previousPrice, uint32 currentPrice) public pure {
         vm.assume(previousPrice > 0);
         vm.assume(currentPrice < previousPrice);
 

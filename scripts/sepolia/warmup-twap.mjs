@@ -248,6 +248,7 @@ async function main() {
   } catch (error) {
     console.log(`\n   ❌ Error getting prices: ${error.message}`);
     console.log("\n   TWAP may still need more time. Try again in a few minutes.\n");
+    throw error;
   }
 }
 

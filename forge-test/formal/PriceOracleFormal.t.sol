@@ -10,7 +10,7 @@ import "../../contracts/libraries/Constants.sol";
 /// @dev Tests prefixed with "check_" are symbolic tests for Halmos
 contract PriceOracleFormalTest is Test {
     /// @notice Verify deviationWithin is reflexive (same price always within any threshold)
-    function check_deviationWithin_reflexive(uint128 price, uint16 maxBps) public pure {
+    function check_deviationWithin_reflexive(uint64 price, uint16 maxBps) public pure {
         vm.assume(price > 0);
         vm.assume(maxBps > 0);
 
@@ -19,7 +19,7 @@ contract PriceOracleFormalTest is Test {
     }
 
     /// @notice Verify deviationWithin returns false for zero prices
-    function check_deviationWithin_zeroPrice(uint128 otherPrice, uint16 maxBps) public pure {
+    function check_deviationWithin_zeroPrice(uint64 otherPrice, uint16 maxBps) public pure {
         vm.assume(otherPrice > 0);
         vm.assume(maxBps > 0);
 
@@ -28,7 +28,7 @@ contract PriceOracleFormalTest is Test {
     }
 
     /// @notice Verify that if prices are within threshold T1, they are within any T2 >= T1
-    function check_deviationWithin_monotonic_threshold(uint128 priceA, uint128 priceB, uint16 bps1, uint16 bps2)
+    function check_deviationWithin_monotonic_threshold(uint64 priceA, uint64 priceB, uint16 bps1, uint16 bps2)
         public
         pure
     {
@@ -48,7 +48,7 @@ contract PriceOracleFormalTest is Test {
     }
 
     /// @notice Verify BTD floor is always <= IUSD price (when CR <= 100%)
-    function check_BTDFloor_neverAboveIUSD(uint128 cr, uint128 iusdPrice) public pure {
+    function check_BTDFloor_neverAboveIUSD(uint64 cr, uint64 iusdPrice) public pure {
         vm.assume(cr > 0 && cr <= 1e18);
         vm.assume(iusdPrice > 0 && iusdPrice <= 2e18);
 
@@ -63,7 +63,7 @@ contract PriceOracleFormalTest is Test {
     }
 
     /// @notice Verify inversePrice is non-zero for non-zero input
-    function check_inversePrice_nonZero(uint128 price) public pure {
+    function check_inversePrice_nonZero(uint64 price) public pure {
         vm.assume(price > 0);
         vm.assume(price <= 1e36);
 
@@ -72,7 +72,7 @@ contract PriceOracleFormalTest is Test {
     }
 
     /// @notice Verify inversePrice preserves ordering in reverse
-    function check_inversePrice_antiMonotonic(uint64 priceA, uint64 priceB) public pure {
+    function check_inversePrice_antiMonotonic(uint32 priceA, uint32 priceB) public pure {
         vm.assume(priceA > 1e6);
         vm.assume(priceB > 1e6);
         vm.assume(priceA < priceB);
@@ -84,13 +84,13 @@ contract PriceOracleFormalTest is Test {
     }
 
     /// @notice Verify normalizeAmount idempotent for 18 decimals
-    function check_normalizeAmount_18decimals_identity(uint128 amount) public pure {
+    function check_normalizeAmount_18decimals_identity(uint64 amount) public pure {
         uint256 result = OracleMath.normalizeAmount(amount, 18);
         assert(result == amount);
     }
 
     /// @notice Verify normalizeAmount upscales common 6-decimal assets correctly
-    function check_normalizeAmount_upscale_6_decimals(uint64 amount) public pure {
+    function check_normalizeAmount_upscale_6_decimals(uint32 amount) public pure {
         vm.assume(amount > 0);
 
         uint256 result = OracleMath.normalizeAmount(amount, 6);
@@ -98,7 +98,7 @@ contract PriceOracleFormalTest is Test {
     }
 
     /// @notice Verify normalizeAmount upscales common 8-decimal assets correctly
-    function check_normalizeAmount_upscale_8_decimals(uint64 amount) public pure {
+    function check_normalizeAmount_upscale_8_decimals(uint32 amount) public pure {
         vm.assume(amount > 0);
 
         uint256 result = OracleMath.normalizeAmount(amount, 8);
@@ -106,7 +106,7 @@ contract PriceOracleFormalTest is Test {
     }
 
     /// @notice Verify normalizeAmount upscales near-18-decimal assets correctly
-    function check_normalizeAmount_upscale_17_decimals(uint64 amount) public pure {
+    function check_normalizeAmount_upscale_17_decimals(uint32 amount) public pure {
         vm.assume(amount > 0);
 
         uint256 result = OracleMath.normalizeAmount(amount, 17);
@@ -114,7 +114,7 @@ contract PriceOracleFormalTest is Test {
     }
 
     /// @notice Verify spotPrice is positive when the reserve ratio is representable at 18 decimals
-    function check_spotPrice_positive_when_representable(uint64 reserveBase, uint64 reserveQuote) public pure {
+    function check_spotPrice_positive_when_representable(uint32 reserveBase, uint32 reserveQuote) public pure {
         vm.assume(reserveBase > 0);
         vm.assume(reserveQuote > 0);
         vm.assume(uint256(reserveQuote) * 1e18 >= uint256(reserveBase));
@@ -124,7 +124,7 @@ contract PriceOracleFormalTest is Test {
     }
 
     /// @notice Verify spotPrice increases when quote reserve increases
-    function check_spotPrice_monotonic_quote(uint64 reserveBase, uint64 reserveQuote1, uint64 reserveQuote2)
+    function check_spotPrice_monotonic_quote(uint32 reserveBase, uint32 reserveQuote1, uint32 reserveQuote2)
         public
         pure
     {

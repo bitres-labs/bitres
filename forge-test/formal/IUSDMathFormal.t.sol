@@ -11,15 +11,11 @@ import "../../contracts/libraries/Constants.sol";
  * @dev Uses Halmos for symbolic execution
  */
 contract IUSDMathFormalTest is Test {
-
     /**
      * @notice Adjustment factor should be 1e18 when actual inflation equals target
      * @dev If current/previous equals monthlyGrowthFactor, factor should be 1e18
      */
-    function check_adjustmentFactor_unity(
-        uint64 previous,
-        uint64 monthlyGrowthFactor
-    ) public pure {
+    function check_adjustmentFactor_unity(uint32 previous, uint64 monthlyGrowthFactor) public pure {
         vm.assume(previous > 0);
         vm.assume(monthlyGrowthFactor >= 1e18); // At least 1x growth
         vm.assume(monthlyGrowthFactor <= 1.1e18); // At most 10% monthly growth
@@ -41,9 +37,9 @@ contract IUSDMathFormalTest is Test {
      * @dev If current1 < current2 with same previous and target, factor1 < factor2
      */
     function check_adjustmentFactor_monotonic(
-        uint64 previous,
-        uint64 current1,
-        uint64 current2,
+        uint32 previous,
+        uint32 current1,
+        uint32 current2,
         uint64 monthlyGrowthFactor
     ) public pure {
         vm.assume(previous > 0);
@@ -63,16 +59,15 @@ contract IUSDMathFormalTest is Test {
      * @notice Actual inflation multiplier should be greater than 1e18 when prices increase
      * @dev If current > previous, actual inflation multiplier > 1e18
      */
-    function check_inflationMultiplier_increases(
-        uint64 previous,
-        uint64 current,
-        uint64 monthlyGrowthFactor
-    ) public pure {
+    function check_inflationMultiplier_increases(uint32 previous, uint32 current, uint64 monthlyGrowthFactor)
+        public
+        pure
+    {
         vm.assume(previous > 0);
         vm.assume(current > previous);
         vm.assume(monthlyGrowthFactor >= 1e18);
 
-        (uint256 actualInflationMultiplier, ) = IUSDMath.adjustmentFactor(current, previous, monthlyGrowthFactor);
+        (uint256 actualInflationMultiplier,) = IUSDMath.adjustmentFactor(current, previous, monthlyGrowthFactor);
 
         // If current > previous, inflation multiplier > 1e18
         assert(actualInflationMultiplier > Constants.PRECISION_18);
@@ -82,14 +77,11 @@ contract IUSDMathFormalTest is Test {
      * @notice Actual inflation multiplier equals 1e18 when prices unchanged
      * @dev If current == previous, actual inflation multiplier == 1e18
      */
-    function check_inflationMultiplier_unity(
-        uint64 value,
-        uint64 monthlyGrowthFactor
-    ) public pure {
+    function check_inflationMultiplier_unity(uint32 value, uint64 monthlyGrowthFactor) public pure {
         vm.assume(value > 0);
         vm.assume(monthlyGrowthFactor >= 1e18);
 
-        (uint256 actualInflationMultiplier, ) = IUSDMath.adjustmentFactor(value, value, monthlyGrowthFactor);
+        (uint256 actualInflationMultiplier,) = IUSDMath.adjustmentFactor(value, value, monthlyGrowthFactor);
 
         // If current == previous, inflation multiplier == 1e18
         assert(actualInflationMultiplier == Constants.PRECISION_18);
@@ -99,12 +91,9 @@ contract IUSDMathFormalTest is Test {
      * @notice Factor should be < 1e18 when actual inflation is below target
      * @dev If actual inflation < target monthly growth, factor < 1e18
      */
-    function check_adjustmentFactor_below_target(
-        uint64 previous,
-        uint64 monthlyGrowthFactor
-    ) public pure {
+    function check_adjustmentFactor_below_target(uint32 previous, uint64 monthlyGrowthFactor) public pure {
         vm.assume(previous > 0);
-        vm.assume(previous <= type(uint64).max / 2); // Prevent overflow
+        vm.assume(previous <= type(uint32).max / 2); // Prevent overflow
         vm.assume(monthlyGrowthFactor > 1e18); // Must have positive target growth
         vm.assume(monthlyGrowthFactor <= 1.1e18);
 

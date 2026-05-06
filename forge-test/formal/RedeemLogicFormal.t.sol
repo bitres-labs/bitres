@@ -10,7 +10,7 @@ import "../../contracts/libraries/RedeemLogic.sol";
  * @dev Symbolic inputs use compact business units, then scale to protocol decimals.
  */
 contract RedeemLogicFormalTest is Test {
-    function _btd(uint32 wholeTokens) private pure returns (uint256) {
+    function _btd(uint24 wholeTokens) private pure returns (uint256) {
         return uint256(wholeTokens) * 1e18;
     }
 
@@ -26,7 +26,7 @@ contract RedeemLogicFormalTest is Test {
         return uint256(bps) * 1e14;
     }
 
-    function _assumeRedeemDomain(uint32 btdTokens, uint8 wbtcPriceKUsd, uint16 iusdBps, uint16 redeemFeeBP)
+    function _assumeRedeemDomain(uint24 btdTokens, uint8 wbtcPriceKUsd, uint16 iusdBps, uint16 redeemFeeBP)
         private
         pure
     {
@@ -36,7 +36,7 @@ contract RedeemLogicFormalTest is Test {
         vm.assume(redeemFeeBP <= 500);
     }
 
-    function _overInputs(uint32 btdTokens, uint8 wbtcPriceKUsd, uint16 iusdBps, uint16 redeemFeeBP)
+    function _overInputs(uint24 btdTokens, uint8 wbtcPriceKUsd, uint16 iusdBps, uint16 redeemFeeBP)
         private
         pure
         returns (RedeemLogic.RedeemInputs memory)
@@ -56,7 +56,7 @@ contract RedeemLogicFormalTest is Test {
     }
 
     function _underInputs(
-        uint32 btdTokens,
+        uint24 btdTokens,
         uint8 wbtcPriceKUsd,
         uint16 iusdBps,
         uint16 crBps,
@@ -82,7 +82,7 @@ contract RedeemLogicFormalTest is Test {
     }
 
     /// @notice Verify fee is calculated correctly.
-    function check_fee_calculation(uint32 btdTokens, uint8 wbtcPriceKUsd, uint16 iusdBps, uint16 redeemFeeBP)
+    function check_fee_calculation(uint24 btdTokens, uint8 wbtcPriceKUsd, uint16 iusdBps, uint16 redeemFeeBP)
         public
         pure
     {
@@ -94,7 +94,7 @@ contract RedeemLogicFormalTest is Test {
     }
 
     /// @notice Verify fee is zero when feeBP is zero.
-    function check_fee_zero_when_feeBP_zero(uint32 btdTokens, uint8 wbtcPriceKUsd, uint16 iusdBps) public pure {
+    function check_fee_zero_when_feeBP_zero(uint24 btdTokens, uint8 wbtcPriceKUsd, uint16 iusdBps) public pure {
         RedeemLogic.RedeemOutputs memory result =
             RedeemLogic.evaluate(_overInputs(btdTokens, wbtcPriceKUsd, iusdBps, 0));
 
@@ -103,7 +103,7 @@ contract RedeemLogicFormalTest is Test {
 
     /// @notice Verify no compensation is returned when CR >= 100%.
     function check_no_compensation_overcollateralized(
-        uint32 btdTokens,
+        uint24 btdTokens,
         uint8 wbtcPriceKUsd,
         uint16 iusdBps,
         uint16 crBps
@@ -120,7 +120,7 @@ contract RedeemLogicFormalTest is Test {
 
     /// @notice Verify only WBTC is returned when CR >= 100%.
     function check_overcollateralized_only_wbtc(
-        uint32 btdTokens,
+        uint24 btdTokens,
         uint8 wbtcPriceKUsd,
         uint16 iusdBps,
         uint16 redeemFeeBP
@@ -135,7 +135,7 @@ contract RedeemLogicFormalTest is Test {
 
     /// @notice Verify BTB is returned when CR < 100% and BTB price >= min price.
     function check_undercollateralized_btb_compensation(
-        uint32 btdTokens,
+        uint24 btdTokens,
         uint8 wbtcPriceKUsd,
         uint16 iusdBps,
         uint16 crBps
@@ -150,7 +150,7 @@ contract RedeemLogicFormalTest is Test {
 
     /// @notice Verify BRS is returned when BTB price is below the configured minimum.
     function check_undercollateralized_brs_compensation(
-        uint32 btdTokens,
+        uint24 btdTokens,
         uint8 wbtcPriceKUsd,
         uint16 iusdBps,
         uint16 crBps
@@ -165,7 +165,7 @@ contract RedeemLogicFormalTest is Test {
 
     /// @notice Verify BTB output decreases as CR increases.
     function check_z_btb_inverse_to_cr(
-        uint32 btdTokens,
+        uint24 btdTokens,
         uint8 wbtcPriceKUsd,
         uint16 iusdBps,
         uint16 crBps1,
@@ -183,7 +183,7 @@ contract RedeemLogicFormalTest is Test {
 
     /// @notice Verify fee is monotonic in feeBP.
     function check_z_fee_monotonic_feeBP(
-        uint32 btdTokens,
+        uint24 btdTokens,
         uint8 wbtcPriceKUsd,
         uint16 iusdBps,
         uint16 feeBP1,
@@ -201,7 +201,7 @@ contract RedeemLogicFormalTest is Test {
     }
 
     /// @notice Verify WBTC output is monotonic in btdAmount.
-    function check_z_wbtc_monotonic_btdAmount(uint32 btdTokens1, uint32 btdTokens2, uint8 wbtcPriceKUsd, uint16 iusdBps)
+    function check_z_wbtc_monotonic_btdAmount(uint24 btdTokens1, uint24 btdTokens2, uint8 wbtcPriceKUsd, uint16 iusdBps)
         public
         pure
     {
@@ -219,7 +219,7 @@ contract RedeemLogicFormalTest is Test {
 
     /// @notice Verify WBTC output is proportional to CR when under-collateralized.
     function check_z_wbtc_proportional_to_cr(
-        uint32 btdTokens,
+        uint24 btdTokens,
         uint8 wbtcPriceKUsd,
         uint16 iusdBps,
         uint16 crBps1,

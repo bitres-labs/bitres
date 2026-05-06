@@ -27,6 +27,7 @@ FORMAL_CONTRACT_TIMEOUT="${FORMAL_CONTRACT_TIMEOUT:-180}"
 FORMAL_RUN_MODE="${FORMAL_RUN_MODE:-contract}"
 FORMAL_PROPERTY_TIMEOUT="${FORMAL_PROPERTY_TIMEOUT:-60}"
 FORMAL_MATCH_CONTRACTS="${FORMAL_MATCH_CONTRACTS:-}"
+FORMAL_MATCH_PROPERTIES="${FORMAL_MATCH_PROPERTIES:-}"
 FORMAL_STRICT_TIMEOUTS="${FORMAL_STRICT_TIMEOUTS:-false}"
 FORMAL_REPORT_DIR="${FORMAL_REPORT_DIR:-reports/formal}"
 FORMAL_BUILD_OUT="${FORMAL_BUILD_OUT:-out-formal}"
@@ -41,19 +42,13 @@ echo "  FORMAL_CONTRACT_TIMEOUT=${FORMAL_CONTRACT_TIMEOUT}s"
 echo "  FORMAL_RUN_MODE=${FORMAL_RUN_MODE}"
 echo "  FORMAL_PROPERTY_TIMEOUT=${FORMAL_PROPERTY_TIMEOUT}s"
 echo "  FORMAL_MATCH_CONTRACTS=${FORMAL_MATCH_CONTRACTS}"
+echo "  FORMAL_MATCH_PROPERTIES=${FORMAL_MATCH_PROPERTIES}"
 echo "  FORMAL_STRICT_TIMEOUTS=${FORMAL_STRICT_TIMEOUTS}"
 echo "  FORMAL_REPORT_DIR=${FORMAL_REPORT_DIR}"
 echo "  FORMAL_BUILD_OUT=${FORMAL_BUILD_OUT}"
 
-echo ""
-echo "[1/8] Building contracts..."
-forge build forge-test/formal --out "${FORMAL_BUILD_OUT}" --force --ast --quiet
-if [ $? -ne 0 ]; then
-    echo "Build failed; formal verification skipped."
-    exit 1
-fi
-
 CONTRACTS=(
+    "FormalSmokeTest:FormalSmoke:forge-test/formal/SmokeFormal.t.sol"
     "CollateralMathFormalTest:CollateralMath:forge-test/formal/CollateralMathFormal.t.sol"
     "IUSDMathFormalTest:IUSDMath:forge-test/formal/IUSDMathFormal.t.sol"
     "RewardMathFormalTest:RewardMath:forge-test/formal/RewardMathFormal.t.sol"
@@ -62,12 +57,38 @@ CONTRACTS=(
     "RedeemLogicFormalTest:RedeemLogic:forge-test/formal/RedeemLogicFormal.t.sol"
     "PriceOracleFormalTest:PriceOracle:forge-test/formal/PriceOracleFormal.t.sol"
 )
+TOTAL_STEPS=$(( ${#CONTRACTS[@]} + 1 ))
+
+echo ""
+echo "[1/${TOTAL_STEPS}] Building contracts..."
+forge build forge-test/formal --out "${FORMAL_BUILD_OUT}" --force --ast --quiet
+if [ $? -ne 0 ]; then
+    echo "Build failed; formal verification skipped."
+    exit 1
+fi
 
 TOTAL_PASS=0
 TOTAL_FAIL=0
 TOTAL_TIMEOUT=0
 TOTAL_RUN_ERRORS=0
 TOTAL_PROCESS_TIMEOUTS=0
+TOTAL_DECLARED_SELECTED=0
+
+select_properties() {
+    local source_file="$1"
+
+    mapfile -t SELECTED_PROPERTIES < <(grep -Eho "function check_[A-Za-z0-9_]*" "${source_file}" | awk '{print $2}')
+    if [ -n "${FORMAL_MATCH_PROPERTIES}" ]; then
+        local filtered_properties=()
+        local property
+        for property in "${SELECTED_PROPERTIES[@]}"; do
+            if [[ "${property}" =~ ${FORMAL_MATCH_PROPERTIES} ]]; then
+                filtered_properties+=("${property}")
+            fi
+        done
+        SELECTED_PROPERTIES=("${filtered_properties[@]}")
+    fi
+}
 
 summarize_run() {
     local run_name="$1"
@@ -114,13 +135,21 @@ for i in "${!CONTRACTS[@]}"; do
     fi
 
     echo ""
-    echo "[${step}/8] Verifying ${label} properties (${contract})..."
+    echo "[${step}/${TOTAL_STEPS}] Verifying ${label} properties (${contract})..."
+    mapfile -t all_properties < <(grep -Eho "function check_[A-Za-z0-9_]*" "${source_file}" | awk '{print $2}')
+    select_properties "${source_file}"
+    contract_declared=${#SELECTED_PROPERTIES[@]}
+
+    if [ "${contract_declared}" -eq 0 ]; then
+        echo "No selected properties for ${contract}; skipping."
+        continue
+    fi
 
     if [ "${FORMAL_RUN_MODE}" = "property" ]; then
-        mapfile -t properties < <(grep -Eho "function check_[A-Za-z0-9_]*" "${source_file}" | awk '{print $2}')
-        echo "Running ${#properties[@]} properties individually..."
+        TOTAL_DECLARED_SELECTED=$((TOTAL_DECLARED_SELECTED + contract_declared))
+        echo "Running ${contract_declared} of ${#all_properties[@]} properties individually..."
 
-        for property in "${properties[@]}"; do
+        for property in "${SELECTED_PROPERTIES[@]}"; do
             log_file="${FORMAL_REPORT_DIR}/${contract}.${property}.log"
             echo ""
             echo "  - ${property}"
@@ -135,19 +164,28 @@ for i in "${!CONTRACTS[@]}"; do
             summarize_run "${contract}.${property}" "${log_file}" "${status}" "${FORMAL_PROPERTY_TIMEOUT}"
         done
     else
+        TOTAL_DECLARED_SELECTED=$((TOTAL_DECLARED_SELECTED + contract_declared))
+        echo "Running ${contract_declared} of ${#all_properties[@]} properties as one contract batch..."
         log_file="${FORMAL_REPORT_DIR}/${contract}.log"
-        timeout "${FORMAL_CONTRACT_TIMEOUT}s" "${HALMOS}" \
+        halmos_args=(
             --forge-build-out "${FORMAL_BUILD_OUT}" \
             --match-contract "${contract}" \
             --solver-timeout-assertion "${HALMOS_SOLVER_TIMEOUT_MS}" \
-            --loop "${HALMOS_LOOP}" \
-            > "${log_file}" 2>&1
+            --loop "${HALMOS_LOOP}"
+        )
+        if [ -n "${FORMAL_MATCH_PROPERTIES}" ]; then
+            halmos_args+=(--match-test "${FORMAL_MATCH_PROPERTIES}")
+        fi
+        timeout "${FORMAL_CONTRACT_TIMEOUT}s" "${HALMOS}" "${halmos_args[@]}" > "${log_file}" 2>&1
         status=$?
         summarize_run "${contract}" "${log_file}" "${status}" "${FORMAL_CONTRACT_TIMEOUT}"
     fi
 done
 
 DECLARED_PROPERTIES=$(grep -Rho "function check_[A-Za-z0-9_]*" forge-test/formal | wc -l | tr -d ' ')
+if [ -n "${FORMAL_MATCH_CONTRACTS}" ] || [ -n "${FORMAL_MATCH_PROPERTIES}" ]; then
+    DECLARED_PROPERTIES="${TOTAL_DECLARED_SELECTED}"
+fi
 OBSERVED_PROPERTIES=$((TOTAL_PASS + TOTAL_FAIL + TOTAL_TIMEOUT))
 
 echo ""
@@ -166,6 +204,11 @@ echo ""
 echo "TIMEOUT means the solver did not prove the property within the configured time; it is not a counterexample."
 
 if [ "${TOTAL_FAIL}" -gt 0 ] || [ "${TOTAL_RUN_ERRORS}" -gt 0 ]; then
+    exit 1
+fi
+
+if [ "${FORMAL_STRICT_TIMEOUTS}" = "true" ] && [ "${OBSERVED_PROPERTIES}" -ne "${DECLARED_PROPERTIES}" ]; then
+    echo "Strict formal failed: observed ${OBSERVED_PROPERTIES}/${DECLARED_PROPERTIES} selected properties."
     exit 1
 fi
 

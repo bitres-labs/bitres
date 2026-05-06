@@ -98,6 +98,15 @@ const PAIR_ABI = [
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function envBool(name, defaultValue) {
+  const value = process.env[name];
+  if (value === undefined) return defaultValue;
+  return ["1", "true", "yes", "on"].includes(value.toLowerCase());
+}
+
+const FAIL_ON_STAKE_ERROR = envBool("BITRES_FAIL_ON_STAKE_ERROR", true);
+const ALLOW_TWAP_DISABLED_AFTER_INIT = envBool("BITRES_ALLOW_TWAP_DISABLED_AFTER_INIT", false);
+
 function loadAddresses() {
   if (!fs.existsSync(ADDR_FILE)) {
     throw new Error(`deployed_addresses.json not found at ${ADDR_FILE}. Deploy via Ignition first.`);
@@ -191,7 +200,7 @@ async function main() {
   console.log(`   Real BTC/USD price: $${Number(btcPrice) / 1e8}`);
 
   // =========================================================================
-  // 2) Configure roles and disable TWAP initially
+  // 2) Configure roles and temporarily disable TWAP during first-observation setup
   // =========================================================================
   console.log("\n=> Configuring roles...");
   const MINTER_ROLE = keccak256(stringToHex("MINTER_ROLE"));
@@ -220,7 +229,8 @@ async function main() {
 
   console.log("   -> Disable TWAP oracle initially");
   const tx3 = await priceOracle.write.setUseTWAP([false], { account: owner.account });
-  await publicClient.waitForTransactionReceipt({ hash: tx3 });
+  const disableReceipt = await publicClient.waitForTransactionReceipt({ hash: tx3 });
+  if (disableReceipt.status !== "success") throw new Error(`setUseTWAP(false) failed: ${tx3}`);
 
   // =========================================================================
   // 3) Set mock oracle prices
@@ -358,6 +368,7 @@ async function main() {
   // =========================================================================
   console.log("\n=> Initializing TWAP Oracle...");
   const pairsList = [pairWBTCUSDC, pairBTDUSDC, pairBTBBTD, pairBRSBTD];
+  const twapFailures = [];
 
   for (const pairAddr of pairsList) {
     try {
@@ -366,14 +377,43 @@ async function main() {
       if (receipt.status === "success") {
         console.log(`   ok TWAP observation recorded for ${pairAddr.slice(0, 10)}...`);
       } else {
-        console.log(`   warn TWAP update tx reverted for ${pairAddr.slice(0, 10)}...`);
+        const message = `TWAP update tx reverted for ${pairAddr}`;
+        twapFailures.push(message);
+        console.log(`   err ${message}`);
       }
     } catch (err) {
-      console.log(`   warn TWAP update failed for ${pairAddr.slice(0, 10)}...: ${err.message?.slice(0, 50) || err}`);
+      const message = `TWAP update failed for ${pairAddr}: ${err.message || err}`;
+      twapFailures.push(message);
+      console.log(`   err ${message.slice(0, 120)}`);
     }
   }
 
-  console.log("   -> Leaving TWAP disabled until warmup confirms 30+ min observations");
+  if (twapFailures.length > 0) {
+    throw new Error(`TWAP initialization failed for ${twapFailures.length} pair(s)`);
+  }
+
+  let readyCount = 0;
+  for (const pairAddr of pairsList) {
+    const ready = await twapOracle.read.isTWAPReady([pairAddr]);
+    if (ready) readyCount++;
+  }
+
+  if (readyCount === pairsList.length) {
+    console.log("   -> All TWAP pairs ready; enabling TWAP");
+    const enableTx = await priceOracle.write.setUseTWAP([true], { account: owner.account });
+    const enableReceipt = await publicClient.waitForTransactionReceipt({ hash: enableTx });
+    if (enableReceipt.status !== "success") throw new Error(`setUseTWAP(true) failed: ${enableTx}`);
+  } else if (ALLOW_TWAP_DISABLED_AFTER_INIT) {
+    console.log(
+      `   -> TWAP not ready (${readyCount}/${pairsList.length}); leaving disabled by explicit testnet override`
+    );
+    console.log("      Run npm run base-sepolia:warmup-twap after 30+ minutes to enable TWAP.");
+  } else {
+    throw new Error(
+      `TWAP not ready after initialization (${readyCount}/${pairsList.length}). ` +
+        "Run warmup after 30+ minutes, or set BITRES_ALLOW_TWAP_DISABLED_AFTER_INIT=true for testnet-only flows."
+    );
+  }
 
   // =========================================================================
   // 7) Initialize stBTD/stBTB vaults
@@ -527,6 +567,7 @@ async function main() {
 
   let successCount = 0;
   let skipCount = 0;
+  const stakeErrors = [];
 
   for (const plan of stakePlans) {
     if (plan.amount === 0n) {
@@ -576,11 +617,16 @@ async function main() {
       console.log(`   ok pool ${plan.id} (${plan.name}) staked: ${plan.amount}`);
       successCount++;
     } catch (err) {
-      console.log(`   err pool ${plan.id} (${plan.name}) failed: ${err.message?.slice(0, 60) || err}`);
+      const message = `pool ${plan.id} (${plan.name}) failed: ${err.message || err}`;
+      stakeErrors.push(message);
+      console.log(`   err ${message.slice(0, 120)}`);
     }
   }
 
   console.log(`\n   Staking complete: ${successCount} succeeded, ${skipCount} skipped`);
+  if (stakeErrors.length > 0 && FAIL_ON_STAKE_ERROR) {
+    throw new Error(`Staking initialization failed for ${stakeErrors.length} pool(s)`);
+  }
 
   // =========================================================================
   console.log("\n" + "=".repeat(60));

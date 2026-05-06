@@ -53,7 +53,7 @@ npx hardhat ignition deploy ignition/modules/FullSystemBaseSepolia.ts --network 
 echo ""
 echo "=> Step 3/6: Initialize system (LP + vaults + farming pools)..."
 echo "   This is a one-step initialization - no secondary init needed."
-npx hardhat run scripts/base-sepolia/init-base-sepolia.mjs --network baseSepolia
+BITRES_ALLOW_TWAP_DISABLED_AFTER_INIT=true npx hardhat run scripts/base-sepolia/init-base-sepolia.mjs --network baseSepolia
 
 echo ""
 echo "=> Step 4/6: Distribute test tokens (faucet)..."
